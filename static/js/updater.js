@@ -12,6 +12,7 @@
     <button type="button" class="btn-secondary" id="defer-update-btn">Depois</button></div>`;
   document.body.appendChild(panel);
   let phase = 'idle';
+  let noticeKey = null;
   let dismissed = null;
   let manual = false;
   const post = action => window.ipc?.postMessage(`updates:${action}`);
@@ -19,12 +20,13 @@
     if (phase === 'ready') post('restart');
     else if (phase === 'available') post('download');
   }
-  document.getElementById('check-updates-btn')?.addEventListener('click', () => { manual = true; post('check'); });
+  document.getElementById('check-updates-btn')?.addEventListener('click', () => { manual = true; dismissed = null; post('check'); });
   document.getElementById('settings-update-action')?.addEventListener('click', updateAction);
   document.getElementById('toast-update-action').addEventListener('click', updateAction);
-  document.getElementById('defer-update-btn').addEventListener('click', () => { dismissed = phase; panel.classList.add('hidden'); });
+  document.getElementById('defer-update-btn').addEventListener('click', () => { dismissed = noticeKey; panel.classList.add('hidden'); });
   window.addEventListener('sancord-update', ({ detail: state }) => {
     phase = state.phase;
+    noticeKey = `${phase}:${state.version || ''}`;
     const messages = {
       idle: 'Verifique se há uma nova versão disponível.', checking: 'Verificando atualizações…',
       available: `Sancord v${state.version} está disponível.`, downloading: `Baixando atualização… ${state.percent || 0}%`,
@@ -50,7 +52,7 @@
     }
     const check = document.getElementById('check-updates-btn');
     if (check) check.disabled = phase === 'checking' || phase === 'downloading';
-    if (actionable && dismissed !== phase) panel.classList.remove('hidden');
+    if (actionable && dismissed !== noticeKey) panel.classList.remove('hidden');
     if (phase === 'updated') panel.classList.remove('hidden');
     if (phase === 'downloading') panel.classList.remove('hidden');
     if (phase === 'error' && manual) panel.classList.remove('hidden');

@@ -78,3 +78,8 @@ windows = { version = "0.58", features = [
     "Win32_Media_KernelStreaming",
     "Win32_Media_Multimedia",
 ] }
+
+[dev-dependencies]
+# Certificados efêmeros e servidor HTTPS somente para os testes do updater.
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

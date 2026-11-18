@@ -246,3 +246,115 @@ Backups desta implementação: `qa-updater/baseline/` (ignorados pelo Git).
   Empacotamento também testado a partir de outra pasta. Nada assinado localmente.
 - `package-release.ps1` aceita `-OutputDir` sem mudar o default do workflow. Os
   executáveis de raiz/dist e banco principal v4 foram preservados.
+
+### Envio autorizado para validação Windows
+
+- O usuário autorizou explicitamente enviar `c1941fd` para a branch pública
+  `codex/prepare-0.2.0` e executar o workflow manual de validação/assinatura.
+- Push realizado sem force e sem tags. Remoto main permaneceu em `5e43107`.
+- Ensaio: https://github.com/gabrielsanderx/Sancord/actions/runs/44293761106,
+  commit `c1941fd2eb35ce9deb13750d888aab4fe7fd9651`. Em acompanhamento; não afirmar
+  aprovação antes de verificar a conclusão. O job de publicação não roda sem tag.
+- Helpers ignorados em `qa-updater/validate-020.mjs` (status) e `collect-020.mjs`
+  (coleta só após sucesso e SHA exato). Credencial GitHub somente em memória;
+  não imprimir tokens, redirecionamentos assinados de artefato ou chaves privadas.
+
+### Resultado do ensaio Windows/MSVC 0.2.0
+
+- Execução `44293761106` concluída com **success** no commit exato `c1941fd`:
+  testes, empacotamento e assinatura aprovados; publicação **skipped**.
+  Evidência: https://github.com/gabrielsanderx/Sancord/actions/runs/44293761106.
+- Artefato `signed-windows-release` baixado para `qa-candidate-0.2.0/github-signed`.
+  A ferramenta local confiável verificou Ed25519, SHA-256 e tamanho do cliente;
+  verificação adicional confirmou que o ZIP contém somente o mesmo `Sancord.exe`.
+  Nenhum executável baixado foi iniciado. Assinatura do updater não é Authenticode.
+- Cliente MSVC: 10.586.112 bytes, SHA-256
+  `04e85f569801a50daf6ccea3211a5de876caf49afd6cc27eeed907890860f4ed`.
+  Proveniência do artefato em `qa-candidate-0.2.0/github-run.json` (ignorado).
+- Confirmado no remoto após o ensaio: branch de preparação em `c1941fd`, main
+  ainda em `5e43107`. Nenhuma tag/release criada, nenhum update distribuído.
+  Hashes dos executáveis existentes na raiz e `dist` continuam iguais.
+- Ficam pendentes abertura da candidata MSVC e instalação/reinício reais, ciclo
+  público do updater, notificações nativas e cenários de mídia/equipamento descritos
+  em `HOMOLOGACAO.md`. Não promover a estável sem fechar esses gates ou definir
+  explicitamente um ensaio experimental autorizado. Próximo passo é essa homologação.
+- Este registro de resultado é posterior ao commit validado e permanece local;
+  não afirmar que o workflow validou alterações posteriores a `c1941fd`.
+
+### Continuação: ensaio offline com versões reais assinadas
+
+- Usuário pediu o próximo passo. Adicionado `scripts/test-signed-update.ps1`, com
+  ações Prepare/Start/Install/Status. Usa 0.1.0 MSVC e 0.2.0 MSVC reais assinadas,
+  validadas pela ferramenta local; não requer ler privada ou publicar release.
+- Prepare executado e Status conferido em `qa-candidate-0.2.0/install-qa/` (ignorado).
+  Instalação/perfil separados, hashes anteriores registrados, nenhuma janela iniciada.
+  Backend QA 3110 registrado e saudável. Sintaxe e verificações de preparação OK.
+- Start/Install são manuais: revisão automática anterior bloqueou abertura nativa,
+  sem motivo detalhado. Não contornar. Usuário abre 0.1.0 de QA, faz login e solicita
+  Install; helper antigo aguarda seu PID real encerrar, verifica e instala 0.2.0 no QA.
+  Status confere backup/hash/janela nova; confirmação visual ainda é necessária.
+- Roteiro em `HOMOLOGACAO.md`. Não confundir esse job offline com teste completo de
+  GitHub, progresso e botão de reinício da UI. Nenhuma dessas etapas está comprovada
+  pela preparação. Nenhum novo push, tag ou release nesta continuação.
+- Primeiro Start do usuário parou no preflight, antes de abrir o cliente: corrigido
+  array JSON aninhado no Windows PowerShell 5.1 (`@(ConvertFrom-Json)`), que confundia
+  a seleção do PID do backend. Preflight real reexecutado no 5.1: porta 3110/PID8300
+  correspondem ao registro, health OK. Status ainda prepared, sem troca executada.
+- Após a correção, usuário confirmou Start aberto e conectado. O registro passou
+  a `started`, com PID/caminho/start-time do core 0.1.0 no perfil isolado; hash do
+  launcher inicial e hashes anteriores conferidos. Solicitado Install manual e
+  fechamento somente da janela de QA para o helper aguardar e reiniciar 0.2.0.
+  Resultado ainda pendente; não inferir sucesso da confirmação de Start.
+- Install concluído: usuário confirmou **“Reabriu e manteve o login”**. Status
+  observou 0.2.0 verificada, um backup 0.1.0 íntegro e uma janela iniciada após a
+  solicitação. Hashes dos executáveis anteriores preservados; cliente MSVC abriu.
+- Ensaio offline de helper/instalação/reinício aprovado. Evidência ignorada em
+  `qa-candidate-0.2.0/install-qa/validation.json`. Estado do script continua
+  `install_requested` por projeto; o resultado está na evidência/roteiro, não
+  interpretar o nome do estado como falha nem executar Install novamente.
+- Restam ciclo GitHub (detecção/download/progresso/acionamento pela UI), notificações
+  nativas e mídia física/redes/TURN. Não publicar estável a partir deste resultado.
+
+### Validação automatizada de rede e correção do adiamento
+
+- Usuário pediu ao agente executar comandos/testes diretamente, sem handoff de
+  PowerShell. A nova suíte TLS roda com cargo; nenhuma interação manual foi pedida.
+- Extraído transporte privado de check/download em `src/updates.rs`, mantendo API
+  pública e URLs GitHub fixas. Testes em `src/updates_https_tests.rs`: servidor TLS
+  efêmero em loopback, certificado em memória, chave de fixture exclusiva dos testes.
+  Nenhuma opção de origem/TLS insegura foi adicionada ao aplicativo.
+- Sete testes de rede: detecção/download/progresso, redirect HTTPS, 404/sem update,
+  equal/old/draft/prerelease, API/JSON/limites, assinatura/versão inválidas, adulteração,
+  truncamento/tamanho/503, certificado desconhecido, redirect HTTP e conexão recusada.
+  Assertions de requests impedem que falhas de TLS gerem falsos positivos nos casos
+  de assinatura/download. Corrigido modo não bloqueante herdado no accept do Windows.
+- Teste opcional do artefato real também executado e aprovado: candidata MSVC assinada
+  do CI `44293761106` transferida por TLS local e validada com a chave pública embutida.
+  `SANCORD_QA_SIGNED_RELEASE_DIR` existe apenas no teste ignorado por padrão. Procedimento
+  em DISTRIBUTION.md. Não confundir loopback com publicação real no GitHub.
+- Bug do botão Depois reproduzido e corrigido: agora adia somente versão/fase em
+  questão, e check manual limpa adiamento. Três testes frontend adicionados, incluindo
+  fluxo completo de ações explícitas/progresso/reinício sem acionamento automático.
+- **199 testes aprovados**: 198 padrão + 1 ensaio do artefato real. Check all-targets,
+  sintaxe JS e consulta real ao GitHub aprovados; repositório ainda sem releases.
+- Computer Use via skill foi tentado para consulta nativa na janela existente; a
+  árvore identifica backend principal. Não comprovado clique por geometria indisponível
+  e entrada concorrente do usuário. Não automatizar autenticação/captura ou contornar.
+  Nenhuma preferência, conta ou instalação foi alterada nessa inspeção.
+  Na observação seguinte a janela estava minimizada; não marcar o botão nativo como
+  validado. Comandos e testes automatizados foram feitos pelo agente, sem handoff.
+- Alterações locais posteriores ao último CI: novo build MSVC/assinatura necessários
+  antes de distribuir a correção. Nenhum push/tag/release feito nesta continuação.
+
+### Consolidação da candidata após a fase 9
+
+- O usuário pediu avançar. O roteiro original termina na fase 9; segue a etapa de
+  homologação/distribuição existente, sem inventar uma fase funcional do prompt.
+- Preparado novo commit na mesma branch de validação `codex/prepare-0.2.0`, reunindo
+  a correção de adiamento, testes TLS e roteiro do helper já ensaiado. Preservados
+  todo o trabalho anterior, main e os pacotes/dados existentes.
+- `release.yml` acrescenta `verify-package` após sign: Windows/MSVC, permissão read,
+  sem Secret; baixa artefato assinado e executa o teste TLS do EXE real. Publish depende
+  desse job e continua restrito a tags. Manual em branch não cria release/update.
+- Acompanhar o novo workflow até a conclusão e verificar o novo artefato; não usar
+  o sucesso de `44293761106` como prova destes fontes posteriores.

@@ -75,8 +75,19 @@ fn bounded(mut reader: impl Read, limit: u64) -> Result<Vec<u8>> {
     if bytes.len() as u64 > limit { return Err("Resposta de atualização excede o limite.".into()); }
     Ok(bytes)
 }
-fn asset_url(config: &UpdateConfig, version: &str, name: &str) -> String {
-    format!("https://github.com/{}/releases/download/v{version}/{name}", config.repository)
+// Privado: produção só constrói os endereços HTTPS fixos do GitHub. Os testes
+// exercitam o mesmo fluxo com TLS local, sem opção de trocar o servidor no app.
+struct ReleaseSource { latest: String, downloads: String }
+impl ReleaseSource {
+    fn github(config: &UpdateConfig) -> Self {
+        Self {
+            latest: format!("https://api.github.com/repos/{}/releases/latest", config.repository),
+            downloads: format!("https://github.com/{}/releases/download", config.repository),
+        }
+    }
+    fn asset(&self, version: &str, name: &str) -> String {
+        format!("{}/v{version}/{name}", self.downloads)
+    }
 }
 fn get_bytes(client: &Client, url: &str, limit: u64) -> Result<Vec<u8>> {
     let response = client.get(url).timeout(Duration::from_secs(30)).send()
@@ -94,14 +105,18 @@ fn release_version(raw: &[u8], current: &str) -> Result<Option<String>> {
 pub fn check(config: &UpdateConfig, current: &str) -> Result<Option<VerifiedRelease>> {
     config.validate()?;
     let client = client()?;
-    let response = client.get(format!("https://api.github.com/repos/{}/releases/latest", config.repository))
+    check_from(config, current, &client, &ReleaseSource::github(config))
+}
+fn check_from(config: &UpdateConfig, current: &str, client: &Client, source: &ReleaseSource) -> Result<Option<VerifiedRelease>> {
+    config.validate()?;
+    let response = client.get(&source.latest)
         .header("Accept", "application/vnd.github+json").timeout(Duration::from_secs(30)).send()
         .map_err(|_| "Não foi possível consultar o GitHub. Verifique a conexão.".to_string())?;
     if response.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
     let response = response.error_for_status().map_err(|_| "GitHub indisponível ou limite de consultas atingido. Tente mais tarde.")?;
     let Some(version) = release_version(&bounded(response, 1024 * 1024)?, current)? else { return Ok(None); };
-    let raw = get_bytes(&client, &asset_url(config, &version, "sancord-update.json"), 64 * 1024)?;
-    let signature = String::from_utf8(get_bytes(&client, &asset_url(config, &version, "sancord-update.sig"), 256)?).map_err(|_| "Assinatura inválida.")?;
+    let raw = get_bytes(client, &source.asset(&version, "sancord-update.json"), 64 * 1024)?;
+    let signature = String::from_utf8(get_bytes(client, &source.asset(&version, "sancord-update.sig"), 256)?).map_err(|_| "Assinatura inválida.")?;
     let verified = verify_manifest(config, &raw, &signature)?;
     if verified.manifest.version != version { return Err("A versão assinada difere da release.".into()); }
     Ok(Some(verified))
@@ -128,8 +143,11 @@ pub fn stage_stream(mut reader: impl Read, path: &Path, manifest: &Manifest, mut
     result
 }
 pub fn download(config: &UpdateConfig, release: &VerifiedRelease, path: &Path, progress: impl FnMut(u64, u64)) -> Result<()> {
+    download_from(config, release, path, progress, &client()?, &ReleaseSource::github(config))
+}
+fn download_from(config: &UpdateConfig, release: &VerifiedRelease, path: &Path, progress: impl FnMut(u64, u64), client: &Client, source: &ReleaseSource) -> Result<()> {
     let verified = verify_manifest(config, &release.raw, &release.signature)?;
-    let response = client()?.get(asset_url(config, &verified.manifest.version, ASSET)).send()
+    let response = client.get(source.asset(&verified.manifest.version, ASSET)).send()
         .and_then(|r| r.error_for_status()).map_err(|_| "Falha de rede durante o download. Tente novamente.")?;
     stage_stream(response, path, &verified.manifest, progress)
 }
@@ -192,3 +210,7 @@ pub fn install(config: &UpdateConfig, job: &InstallJob, mut launch: impl FnMut(&
 #[cfg(test)]
 #[path = "updates_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "updates_https_tests.rs"]
+mod https_tests;

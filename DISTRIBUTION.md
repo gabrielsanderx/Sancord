@@ -111,7 +111,8 @@ Restrinja as permissões da pasta da chave antes de gerar o arquivo.
 
 4. O workflow verifica que a tag coincide com `Cargo.toml`, é estável e pertence à
    história da `main`. Executa CI, compila Windows x64 MSVC, empacota, assina com o
-   Secret e verifica a assinatura antes de criar a release.
+   Secret e verifica a assinatura. Um job separado, sem Secret, testa por HTTPS de
+   loopback o download do pacote real assinado antes de permitir criar a release.
 5. Os assets são enviados primeiro como draft. Só depois do upload completo o draft
    é publicado como estável/latest. Releases existentes não são sobrescritas.
 6. Usuários recebem **Atualização disponível**, versão e changelog. O download e o
@@ -151,6 +152,35 @@ truncamento, erro de leitura, revalidação, instalação, acionamento do reiní
 rollback quando criar o processo falha. Os testes de instalação usam executáveis
 de fixture e um callback de lançamento; não equivalem a uma atualização pública real.
 `tests/frontend-updater.test.cjs` cobre ações, estados, progresso e changelog como texto.
+
+`src/updates_https_tests.rs` exercita o mesmo fluxo de consulta/download em conexões
+HTTPS reais de loopback: detecção, 404/sem atualização, versões experimentais, erros
+HTTP, limites, certificado não confiável, redirecionamento HTTPS, bloqueio de downgrade
+para HTTP, assinatura/versão divergentes e remoção de downloads parciais/adulterados.
+Certificados TLS e chaves são exclusivos dos testes; o certificado TLS é gerado em
+memória por execução. A produção conserva os endereços HTTPS fixos do GitHub e a
+chave pública embutida. Não há variável de ambiente de endpoint/TLS alternativo no app.
+Os testes comuns executam automaticamente no `cargo test --locked --all-targets` do CI.
+
+Depois de coletar o artefato assinado, também é possível testar a transferência do
+EXE real, com a chave pública de produção, sem iniciar o executável ou publicar:
+
+```powershell
+$previousQaArtifact = [Environment]::GetEnvironmentVariable('SANCORD_QA_SIGNED_RELEASE_DIR', 'Process')
+try {
+  $env:SANCORD_QA_SIGNED_RELEASE_DIR = 'D:\Sancord\qa-candidate-0.2.0\github-signed'
+  cargo test --locked --lib updates::https_tests::https_downloads_real_ci_artifact_with_embedded_release_key -- --ignored --exact
+  if ($LASTEXITCODE -ne 0) { throw 'Teste do artefato assinado falhou.' }
+} finally {
+  [Environment]::SetEnvironmentVariable('SANCORD_QA_SIGNED_RELEASE_DIR', $previousQaArtifact, 'Process')
+}
+```
+
+Esse teste fica explicitamente ignorado na suíte padrão porque depende de um artefato
+externo do CI. No workflow de release, `verify-package` o executa explicitamente após
+`sign`; `publish` exige seu sucesso. A variável é lida somente no código de teste. O ensaio foi executado
+com sucesso com a candidata 0.2.0 de `44293761106`; ele valida TLS/progresso/assinatura/
+hash do pacote real em loopback, sem comprovar sua publicação nos assets do GitHub.
 
 O teste completo requer duas versões reais assinadas: instalar a primeira em um perfil
 Windows de QA, publicar a segunda, verificar notificação/changelog, baixar, confirmar

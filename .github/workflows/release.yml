@@ -81,9 +81,35 @@ jobs:
             dist/release-notes.md
           if-no-files-found: error
           retention-days: 7
+  verify-package:
+    needs: sign
+    runs-on: windows-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: signed-windows-release
+          path: qa-signed-artifact
+      - name: Rust estável (Windows x64 MSVC)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Preparar dependências verificadas
+        run: ./scripts/prepare-windows.ps1
+      - name: Validar transferência HTTPS do pacote real assinado
+        env:
+          SANCORD_QA_SIGNED_RELEASE_DIR: ${{ github.workspace }}/qa-signed-artifact
+        run: |
+          cargo test --locked --lib updates::https_tests::https_downloads_real_ci_artifact_with_embedded_release_key -- --ignored --exact
+          if ($LASTEXITCODE -ne 0) { throw 'Ensaio HTTPS do pacote assinado recusado.' }
   publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: sign
+    needs: verify-package
     runs-on: windows-latest
     timeout-minutes: 10
     permissions:

@@ -13,6 +13,12 @@
 - Proteção de autoria de integrações, contraste nos ajustes/convites e captura de
   microfone iniciada somente por chamada/teste explícito.
 - Preparação de homologação desktop e ensaio seguro de migração em cópia do banco.
+- Correção do botão Depois no updater: adiar uma versão preserva o aviso de versões
+  posteriores; verificar manualmente reapresenta a atualização adiada.
+- Testes HTTPS automatizados de detecção, download, progresso e falhas do updater,
+  com ensaio adicional do artefato real assinado pelo CI.
+- Publicação condicionada também à validação HTTPS do pacote real já assinado,
+  executada em um job Windows/MSVC separado e sem acesso à chave privada.
 
 - Continuação do polimento: traduções dinâmicas da navegação rápida, atalhos e
   diálogos; preservação de nomes e conteúdo do usuário.
