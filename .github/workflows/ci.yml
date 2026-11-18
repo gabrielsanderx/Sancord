@@ -1,0 +1,41 @@
+name: Windows CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Rust estável (Windows x64 MSVC)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Preparar WebView2 e dependências verificadas
+        run: ./scripts/prepare-windows.ps1
+      - name: Auditar arquivos versionados
+        run: ./scripts/audit-git.ps1 -Tracked
+      - name: Compilar todos os targets
+        run: cargo check --locked --all-targets
+      - name: Testar Rust, incluindo updater
+        run: cargo test --locked --all-targets
+      - name: Testar interface
+        run: node --test tests/frontend-*.test.cjs
+      - name: Verificar sintaxe JavaScript
+        shell: pwsh
+        run: |
+          Get-ChildItem static -Recurse -Filter *.js | ForEach-Object {
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "JavaScript inválido: $($_.Name)" }
+          }
