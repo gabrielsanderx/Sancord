@@ -52,7 +52,8 @@ Backups desta implementação: `qa-updater/baseline/` (ignorados pelo Git).
 ## Evidências locais da implementação
 
 - `cargo check --locked --all-targets`: passou.
-- `cargo test --locked --all-targets`: 77 testes do núcleo e 6 do desktop passaram.
+- `cargo test --locked --all-targets`: 77 testes do núcleo passaram; após o teste
+  adicional da tela de conexão, os 7 testes do desktop também passaram.
 - `node --test tests/frontend-*.test.cjs`: 29 testes passaram.
 - Os dois YAMLs foram analisados localmente; as actions possuem SHAs completos.
 - Preparação de versão testada numa cópia: Cargo.toml e Cargo.lock ficaram sincronizados.
@@ -68,6 +69,8 @@ Backups desta implementação: `qa-updater/baseline/` (ignorados pelo Git).
   [CI Windows/MSVC completo aprovado, com CRT estático](https://github.com/gabrielsanderx/Sancord/actions/runs/44210124225).
   O workflow final de distribuição foi iniciado manualmente, sem publicação:
   [ensaio de empacotamento e assinatura](https://github.com/gabrielsanderx/Sancord/actions/runs/44210124727).
+  Ensaio final com o updater na tela de conexão e descoberta preservada:
+  [pipeline final](https://github.com/gabrielsanderx/Sancord/actions/runs/44212838331).
 - O cadastro do Secret foi confirmado por consulta de metadados, sem ler seu valor.
   O ensaio manual agora testa também a assinatura em job separado da publicação.
   O ensaio passou após corrigir o formato do Secret; a publicação foi pulada.
@@ -77,3 +80,6 @@ Backups desta implementação: `qa-updater/baseline/` (ignorados pelo Git).
   Não afirmar que basta trocar a pública para os clientes antigos aceitarem outra chave.
 - O updater também está carregado na tela de conexão: não depende de conseguir entrar
   no backend para mostrar atualizações. Há um teste dos recursos internos para esse caso.
+- A variável pública `SANCORD_DISCOVERY_PUBKEY` foi configurada a partir da chave
+  pública de descoberta já existente no host, preservando o comportamento dos clientes.
+  A chave privada de descoberta não foi lida nem enviada ao GitHub.
