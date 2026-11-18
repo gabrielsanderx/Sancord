@@ -41,7 +41,8 @@ na pasta são do trabalho anterior. Não foram recriadas nesta continuação.
 ## Validação
 
 Baseline antes das alterações: 106 testes de núcleo + 8 desktop + 1 manutenção +
-107 frontend aprovados. Após a continuação: **106 + 8 + 1 + 123 = 238 testes aprovados**.
+107 frontend aprovados. Após a continuação e os ajustes pós-inspeção nativa:
+**106 + 8 + 1 + 125 = 240 testes aprovados**.
 Um ensaio do artefato assinado permanece ignorado por padrão, pois requer o pacote
 assinado específico; não está incluído nessa contagem.
 
@@ -61,10 +62,12 @@ histórico, limite do composer, cancelamento e alvo de exclusão durante confirm
 assíncrona. As suítes existentes continuam cobrindo chat, permissões, social, voz/vídeo,
 updater, integrações, castigos, modo lento, tags e preferências.
 
-Os ensaios de DOM/CSS agora são **sete testes permanentes**, executados também pelo
+Os ensaios de DOM/CSS agora são **nove testes permanentes**, executados também pelo
 CI e por `scripts/homologate.ps1`. Eles carregam todos os scripts do HTML, verificam
-controles dinâmicos/reações, os quatro temas, ausência de captura ao abrir Voz, tooltips
-e teclado nos diálogos. O contraste é calculado após aplicar as variáveis das duas
+controles dinâmicos/reações, os quatro temas, ausência de captura ao abrir Voz, tooltips,
+teclado nos diálogos, recolhimento da coluna de membros para painel flutuante em janela
+estreita (`<= 1100 px`) com descrição do canal saindo só em `<= 940 px`, e contraste
+semântico dos rótulos secundários em Aparência, perfis e atalhos no tema Claro. O contraste é calculado após aplicar as variáveis das duas
 folhas, respeitando a especificidade dos seletores dos temas. Foi reproduzida uma
 falha de foco da confirmação antes da correção: agora Cancelar recebe foco, Tab e
 Shift+Tab ficam dentro do diálogo e Escape cancela/restaura o foco anterior.
@@ -97,21 +100,51 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts/package-re
 
 É um build local, **sem assinatura de release**. Não foi publicado, não substitui o
 artefato assinado `8c9cbd9` e não deve ser enviado ao updater como release estável.
-O build usa a toolchain local; Windows/MSVC e assinatura precisam do CI no commit final.
+Esse build usa a toolchain local. A candidata Windows/MSVC assinada foi validada
+separadamente, conforme o registro abaixo.
 
-**Homologação nativa ainda pendente:** a revisão automática rejeitou o comando de
-abertura do cliente isolado com `blocked by policy`, sem fornecer motivo detalhado.
-Nenhum método alternativo de lançamento foi usado para contornar a rejeição. Assim,
-não há alegação de comparação visual, segunda rodada por screenshot ou teste completo
-de rede/mídia na janela atualizada. Esta pendência impede declarar todos os critérios
-visuais do prompt homologados, apesar de os fontes compilarem e os testes passarem.
+### Candidata assinada validada no CI
 
-Quando a abertura nativa estiver disponível, conferir o pacote isolado em 1320×830 e
-940×600, DPI 100/125/150%, quatro temas, nomes longos, coluna de membros/overlay,
-mensagens agrupadas, reply/uploads, menus, perfis, settings e updater. Conferir também
-voz/tela com duas instâncias, sem iniciar captura sem ação explícita. Corrigir eventuais
-diferenças de layout antes da publicação; não executar o backend candidato sobre os
-dados de produção apenas para inspecionar o visual.
+O usuário autorizou o envio de **`06a29d4d0fcd9ae82e1c0be0a6e8606fc57fbbf4`** para
+`codex/visual-0.2.1` e a execução manual do workflow. A execução
+[44355471579](https://github.com/gabrielsanderx/Sancord/actions/runs/44355471579)
+terminou com sucesso em `tests / test`, `package`, `sign` e `verify-package`;
+`publish` foi pulado. Isso valida o novo visual nos fontes compilados, o build
+Windows/MSVC e a assinatura do updater, mas não o layout na janela nativa.
+
+O pacote assinado dessa execução está em
+`qa-visual-20261118/signed-06a29d4/Sancord-0.2.1-windows-x64.zip`, acompanhado do
+manifesto e assinatura. A verificação local também aprovou assinatura Ed25519,
+SHA-256, versão, ZIP com um único cliente e correspondência com o EXE externo.
+O ensaio HTTPS do artefato real passou também localmente: **238 testes padrão +
+1 ensaio adicional = 239 aprovados**. Nenhum cliente baixado foi executado.
+
+A assinatura é a do updater, conforme `DISTRIBUTION.md`; não é Authenticode.
+Este artefato continua sendo uma candidata de QA e não foi promovido a release.
+
+**Conferência nativa e correção de contraste dos rótulos secundários:** após
+autorização explícita do usuário, a candidata `signed-06a29d4` foi aberta em
+**"Sancord - QA final 0.2.1"** conectada ao backend isolado `http://127.0.0.1:3122`
+como `VozQA_A`. Foram conferidos na janela nativa: layout principal de 4 colunas,
+boas-vindas do canal `#resenha`, mensagem de sistema, membros online e offline, envio
+com `Enter`, quebra de linha com `Shift+Enter`, agrupamento de mensagens, abertura
+dos quatro temas (`Claro`, `Ash`, `Escuro` e `Onyx/OLED`) e navegação rápida `Ctrl+K`.
+
+Durante a revisão nativa do tema Claro em **Aparência**, foram identificados rótulos
+secundários e selos com contraste fraco (`.accent-swatch-badge`, `.appearance-custom-banner`,
+`.density-choice-card.active`, `.ptt-key-badge`, `.shortcut-row kbd`, `.settings-subnav`,
+`.security-pill.ok`, `.ui-toast`, `.profile-card-custom-status`, `.profile-tab-btn.active`,
+`.profile-mutual-row > span` e cores padrão `#f2f3f5`/`#dbdee1` em nomes sem cor
+personalizada), além da ordem de saída entre `.members-sidebar` (`<= 1100 px`) e
+`.channel-topic` (`<= 940 px`). Esses pontos foram corrigidos em `static/ui.css`,
+`static/app.js` e `static/js/chat.js`, cobertos por novos testes permanentes em
+`tests/frontend-css.test.cjs` e `tests/frontend-dom.test.cjs` (**240 testes padrão
+aprovados**), e o pacote local `qa-visual-20261118/package/` foi atualizado.
+
+Antes de promover a candidata para `main` / tag `v0.2.1`, o novo commit com essa
+correção de contraste deve passar pelo workflow Windows/MSVC (`release.yml`) na branch
+`codex/visual-0.2.1`. Nenhuma tag, release, troca de executável instalado ou migração
+de produção foi feita sem autorização.
 
 ## Git e próximo passo
 
@@ -119,8 +152,10 @@ O trabalho anterior foi enviado pelo Claude à branch remota `release/0.2.1` em
 `8c9cbd9` pela API. O histórico remoto foi buscado sem alterar o working tree original.
 Uma branch local `codex/visual-0.2.1` é preparada em worktree isolado, derivada desse
 commit e com os fontes atuais sobrepostos, sem perder as implementações do Claude.
-A validação CI de `8c9cbd9` não inclui esta refatoração. O próximo passo de distribuição
-é enviar a branch final e executar `release.yml` manualmente para validar Windows/MSVC
-e assinatura, sem tag/release pública; a homologação nativa continua necessária.
-Nenhuma tag, push, release, troca de executável instalado ou migração de produção foi
-feita por esta continuação.
+A validação antiga de `8c9cbd9` não inclui esta refatoração; a de `06a29d4`, acima,
+inclui. O envio autorizado da branch e a validação manual estão concluídos. A pasta
+original foi preservada; novos commits devem partir do worktree/branch com o histórico
+correto. A atualização deste relatório após o CI é local e não altera o código testado.
+Antes de promover a candidata, ainda é necessário concluir a homologação nativa.
+Nenhuma tag, release, troca de executável instalado ou migração de produção foi feita
+por esta continuação.

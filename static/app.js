@@ -3640,7 +3640,7 @@ function applyDecoToElement(el, decoId) {
 // então vale como "cor do tema" (texto de título) em qualquer tema.
 function themedNameColor(col) {
   const v = String(col || "").trim().toLowerCase();
-  return v === "#fff" || v === "#ffffff" ? "" : col || "";
+  return v === "#fff" || v === "#ffffff" || v === "#f2f3f5" || v === "#dbdee1" ? "" : col || "";
 }
 
 function applyNameStyleToEl(el, userObj, fallbackColor) {

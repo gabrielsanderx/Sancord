@@ -7,7 +7,8 @@
 - Início de canal contextual, estados vazios compartilhados, membros offline reais,
   tooltips acessíveis e confirmações integradas ao aplicativo.
 - Confirmações recebem foco e contêm a navegação por teclado; ensaios de DOM e
-  contraste dos temas passam a integrar o CI. Ícones de reordenação corrigidos.
+  contraste dos temas passam a integrar o CI. Ícones de reordenação e contraste de
+  rótulos secundários em Aparência, perfis, atalhos e tema Claro corrigidos.
 - Candidata local: testes automatizados aprovados; homologação visual nativa e CI do
   commit com a refatoração ainda pendentes. Esta alteração não publica uma release.
 - Castigo (timeout) de membros: duração de 60 segundos a 28 dias, motivo na auditoria,

@@ -551,8 +551,9 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
 
   const liveUser = findLiveUserByName(authorLower) || state.users.get(msg.author_id);
   const avatarUrl = liveUser?.avatar_url || msg.author_avatar;
-  const nameColor = liveUser?.name_color || msg.author_color;
-  const safeColor = /^#[0-9a-f]{3,8}$/i.test(nameColor || "") ? nameColor : "#dbdee1";
+  const rawNameColor = typeof themedNameColor === "function" ? themedNameColor(liveUser?.name_color) : liveUser?.name_color;
+  const nameColor = rawNameColor || (typeof themedNameColor === "function" ? themedNameColor(msg.author_color) : msg.author_color);
+  const safeColor = /^#[0-9a-f]{3,8}$/i.test(nameColor || "") ? nameColor : "";
   const avatarColor = /^#[0-9a-f]{3,8}$/i.test(msg.author_color || "") ? msg.author_color : "#5865f2";
   const decoCls = getDecoClass(liveUser?.avatar_decoration);
   const nameCls = getNameStyleClass(liveUser?.name_style);
@@ -576,7 +577,7 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
   const meta = grouped
     ? ""
     : `<div class="message-meta">
-         <span class="message-author clickable-profile styled-name ${nameCls}" style="${liveUser?.name_style === "gradient" ? "" : `color:${safeColor};--name-color:${safeColor};`}">${escapeHtml(msg.author_name)}</span>
+         <span class="message-author clickable-profile styled-name ${nameCls}" style="${liveUser?.name_style === "gradient" || !safeColor ? "" : `color:${safeColor};--name-color:${safeColor};`}">${escapeHtml(msg.author_name)}</span>
          ${authorKindOf(msg) !== "user" ? `<span class="bot-tag author-${authorKindOf(msg)}">${typeof t === "function" ? t(`author.${authorKindOf(msg)}`) : "SISTEMA"}</span>` : ""}
          <time class="message-time" ${msg.created_at ? `datetime="${new Date(msg.created_at).toISOString()}" title="${escapeHtml(new Date(msg.created_at).toLocaleString("pt-BR"))}"` : ""}>${escapeHtml(formatMessageTime(msg))}</time>
          ${msg.pinned ? `<span class="pin-tag">📌 Fixada</span>` : ""}

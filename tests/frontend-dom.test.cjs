@@ -70,3 +70,27 @@ test('confirmação recebe foco, contém Tab/Shift+Tab e Escape devolve foco sem
   assert.equal(await result, false); assert.equal(d.querySelector('.sancord-dialog'), null);
   assert.equal(d.activeElement, origin);
 });
+
+test('janela estreita recolhe membros para painel flutuante e perfis preservam cores do tema', async t => {
+  const h = await openInterface(t), d = h.document;
+  const layout = d.getElementById('app-layout'), toggle = d.getElementById('toggle-members-btn');
+  h.run('state.activeView = "server"; appLayout.classList.remove("hide-members"); toggleMembersBtn.classList.add("active");');
+  h.run('NARROW_QUERY.matches = true; syncNarrowLayout();');
+  assert.equal(d.body.classList.contains('narrow-window'), true);
+  assert.equal(layout.classList.contains('hide-members'), true);
+  toggle.click();
+  assert.equal(layout.classList.contains('force-members'), true);
+  d.getElementById('chat-messages').dispatchEvent(new h.w.MouseEvent('mousedown', { bubbles: true }));
+  assert.equal(layout.classList.contains('force-members'), false);
+  assert.equal(layout.classList.contains('hide-members'), true);
+  h.run('NARROW_QUERY.matches = false; syncNarrowLayout();');
+  assert.equal(d.body.classList.contains('narrow-window'), false);
+  assert.equal(layout.classList.contains('hide-members'), false);
+
+  h.run('state.selfUser = { id: "u1", username: "VozQA_A", avatar_color: "#5865f2", name_color: null }; updateSelfProfileUI();');
+  assert.equal(d.getElementById('self-username').style.color, '');
+  h.run('openMemberProfilePopover(null, { author_name: "VozQA_B", author_color: "#5865f2" });');
+  assert.equal(d.getElementById('profile-popover-modal').classList.contains('hidden'), false);
+  assert.equal(d.getElementById('profile-card-name').textContent, 'VozQA_B');
+  assert.equal(d.getElementById('profile-card-name').style.color, '');
+});

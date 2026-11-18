@@ -466,6 +466,7 @@ body {
   font-size: var(--font-message);
   font-weight: var(--weight-semibold);
   line-height: 22px;
+  color: var(--text-primary);
 }
 .message-time {
   font-size: var(--font-xs);
@@ -840,9 +841,11 @@ textarea#chat-input {
 /* ---------------------------------------------------------------------------
    14. Responsividade: membros saem primeiro, depois a descrição do canal
    ------------------------------------------------------------------------- */
-@media (max-width: 1100px) {
-  .channel-topic,
-  .header-divider { display: none; }
+.chat-header-left .channel-topic,
+.chat-header-left .header-divider { display: block; }
+@media (max-width: 940px) {
+  .chat-header-left .channel-topic,
+  .chat-header-left .header-divider { display: none; }
 }
 @media (max-width: 900px) {
   .chat-search-wrap input,
@@ -1060,8 +1063,56 @@ svg.ui-icon { fill: none !important; stroke: currentColor; }
 .sancord-card-option { border-radius: var(--radius-sm); border-color: var(--divider); background: var(--bg-card); }
 .sancord-card-option:has(input:checked) { border-color: var(--accent); background: var(--bg-selected); }
 .profile-mutual-row { border-color: var(--divider); background: var(--bg-card); border-radius: var(--radius-sm); }
+.profile-mutual-row:hover { background: var(--bg-hover); }
 .profile-mutual-row strong, .dm-peer-panel strong { color: var(--text-primary) !important; }
-.profile-mutual-row .profile-mutual-row-left > div > div { color: var(--text-subtle) !important; }
+.profile-mutual-row .profile-mutual-row-left > div > div,
+.profile-mutual-row > span { color: var(--text-subtle) !important; }
+
+.accent-swatch-badge { background: var(--bg-hover); color: var(--text-secondary); border: 1px solid var(--divider); }
+.settings-hint-text, .cust-sub-hint, .dsp-sub, .density-choice-card span,
+.cust-square-caption, .cust-preview-heading { color: var(--text-subtle); }
+.theme-swatch-tile, .accent-swatch-tile { border-color: var(--divider); }
+.theme-swatch-tile:hover, .accent-swatch-tile:hover { border-color: var(--text-subtle); }
+.theme-swatch-tile.active, .accent-swatch-tile.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+body .appearance-custom-banner {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--divider));
+}
+body .appearance-custom-text strong { color: var(--text-primary); }
+body .appearance-custom-text p { color: var(--text-secondary); }
+body .density-choice-card { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--divider); }
+body .density-choice-card.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+}
+.ptt-key-badge, .shortcut-row kbd { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--divider); }
+.settings-subnav { border-left-color: var(--divider); }
+.settings-subnav-item { color: var(--text-subtle); }
+.settings-subnav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.settings-subnav-item.active { color: var(--text-primary); }
+.settings-subnav-item.active::before { background: var(--accent); }
+.security-pill.ok { color: var(--success); background: color-mix(in srgb, var(--success) 16%, transparent); }
+body .profile-card-handle, .profile-modal-left .profile-card-custom-status,
+body .profile-info-block label, .profile-card-section label { color: var(--text-secondary); }
+.profile-modal-left, .profile-modal-right-top,
+.profile-activity-card, .profile-card-more-menu { border-color: var(--divider); }
+.profile-activity-card, .profile-card-more-menu { background: var(--bg-card); }
+.profile-tab-btn.active { color: var(--text-primary); border-bottom-color: var(--accent); }
+.profile-note-textarea:focus { background: var(--bg-input); border-color: var(--accent); }
+.profile-activity-icon { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+body .profile-card-icon-btn { background: var(--bg-hover); color: var(--text-body); border-color: var(--divider); }
+body .profile-card-icon-btn:hover { background: var(--bg-selected); color: var(--text-primary); }
+.ui-toast { background: var(--bg-float); color: var(--text-primary); border-color: var(--divider); box-shadow: var(--shadow-float); }
+.reaction-pill.reacted { color: var(--text-primary); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+body[data-theme="light"] .mention-pill:not(.mention-role):not(:hover),
+body[data-theme="light"] .friends-tab-btn.add-tab.active,
+body[data-theme="light"] .home-new-pill {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
 
 .chat-search-wrap { position: relative; }
 .chat-search-wrap > .ui-search-icon { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-subtle); display: flex; }

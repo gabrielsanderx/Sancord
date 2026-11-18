@@ -752,3 +752,129 @@ pendente. Os fontes já têm as duas coisas.
   manual de `release.yml`, sem tag ou atualização aos usuários. Ainda não executado.
   A homologação visual nativa segue pendente pelo bloqueio anteriormente registrado;
   não foi tentado outro mecanismo de lançamento para contorná-lo.
+
+### CI final autorizado e candidata assinada — 18/11/2026
+
+- Usuário autorizou o envio do commit **`06a29d4d0fcd9ae82e1c0be0a6e8606fc57fbbf4`**
+  à branch pública `codex/visual-0.2.1` e a execução manual de `release.yml`.
+- Envio concluído, sem force push. Pai do commit: `8c9cbd9`; os módulos de backend do
+  Claude continuam idênticos. Em `src/`, só assets/estilos do desktop diferem.
+- **CI `44355471579` concluído com sucesso:**
+  https://github.com/gabrielsanderx/Sancord/actions/runs/44355471579
+  - `tests / test`: check, testes Rust/frontend, sintaxe e auditoria aprovados;
+  - `package`: cliente/backend/ZIP compilados em Windows x64 MSVC;
+  - `sign`: manifesto assinado e verificado;
+  - `verify-package`: ensaio HTTPS do artefato real assinado aprovado;
+  - `publish`: pulado, porque a execução é de branch, sem tag.
+- Artefato `signed-windows-release` baixado para
+  `qa-visual-20261118/signed-06a29d4/`. A ferramenta local de manutenção verificou
+  assinatura e integridade. Conferidos versão 0.2.1, ZIP contendo somente o cliente,
+  hash do EXE externo igual ao EXE do ZIP autenticado e changelog final em UTF-8.
+  Nenhum executável baixado foi iniciado.
+- Teste adicional local `https_downloads_real_ci_artifact_with_embedded_release_key`
+  aprovado com esse pacote. **238 testes padrão + 1 do artefato = 239 aprovados**.
+  Logs/metadados de proveniência ficam na pasta de QA ignorada.
+- Assinatura Ed25519 é do updater; Authenticode continua sendo assunto separado,
+  conforme `DISTRIBUTION.md`.
+- A branch de revisão está limpa no commit enviado. A pasta original conserva o
+  working tree anterior e recebe este registro local posterior ao CI. Não commitar
+  tudo sobre o HEAD antigo `390aeee`; continuar a partir de `codex/visual-0.2.1`.
+- **Pendência restante desta refatoração:** homologação visual nativa/DPI e fluxos na
+  janela atualizada, ainda bloqueados pela revisão automática já descrita. Sem nova
+  tentativa por mecanismo alternativo. Não declarar essa conferência realizada.
+- `main`, tag/release estável, executáveis instalados e dados de produção não foram
+  alterados. Promoção para estável exige resolver a homologação e autorização própria.
+
+### Preparação da conferência nativa final — 18/11/2026
+
+- Usuário pediu avançar com a conferência/promoção após confirmar que o atalho ainda
+  abre 0.2.0. Antes de publicar ou substituir o instalado, retomada a homologação.
+- Novo snapshot consistente do banco de produção, aberto somente para leitura.
+  `check-migration` aprovou **v10→v13**, 30 tabelas antigas preservadas por hash e
+  integridade OK. Caminho da cópia em `qa-visual-20261118/final-migration-path.txt`;
+  a cópia contém dados reais, deve permanecer ignorada e não ser compartilhada.
+- Assinatura/integridade da candidata `signed-06a29d4` verificadas novamente.
+- Backend local de QA **0.2.1**, porta **3122**, iniciado a partir do servidor local
+  compilado; dados/logs isolados em `qa-visual-20261118/native-final/` e descoberta
+  desligada. Identidade do processo gravada em `backend-process.json`. Não parar
+  processos de 3000/3100/3110 para trabalhar nesse QA.
+- Nova tentativa pelo mesmo `Start-Process`, após a solicitação do usuário, foi
+  novamente rejeitada pela revisão automática com **`blocked by policy`**, sem motivo
+  detalhado. O comando foi rejeitado antes da execução; nenhum cliente iniciou.
+  Não contornar com outro mecanismo de lançamento por ferramenta.
+- Preparadas contas descartáveis VozQA_A/B, amizade e servidor real de teste no
+  backend 3122. Credenciais somente na pasta ignorada; não imprimir/copiar ao chat.
+- Para o usuário abrir manualmente, `native-final/Abrir-QA.cmd` aponta à candidata
+  assinada, usa perfil separado e desliga host local, registro de protocolo e updater.
+  `ACESSO-QA.txt` contém a entrada de QA para login manual; a skill de computer use
+  proíbe automatizar diálogos de autenticação.
+- Após o usuário informar que a janela "Sancord - QA final 0.2.1" está conectada,
+  usar a skill de computer use para inspecionar a interface, temas e layout, sem
+  iniciar captura nem alterar segurança/privacidade. Não declarar inspeção visual
+  antes de observar essa janela. Não houve publicação/tag/main ou troca do atalho.
+
+### Abertura nativa permitida após autorização explícita — 18/11/2026
+
+- O usuário autorizou explicitamente que o agente abrisse a candidata e efetuasse
+  a entrada com a conta de teste. Nova solicitação pelo mesmo `Start-Process` foi
+  permitida. Não foi usado mecanismo alternativo para contornar a revisão.
+- Janela observada: **"Sancord - QA final 0.2.1"**, app extraído do pacote assinado
+  `signed-06a29d4`; endpoint exibido `http://127.0.0.1:3122` e perfil separado.
+- Entrada com VozQA_A concluída; observado estado conectado e servidor "Voz QA local".
+  Credencial exclusiva de QA lida sem exibição no chat. Não usar credenciais de produção.
+- Tela principal escura observada nativamente: quatro colunas, welcome de #resenha,
+  mensagem do sistema, membro online e membro offline, composer compacto e user panel.
+  Isso é somente a primeira parte da conferência: temas, teclado, agrupamento e
+  responsividade ainda não foram homologados na janela atualizada.
+- Tentativa de mensagem de QA deixou um rascunho no composer; envio com Enter não
+  foi confirmado. Não repetir ações assumindo que a entrada anterior funcionou.
+- Controle recebeu **"user input was detected in this window"**; depois a janela
+  apareceu minimizada. Recuperação com estado/ativação e handle atualizado também
+  foi interrompida. Não insistir com coordenadas/índices antigos ou outra API de UI.
+- Solicitado ao usuário somente deixar a janela de QA em primeiro plano e sem entrada
+  concorrente para retomar os cliques. Não há necessidade de comandos ou nova senha.
+  Após confirmação, reobter a janela pelo inventário antes de qualquer interação.
+- Ainda sem tag/release v0.2.1, alteração de main, substituição do instalado ou migração
+  de produção. A autorização atual permite avançar com a conferência, sem fingir que
+  as etapas interrompidas foram aprovadas.
+
+### Continuação e fechamento dos ajustes da conferência nativa — 18/11/2026
+
+- Na retomada da janela **"Sancord - QA final 0.2.1"** (`http://127.0.0.1:3122`, conta
+  `VozQA_A`), foram confirmados:
+  - envio com `Enter`, nova linha com `Shift+Enter` e agrupamento de mensagens em
+    `#resenha` (duas mensagens consecutivas gravadas no banco de QA 3122);
+  - abertura dos quatro temas (`Claro`, `Ash`, `Escuro` e `Onyx/OLED`) em Configurações →
+    Aparência;
+  - filtragem e abertura do canal de texto via navegação rápida (`Ctrl+K`);
+  - encerramento da chamada de voz que havia sido acionada durante atividade concorrente.
+- **Achado visual na janela nativa (tema Claro em Aparência, Perfis e Atalhos) corrigido:**
+  - rótulos secundários e selos `.accent-swatch-badge` (`EXCLUSIVO SANCORD`,
+    `18 PALETAS LIVRES`, `ÚNICO DO SANCORD`), `.appearance-custom-banner`,
+    `.density-choice-card.active`, `.theme-swatch-tile`/`.accent-swatch-tile`,
+    `.ptt-key-badge` (`#ptt-key-display`), `.shortcut-row kbd`, `.settings-subnav`,
+    `.security-pill.ok`, `.ui-toast`, `.reaction-pill.reacted` e `.mention-pill` no Claro
+    passaram a usar tokens semânticos em `static/ui.css`;
+  - no cartão/modal de perfil (`#profile-popover-modal`) e nos nomes sem cor personalizada
+    (`static/app.js` `themedNameColor` e `static/js/chat.js`), valores claros padrão
+    (`#ffffff`, `#f2f3f5`, `#dbdee1`) deixaram de ser fixados inline, preservando
+    `var(--text-primary)` no tema Claro, além de `.profile-card-custom-status`,
+    `.profile-tab-btn.active`, `.profile-note-textarea:focus` e `.profile-mutual-row > span`;
+  - na responsividade (`static/ui.css`), a coluna de membros sai da grade primeiro em
+    `<= 1100 px` (abrindo como painel flutuante pelo botão de membros e fechando ao
+    clicar fora), enquanto `.channel-topic` e o divisor do cabeçalho do chat só saem em
+    `<= 940 px`.
+- **Validação automatizada atualizada:**
+  - novos testes permanentes em `tests/frontend-css.test.cjs` (contraste `>= 4.5:1` em
+    `--bg-chat`, `--bg-card` e `--bg-hover` nos 4 temas + verificação de tokens nos
+    rótulos secundários de Aparência, perfis, atalhos e toast no tema Claro) e
+    `tests/frontend-dom.test.cjs` (recolhimento/painel flutuante de membros em janela
+    estreita e abertura de perfil sem cor inline clara fixa);
+  - **240 testes padrão aprovados** (106 núcleo + 8 desktop + 1 manutenção + 125 frontend);
+  - pacote local `qa-visual-20261118/package/` recompilado e sincronizado com o worktree
+    `qa-visual-20261118/review-worktree/` (`codex/visual-0.2.1`).
+- **Próximo passo para publicação da `0.2.1`:**
+  - com autorização do usuário: commitar/enviar este ajuste final na branch
+    `codex/visual-0.2.1` (ou direto para `main`), rodar o workflow `release.yml`, criar a
+    tag `v0.2.1` e atualizar o `SancordServer.exe` + `Sancord.exe` de produção (migrando
+    o banco principal de v10 para v13).
