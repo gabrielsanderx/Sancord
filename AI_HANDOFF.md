@@ -29,6 +29,7 @@ real entre máquinas. Não migrar o banco principal para testar releases.
   Nunca ler/exibir a privada em mensagens, commits ou logs. Secret de Actions necessário:
   `SANCORD_UPDATE_SIGNING_KEY`. Cadastro é uma etapa manual do usuário.
 - Build gera o recurso do ícone via `embed-resource`, sem depender do antigo `icon.o`.
+  A configuração Cargo para Windows/MSVC liga CRT estático para o pacote portátil.
   `prepare-windows.ps1` obtém o loader do pacote verificado pelo Cargo.lock.
   `SancordBundle` exige feature `bundle` e o build em duas etapas existente.
 - Workflows Windows CI e stable release: testes antes de empacotar/assinar/publicar;

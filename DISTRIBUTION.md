@@ -27,6 +27,8 @@ dos executáveis antigos. Depois, as atualizações são recebidas dentro do apl
 
 O pacote Windows é portátil (EXE e ZIP), sem privilégios de administrador. Instale-o
 numa pasta em que seu usuário possa gravar. WebView2 Runtime precisa estar instalado.
+Os builds Windows/MSVC usam CRT estático pela configuração `.cargo/config.toml`,
+para não exigir uma cópia separada de `vcruntime140.dll`.
 A assinatura Ed25519 autentica o updater; ela não é um certificado Authenticode e
 não remove avisos SmartScreen. Certificado de assinatura Windows é uma etapa separada.
 
@@ -157,3 +159,4 @@ sem permissão de escrita. Nunca use o banco de produção para esse ensaio.
 Referências: [GitHub Releases API](https://docs.github.com/en/rest/releases/releases),
 [GitHub Actions Secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets),
 [gh release create](https://cli.github.com/manual/gh_release_create).
+Configuração de CRT: [referência de linkage do Rust](https://doc.rust-lang.org/reference/linkage.html).

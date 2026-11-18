@@ -1,0 +1,3 @@
+[target.x86_64-pc-windows-msvc]
+# O pacote portátil não deve depender de um vcruntime140.dll instalado à parte.
+rustflags = ["-C", "target-feature=+crt-static"]
