@@ -4,11 +4,13 @@ use argon2::password_hash::rand_core::{OsRng, RngCore};
 use ed25519_dalek::{Signer, SigningKey};
 use sancord::updates::{self, Manifest, UpdateConfig};
 use sha2::{Digest, Sha256};
+mod migration_check;
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut cfg = UpdateConfig::embedded()?;
     match args.first().map(String::as_str) {
+        Some("check-migration") if args.len() == 2 => migration_check::run(Path::new(&args[1]))?,
         Some("check") if args.len() == 1 => {
             match updates::check(&cfg, env!("CARGO_PKG_VERSION"))? {
                 Some(release) => println!("Atualização disponível: {}", release.manifest.version),
@@ -53,7 +55,7 @@ fn run() -> Result<(), String> {
             updates::verify_package(&dir.join(updates::ASSET), &release.manifest)?;
             println!("Assinatura e integridade válidas.");
         }
-        _ => return Err("Uso: sancord-release check | keygen <arquivo-novo> | validate <vX.Y.Z> | sign <pasta-dist> <notas.md> | verify <pasta-dist>".into()),
+        _ => return Err("Uso: sancord-release check | check-migration <pasta-qa> | keygen <arquivo-novo> | validate <vX.Y.Z> | sign <pasta-dist> <notas.md> | verify <pasta-dist>".into()),
     }
     Ok(())
 }

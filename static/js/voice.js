@@ -158,12 +158,15 @@ function openVoiceUserMenu(e, uid) {
 // ---------------------------------------------------------------------------
 
 function onVoiceMoved({ channel_id, by }) {
+  state.voiceJoinRequestId = (state.voiceJoinRequestId || 0) + 1;
   if (!channel_id) {
     leaveVoiceChannel();
     showUiToast(`${by} desconectou você da voz.`);
     return;
   }
   // O servidor já nos colocou no destino: só refaz as conexões e a interface.
+  stopScreenSharing(false);
+  stopCamera(false);
   cleanupAllPeers();
   state.currentVoiceChannel = channel_id;
   const name = getFriendlyVoiceName(channel_id);

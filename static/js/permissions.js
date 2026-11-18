@@ -32,8 +32,10 @@ function voicePermissions() {
 
 function messagePermissions(message) {
   if (isPrivateTextId(message.channel_id)) return { send_messages: true, add_reactions: true, pin_messages: true, attach_files: true };
-  const srv = state.servers.find(s => s.text_channels?.some(c => c.id === message.channel_id));
-  return getChannelPermissions(srv, srv?.text_channels.find(c => c.id === message.channel_id));
+  // Mensagem de thread: vale o canal-pai (como no servidor).
+  const channelId = state.threadIndex?.get(message.channel_id)?.parent_id || message.channel_id;
+  const srv = state.servers.find(s => s.text_channels?.some(c => c.id === channelId));
+  return getChannelPermissions(srv, srv?.text_channels.find(c => c.id === channelId));
 }
 
 function canEditRole(srv, role) {

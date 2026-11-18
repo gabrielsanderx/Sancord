@@ -7,6 +7,41 @@
 // Todos usam textContent (nunca innerHTML com dados do usuário).
 // ============================================================================
 
+// Cache de imagens (Fase 9, seção 63): avatares chegam como data URL de dezenas
+// de KB e eram repetidos por inteiro em cada mensagem (42 MB de HTML com 300
+// mensagens). Cada imagem é decodificada uma vez e vira um "blob:" curto.
+const MEDIA_URL_CACHE = new Map();
+const MEDIA_URL_CACHE_MAX = 500;
+const MEDIA_URL_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+const MEDIA_URL_MIN_LENGTH = 2048;
+let mediaUrlCacheBytes = 0;
+
+function cachedMediaUrl(url) {
+  if (typeof url !== "string" || url.length < MEDIA_URL_MIN_LENGTH || !url.startsWith("data:")) return url;
+  const hit = MEDIA_URL_CACHE.get(url);
+  if (hit) return hit;
+  // Não descarta URLs ainda usadas pelo DOM ou por um render em preparação.
+  // Ao atingir o orçamento, imagens novas continuam usando sua URL original.
+  if (MEDIA_URL_CACHE.size >= MEDIA_URL_CACHE_MAX || mediaUrlCacheBytes >= MEDIA_URL_CACHE_MAX_BYTES) return url;
+  try {
+    const comma = url.indexOf(",");
+    const meta = url.slice(5, comma);
+    if (!meta.endsWith(";base64")) return url;
+    const mime = meta.slice(0, -";base64".length);
+    if (!/^image\/(png|jpeg|jpg|gif|webp)$/.test(mime)) return url;
+    const bin = atob(url.slice(comma + 1));
+    if (bin.length > MEDIA_URL_CACHE_MAX_BYTES - mediaUrlCacheBytes) return url;
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    MEDIA_URL_CACHE.set(url, blobUrl);
+    mediaUrlCacheBytes += bin.length;
+    return blobUrl;
+  } catch (_) {
+    return url;
+  }
+}
+
 const SancordUI = (() => {
   let menuEl = null;
   let menuCleanup = null;
@@ -136,7 +171,7 @@ const SancordUI = (() => {
    *            placeholder, maxlength, required, hint, visibleWhen: (values) => bool }]
    * Resolve com os valores ou null se cancelado.
    */
-  function formDialog({ title, description = "", fields = [], submitLabel = "Salvar", danger = false, extraAction = null }) {
+  function formDialog({ title, description = "", fields = [], submitLabel, submitKey = "common.save", danger = false, extraAction = null }) {
     return new Promise((resolve) => {
       const prevFocus = document.activeElement;
       const backdrop = document.createElement("div");
@@ -253,6 +288,7 @@ const SancordUI = (() => {
         }
         if (f.type !== "cards" && f.type !== "checklist") {
           input.id = id;
+          if (f.readOnly) input.readOnly = true;
           if (f.value !== undefined && f.value !== null) input.value = f.value;
           if (f.placeholder) input.placeholder = f.placeholder;
           if (f.maxlength) input.maxLength = f.maxlength;
@@ -291,11 +327,15 @@ const SancordUI = (() => {
       const cancel = document.createElement("button");
       cancel.type = "button";
       cancel.className = "btn-secondary";
-      cancel.textContent = "Cancelar";
+      cancel.dataset.i18n = "common.cancel";
+      cancel.textContent = typeof t === "function" ? t("common.cancel") : "Cancelar";
       const submit = document.createElement("button");
       submit.type = "submit";
       submit.className = danger ? "btn-primary btn-danger" : "btn-primary";
-      submit.textContent = submitLabel;
+      if (submitLabel === undefined) {
+        submit.dataset.i18n = submitKey;
+        submit.textContent = typeof t === "function" ? t(submitKey) : submitKey === "common.confirm" ? "Confirmar" : "Salvar";
+      } else submit.textContent = submitLabel;
       actions.append(cancel, submit);
       form.appendChild(actions);
       card.appendChild(form);
@@ -349,7 +389,7 @@ const SancordUI = (() => {
           const hidden = f.visibleWhen && !f.visibleWhen(v);
           const empty = Array.isArray(v[f.name]) ? v[f.name].length === 0 : !String(v[f.name] || "").trim();
           if (!hidden && f.required && empty) {
-            error.textContent = `Preencha: ${f.label || f.name}.`;
+            error.textContent = typeof t === "function" ? t("common.required", { field: f.label || f.name }) : `Preencha: ${f.label || f.name}.`;
             error.classList.remove("hidden");
             inputs[f.name].focus?.();
             return;
@@ -366,8 +406,8 @@ const SancordUI = (() => {
     });
   }
 
-  function confirm({ title, message, confirmLabel = "Confirmar", danger = false }) {
-    return formDialog({ title, description: message, fields: [], submitLabel: confirmLabel, danger }).then((v) => v !== null);
+  function confirm({ title, message, confirmLabel, danger = false }) {
+    return formDialog({ title, description: message, fields: [], submitLabel: confirmLabel, submitKey: "common.confirm", danger }).then((v) => v !== null);
   }
 
   let tipEl = null;

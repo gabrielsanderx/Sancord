@@ -273,7 +273,8 @@ fn update_channel(
             None => None,
         };
         if let Some(k) = &kind {
-            if *k != ch_kind && !(k.is_text_like() && ch_kind.is_text_like()) {
+            let switchable = |x: &ChannelKind| matches!(x, ChannelKind::Text | ChannelKind::Announcement);
+            if *k != ch_kind && !(switchable(k) && switchable(&ch_kind)) {
                 return Err("Só é possível alternar entre canal de texto e de anúncios.");
             }
         }
@@ -296,7 +297,10 @@ fn update_channel(
         Ok(())
     })();
     match result {
-        Ok(()) => broadcast_server_update(st, server_id),
+        Ok(()) => {
+            crate::moderation::audit_by_uid(st, user_id, server_id, "channel_update", Some(channel_id), None);
+            broadcast_server_update(st, server_id)
+        }
         Err(msg) => st.feedback(user_id, false, "update_channel", msg),
     }
 }
@@ -530,7 +534,7 @@ async fn join_authenticated(user_id: &str, acc: Account, state: &SharedState) {
 /// Busca uma mensagem para alteração: primeiro no cache, depois no banco
 /// (mensagens antigas fora do cache). A leitura do banco acontece SEM o lock
 /// do estado, em `spawn_blocking`.
-async fn fetch_message_for_mutation(
+pub(crate) async fn fetch_message_for_mutation(
     state: &SharedState,
     channel_id: &str,
     message_id: &str,
@@ -557,7 +561,7 @@ async fn fetch_message_for_mutation(
 
 /// Aplica `f` à mensagem no cache (se estiver lá) ou à cópia vinda do banco,
 /// persiste e devolve a versão final. `f` retorna `false` para abortar.
-fn mutate_message(
+pub(crate) fn mutate_message(
     st: &mut ServerState,
     channel_id: &str,
     message_id: &str,
@@ -633,6 +637,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             let (b, a, r) = (before_id.clone(), after_id.clone(), around_id.clone());
             // (mensagens, há mais antigas, há mais novas)
             let result = tokio::task::spawn_blocking(move || -> Result<(Vec<ChatMessage>, bool, bool), crate::db::DbError> {
+                // Lê o que já foi aceito: espera a fila de escrita (fixar/editar recém-feitos).
+                db.flush();
                 if let Some(around) = r {
                     db.messages_around(&ch, &around, limit)
                 } else if let Some(after) = a {
@@ -751,7 +757,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 st.db.clone()
             };
             let ch = channel_id.clone();
-            let pins = tokio::task::spawn_blocking(move || db.pinned_messages(&ch, 50)).await;
+            let pins = tokio::task::spawn_blocking(move || {
+                db.flush();
+                db.pinned_messages(&ch, 50)
+            })
+            .await;
             let st = state.read().await;
             match pins {
                 Ok(Ok(messages)) => st.send_to(user_id, ServerMessage::PinnedMessages { channel_id, messages }),
@@ -937,6 +947,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             reply_to_id,
             nonce,
             attachment_ids,
+            poll,
         } => {
             let nonce: Option<String> = nonce.map(|n| n.chars().take(64).collect());
             // Mensagem respondida pode estar fora do cache: busca antes de travar o estado.
@@ -963,6 +974,19 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 }
             }
             let valid_img = image_url.is_some();
+
+            // Enquete (Fase 8): validada antes de qualquer outra coisa; a pergunta vira o texto.
+            let poll = match poll {
+                Some(input) => match crate::community::build_poll(input, crate::auth::now_ms()) {
+                    Ok(p) => Some(p),
+                    Err(msg) => {
+                        fail(&*state.read().await, msg);
+                        return;
+                    }
+                },
+                None => None,
+            };
+            let trimmed = if trimmed.is_empty() { poll.as_ref().map(|p| p.question.as_str()).unwrap_or("") } else { trimmed };
 
             if trimmed.is_empty() && !valid_img && attachment_ids.is_empty() {
                 return;
@@ -1033,6 +1057,10 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     fail(&st, "Seu cargo não possui permissão para enviar imagens/anexos.");
                     return;
                 }
+                if srv.find_channel(&channel_id).is_some_and(|c| !c.kind.accepts_messages()) {
+                    fail(&st, "Neste fórum, publique criando uma postagem.");
+                    return;
+                }
                 let is_announcement = srv
                     .find_channel(&channel_id)
                     .is_some_and(|c| c.kind == ChannelKind::Announcement);
@@ -1064,6 +1092,19 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 .map(|t| t.author_name.to_lowercase());
             let mentions = compute_mentions(&st, &channel_id, &content, &me_lower, reply_author_lower.as_deref());
 
+            // AutoMod (Fase 8): aplicado no servidor, antes de gravar ou distribuir.
+            if let Some(srv_id) = target_server_id.clone() {
+                let checked = match &poll {
+                    Some(p) => format!("{content} {}", crate::community::poll_text(p)),
+                    None => content.clone(),
+                };
+                if let Err((rule, reason)) = crate::moderation::check_message(&mut st, &srv_id, &me_lower, &checked, &mentions) {
+                    fail(&st, reason);
+                    crate::moderation::report_violation(&mut st, &srv_id, &me_lower, &channel_id, rule, &content);
+                    return;
+                }
+            }
+
             let chat_msg = ChatMessage {
                 id: Uuid::new_v4().to_string(),
                 channel_id: channel_id.clone(),
@@ -1082,6 +1123,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 nonce: nonce.clone(),
                 attachments,
                 mentions,
+                poll,
+                author_kind: crate::models::AuthorKind::User,
             };
 
             // Estado social antes de contar menções: solicitações não notificam.
@@ -1106,6 +1149,10 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             // Persiste (fila do banco) e mantém só as recentes no cache.
             // Antes, o histórico era truncado em 200 e as antigas eram perdidas.
             st.insert_message(chat_msg.clone());
+            if !is_dm {
+                // Thread: atividade, contador e desarquivar (no-op para canais comuns).
+                crate::threads::on_message(&mut st, &channel_id, chat_msg.created_at);
+            }
             // Menções pendentes para os destinatários; o autor já leu a própria mensagem.
             st.bump_mentions(&channel_id, &me_lower, &chat_msg.mentions);
             if let Some(acc) = st.account_id_for(&me_lower) {
@@ -1157,9 +1204,16 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             let new_content: String = trimmed.chars().take(2000).collect();
             // Menções recalculadas para o destaque (edição não gera nova notificação).
             let new_mentions = compute_mentions(&st, &channel_id, &new_content, &me_lower, None);
+            if let Some(sid) = srv_id.clone() {
+                if let Err((rule, reason)) = crate::moderation::check_message(&mut st, &sid, &me_lower, &new_content, &new_mentions) {
+                    st.feedback(user_id, false, "edit_chat", reason);
+                    crate::moderation::report_violation(&mut st, &sid, &me_lower, &channel_id, rule, &new_content);
+                    return;
+                }
+            }
             let updated_msg = mutate_message(&mut st, &channel_id, &message_id, fallback, |msg| {
                 // Só o autor edita a própria mensagem.
-                if msg.author_id == user_id || msg.author_name.eq_ignore_ascii_case(&user.username) {
+                if msg.authored_by(user_id, &user.username) {
                     msg.content = new_content;
                     msg.edited = true;
                     let reply_author = msg.reply_to.as_ref().map(|r| r.author_name.to_lowercase());
@@ -1217,16 +1271,25 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 .as_ref()
                 .map(|m| {
                     m.channel_id == channel_id
-                        && (can_moderate
-                            || m.author_id == user_id
-                            || m.author_name.eq_ignore_ascii_case(&user.username))
+                        && (can_moderate || m.authored_by(user_id, &user.username))
                 })
                 .unwrap_or(false);
             if !allowed {
                 st.feedback(user_id, false, "delete_chat", "Você não pode excluir esta mensagem.");
             }
             if allowed {
+                // Exclusão por moderação (mensagem de outra pessoa) entra na auditoria.
+                if let (Some(sid), Some(m)) = (&srv_id, &fallback) {
+                    let own = m.authored_by(user_id, &user.username);
+                    if !own {
+                        let preview: String = m.content.chars().take(80).collect();
+                        crate::moderation::audit(&st, sid, &me_lower, "message_delete", Some(&m.author_name.to_lowercase()), Some(format!("canal: {channel_id}; texto: {preview}")));
+                    }
+                }
                 st.remove_message(&channel_id, &message_id);
+                if !is_dm {
+                    crate::threads::on_message_deleted(&mut st, &channel_id);
+                }
                 let ev = ServerMessage::MessageDeleted {
                     channel_id: channel_id.clone(),
                     message_id,
@@ -1272,6 +1335,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 if is_dm {
                     st.send_to_dm_participants(&channel_id, ServerMessage::MessageUpdated { message });
                 } else if let Some(sid) = srv_id {
+                    let action = if message.pinned { "message_pin" } else { "message_unpin" };
+                    crate::moderation::audit(&st, &sid, &me_lower, action, Some(&message.author_name.to_lowercase()), Some(format!("canal: {channel_id}")));
                     st.broadcast_to_server(&sid, ServerMessage::MessageUpdated { message });
                 }
             }
@@ -1436,6 +1501,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     if new_channel.kind.is_text_like() {
                         st.chat_history.entry(new_channel.id.clone()).or_default();
                     }
+                    crate::moderation::audit(&st, &target_srv_id, &me_lower, "channel_create", Some(&new_channel.name), Some(format!("tipo: {}", new_channel.kind.as_str())));
                     st.broadcast_to_server(
                         &target_srv_id,
                         ServerMessage::ChannelCreated {
@@ -1484,9 +1550,12 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
 
             match removed {
                 Ok(kind) => {
+                    crate::integrations::remove_channel(&mut st, &channel_id);
                     if kind.is_text_like() {
                         st.delete_channel_history(&channel_id);
+                        crate::threads::remove_threads_of(&mut st, &target_srv_id, &channel_id);
                     }
+                    crate::moderation::audit_by_uid(&st, user_id, &target_srv_id, "channel_delete", Some(&channel_id), Some(format!("tipo: {}", kind.as_str())));
                     st.broadcast_to_server(
                         &target_srv_id,
                         ServerMessage::ChannelDeleted {
@@ -1536,7 +1605,10 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 Ok(())
             })();
             match result {
-                Ok(()) => broadcast_server_update(&mut st, &server_id),
+                Ok(()) => {
+                    crate::moderation::audit(&st, &server_id, &actor, "channel_permissions", Some(&channel_id), Some(if sync_category { "sincronizado com a categoria".into() } else { "exceções alteradas".into() }));
+                    broadcast_server_update(&mut st, &server_id)
+                }
                 Err(reason) => st.feedback(user_id, false, "channel_permissions", reason),
             }
         }
@@ -1551,12 +1623,16 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 Ok(())
             })();
             match result {
-                Ok(()) => broadcast_server_update(&mut st, &server_id),
+                Ok(()) => {
+                    crate::moderation::audit(&st, &server_id, &actor, "category_permissions", Some(&category_id), None);
+                    broadcast_server_update(&mut st, &server_id)
+                }
                 Err(reason) => st.feedback(user_id, false, "category_permissions", reason),
             }
         }
         ClientMessage::CreateCategory { server_id, name } => {
             let clean = clean_display_name(&name, 32);
+            let clean_name = clean.clone();
             let mut st = state.write().await;
             if clean.is_empty() {
                 st.feedback(user_id, false, "create_category", "Dê um nome para a categoria.");
@@ -1579,6 +1655,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 true
             });
             if ok {
+                crate::moderation::audit_by_uid(&st, user_id, &server_id, "category_create", Some(&clean_name), None);
                 broadcast_server_update(&mut st, &server_id);
             } else {
                 st.feedback(user_id, false, "create_category", "Este servidor atingiu o limite de categorias.");
@@ -1637,6 +1714,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 true
             });
             if found {
+                crate::moderation::audit_by_uid(&st, user_id, &server_id, "category_delete", Some(&category_id), None);
                 broadcast_server_update(&mut st, &server_id);
             } else {
                 st.feedback(user_id, false, "delete_category", "Categoria não encontrada ou ainda possui canais com permissões herdadas. Mova os canais antes de excluir.");
@@ -1711,6 +1789,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 }
             }
             let invite = st.create_invite(&server_id, &me_lower, max_age_secs, max_uses);
+            crate::moderation::audit(&st, &server_id, &me_lower, "invite_create", Some(&invite.code), Some(format!("validade: {:?} s; usos: {:?}", max_age_secs, max_uses)));
             let info = st.invite_info(&invite);
             st.send_to(user_id, ServerMessage::InviteCreated { invite: info });
         }
@@ -1752,6 +1831,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 return;
             }
             st.remove_invite(&code_up);
+            crate::moderation::audit(&st, &server_id, &me_lower, "invite_revoke", Some(&code_up), None);
             st.feedback(user_id, true, "revoke_invite", "Convite revogado.");
             if can_manage_server(&st, user_id, &server_id) {
                 let invites = st.server_invites(&server_id);
@@ -1764,6 +1844,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             muted_servers,
             collapsed_categories,
             privacy,
+            notify_levels,
         } => {
             let mut st = state.write().await;
             let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
@@ -1790,6 +1871,9 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             }
             if let Some(p) = privacy {
                 prefs.privacy = p.sanitized();
+            }
+            if let Some(levels) = notify_levels {
+                prefs.notify_levels = crate::models::UserPrefs::sanitize_notify_levels(levels);
             }
             st.set_prefs(&account_id, prefs);
             // Revalida (remove servidores que não são do usuário) e sincroniza todas as abas.
@@ -2174,10 +2258,63 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
 
         ClientMessage::ModerateVoice { server_id, target_username, action, channel_id } => {
             let mut st = state.write().await;
-            match crate::voice::moderate(&mut st, user_id, &server_id, &target_username, &action, channel_id) {
-                Ok(msg) => st.feedback(user_id, true, "moderate_voice", msg),
+            match crate::voice::moderate(&mut st, user_id, &server_id, &target_username, &action, channel_id.clone()) {
+                Ok(msg) => {
+                    let details = channel_id.map(|c| format!("destino: {c}"));
+                    crate::moderation::audit_by_uid(&st, user_id, &server_id, &format!("voice_{action}"), Some(&target_username.to_lowercase()), details);
+                    st.feedback(user_id, true, "moderate_voice", msg)
+                }
                 Err(msg) => st.feedback(user_id, false, "moderate_voice", msg),
             }
+        }
+
+        ClientMessage::VotePoll { channel_id, message_id, option_ids } => {
+            crate::community::vote(state, user_id, channel_id, message_id, option_ids).await;
+        }
+        ClientMessage::ClosePoll { channel_id, message_id } => {
+            crate::community::close(state, user_id, channel_id, message_id).await;
+        }
+        ClientMessage::ListThreads { server_id } => {
+            crate::threads::list(state, user_id, server_id).await;
+        }
+        ClientMessage::CreateThread { channel_id, name, message_id } => {
+            crate::threads::create(state, user_id, channel_id, name, message_id).await;
+        }
+        ClientMessage::UpdateThread { thread_id, name, archived, locked } => {
+            crate::threads::update(state, user_id, thread_id, name, archived, locked).await;
+        }
+        ClientMessage::DeleteThread { thread_id } => {
+            crate::threads::delete(state, user_id, thread_id).await;
+        }
+        ClientMessage::ListEvents { server_id } => {
+            crate::community::list(state, user_id, server_id).await;
+        }
+        ClientMessage::SaveEvent { server_id, event_id, title, description, channel_id, location, starts_at, ends_at } => {
+            crate::community::save(state, user_id, server_id, event_id, title, description, channel_id, location, starts_at, ends_at).await;
+        }
+        ClientMessage::DeleteEvent { server_id, event_id } => {
+            crate::community::delete(state, user_id, server_id, event_id).await;
+        }
+        ClientMessage::SetEventInterest { server_id, event_id, interested } => {
+            crate::community::set_interest(state, user_id, server_id, event_id, interested).await;
+        }
+
+        ClientMessage::GetAuditLog { server_id, before, action } => {
+            crate::moderation::get_audit_log(state, user_id, server_id, before, action).await;
+        }
+        ClientMessage::GetAutoMod { server_id } => {
+            crate::moderation::get_automod(state, user_id, server_id).await;
+        }
+        ClientMessage::UpdateAutoMod { server_id, config } => {
+            crate::moderation::update_automod(state, user_id, server_id, config).await;
+        }
+        ClientMessage::SearchMessages {
+            request_id, query, server_id, channel_id, private_only, author, has, before, after, pinned, mentions_me,
+        } => {
+            crate::moderation::search(
+                state, user_id, request_id, query, server_id, channel_id, private_only, author, has, before, after, pinned, mentions_me,
+            )
+            .await;
         }
 
         ClientMessage::DeclineCall { channel_id } => {
@@ -2341,6 +2478,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 created_at: now,
                 member_joined_at: HashMap::from([(me_lower.clone(), now)]),
                 voice_moderation: HashMap::new(),
+                automod: Default::default(),
+                threads: Vec::new(),
             };
 
             // Mensagem de boas-vindas no primeiro canal de texto comum (não no de anúncios).
@@ -2371,6 +2510,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 nonce: None,
                 attachments: Vec::new(),
                 mentions: MessageMentions::default(),
+                poll: None,
+                author_kind: crate::models::AuthorKind::System,
             };
 
             for ch in &text_channels {
@@ -2550,6 +2691,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 }
                 srv.clone()
             };
+            crate::moderation::audit(&st, &server_id, &me_lower, "server_update", None, regenerate_invite.then(|| "novo convite padrão".to_string()));
 
             if regenerate_invite {
                 // Troca o convite padrão: o antigo deixa de funcionar.
@@ -2611,6 +2753,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
 
             let removed_srv = st.servers.remove(pos);
             for ch in &removed_srv.text_channels {
+                crate::integrations::remove_channel(&mut st, &ch.id);
                 st.delete_channel_history(&ch.id);
             }
             // No banco os convites saem por cascata; aqui limpamos o cache.
@@ -2685,6 +2828,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 nonce: None,
                 attachments: Vec::new(),
                 mentions: MessageMentions::default(),
+                poll: None,
+                author_kind: crate::models::AuthorKind::User,
             };
 
             st.insert_message(invite_msg.clone());
@@ -2758,6 +2903,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 srv.clone()
             };
             st.save_servers();
+            let created_name = updated_srv.roles.last().map(|r| r.name.clone());
+            crate::moderation::audit(&st, &server_id, &me_lower, "role_create", created_name.as_deref(), None);
             st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
         }
 
@@ -2812,6 +2959,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 srv.clone()
             };
             st.save_servers();
+            let role_name = updated_srv.roles.iter().find(|r| r.id == role_id).map(|r| r.name.clone());
+            crate::moderation::audit(&st, &server_id, &me_lower, "role_update", role_name.as_deref().or(Some(&role_id)), None);
             st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
         }
 
@@ -2847,6 +2996,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 srv.clone()
             };
             st.save_servers();
+            crate::moderation::audit(&st, &server_id, &me_lower, "role_delete", Some(&role_id), None);
             st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
         }
 
@@ -2881,7 +3031,10 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 Ok(())
             })();
             match result {
-                Ok(()) => broadcast_server_update(&mut st, &server_id),
+                Ok(()) => {
+                    crate::moderation::audit(&st, &server_id, &actor, "role_reorder", None, None);
+                    broadcast_server_update(&mut st, &server_id)
+                }
                 Err(reason) => st.feedback(user_id, false, "reorder_roles", reason),
             }
         }
@@ -2909,14 +3062,20 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     .into_iter()
                     .filter(|rid| rid != "everyone" && srv.roles.iter().any(|r| &r.id == rid))
                     .collect();
+                let names: Vec<String> = valid_ids
+                    .iter()
+                    .filter_map(|id| srv.roles.iter().find(|r| &r.id == id).map(|r| r.name.clone()))
+                    .collect();
                 if valid_ids.is_empty() {
                     srv.member_roles.remove(&target_lower);
                 } else {
-                    srv.member_roles.insert(target_lower, valid_ids);
+                    srv.member_roles.insert(target_lower.clone(), valid_ids);
                 }
-                srv.clone()
+                (srv.clone(), names)
             };
+            let (updated_srv, role_names) = updated_srv;
             st.save_servers();
+            crate::moderation::audit(&st, &server_id, &me_lower, "member_roles", Some(&target_lower), Some(format!("cargos: {}", if role_names.is_empty() { "nenhum".into() } else { role_names.join(", ") })));
             st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
         }
 
@@ -2956,6 +3115,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             };
 
             st.save_servers();
+            crate::moderation::audit(&st, &server_id, &me_lower, "member_kick", Some(&target_lower), None);
             let target_uids: Vec<String> = st
                 .users
                 .iter()
@@ -3013,6 +3173,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             };
 
             st.save_servers();
+            crate::moderation::audit(&st, &server_id, &me_lower, "member_ban", Some(&target_lower), None);
             let target_uids: Vec<String> = st
                 .users
                 .iter()
@@ -3054,6 +3215,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 srv.clone()
             };
             st.save_servers();
+            crate::moderation::audit(&st, &server_id, &me_lower, "member_unban", Some(&target_lower), None);
             st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
         }
 

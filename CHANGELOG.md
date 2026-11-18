@@ -1,5 +1,33 @@
 # Histórico de versões
 
+## 0.2.0
+
+- Auditoria persistida, AutoMod configurável e busca no histórico com filtros e
+  verificação de acesso aos canais.
+- Enquetes, eventos, threads e fóruns com persistência e permissões herdadas.
+- Notificações por servidor/canal, navegação rápida, atalhos, responsividade,
+  melhorias dos temas e estrutura de idioma pt-BR com inglês preview.
+
+- Integrações HTTP por canal: bots de envio e webhooks com token revogável, rotação,
+  persistência, auditoria, AutoMod e mensagens em tempo real (schema v10).
+- Proteção de autoria de integrações, contraste nos ajustes/convites e captura de
+  microfone iniciada somente por chamada/teste explícito.
+- Preparação de homologação desktop e ensaio seguro de migração em cópia do banco.
+
+- Continuação do polimento: traduções dinâmicas da navegação rápida, atalhos e
+  diálogos; preservação de nomes e conteúdo do usuário.
+- Correções dos limites efetivos do cache de imagens e validação de idioma salvo.
+
+- Câmera: seleção de webcam e qualidade nas configurações de Voz e vídeo.
+- Cancelamento de câmera/tela ao sair ou trocar de canal; limpeza de recursos e
+  tratamento de perda da ponte de captura.
+- Correções na identificação de streams remotos e novas verificações de vídeo.
+- Fase 7 em validação: teste local de tela relatado pelo usuário; webcam física
+  e cenários entre redes diferentes ainda pendentes.
+- Candidata em homologação: testes locais e migração da cópia aprovados; CI final
+  Windows/MSVC, pacote assinado final e ciclo público de atualização ainda exigem
+  validação. Nenhuma publicação estável é autorizada por este changelog.
+
 ## 0.1.0
 
 - Cliente Windows com interface embutida no executável.

@@ -163,7 +163,7 @@ impl ServerState {
         }
         self.servers
             .iter()
-            .find(|s| s.find_channel(channel_id).is_some())
+            .find(|s| s.has_channel_or_thread(channel_id))
             .is_some_and(|s| s.channel_permissions(user, channel_id).view_channel)
     }
 

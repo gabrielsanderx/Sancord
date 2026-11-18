@@ -62,10 +62,18 @@ pub enum ChannelKind {
     Voice,
     /// Canal de anúncios: todos leem, só moderadores publicam.
     Announcement,
+    /// Fórum (Fase 8): cada postagem é uma thread; não recebe mensagens diretas.
+    Forum,
 }
 
 impl ChannelKind {
+    /// Fica na lista de canais "de texto" (permissões, layout e leitura).
     pub fn is_text_like(&self) -> bool {
+        matches!(self, ChannelKind::Text | ChannelKind::Announcement | ChannelKind::Forum)
+    }
+
+    /// Aceita mensagens diretamente (fórum só por postagens/threads).
+    pub fn accepts_messages(&self) -> bool {
         matches!(self, ChannelKind::Text | ChannelKind::Announcement)
     }
 
@@ -74,6 +82,7 @@ impl ChannelKind {
             ChannelKind::Text => "text",
             ChannelKind::Voice => "voice",
             ChannelKind::Announcement => "announcement",
+            ChannelKind::Forum => "forum",
         }
     }
 
@@ -82,9 +91,35 @@ impl ChannelKind {
             "text" => Some(ChannelKind::Text),
             "voice" => Some(ChannelKind::Voice),
             "announcement" => Some(ChannelKind::Announcement),
+            "forum" => Some(ChannelKind::Forum),
             _ => None,
         }
     }
+}
+
+/// Thread (Fase 8): conversa filha de um canal de texto ou postagem de fórum.
+/// As mensagens usam `id` como canal; as permissões são as do canal-pai.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Thread {
+    pub id: String,
+    pub server_id: String,
+    pub parent_id: String,
+    pub name: String,
+    pub owner: String,
+    /// Mensagem do canal-pai que originou a thread (não existe em postagens de fórum).
+    #[serde(default)]
+    pub starter_message_id: Option<String>,
+    pub created_at: i64,
+    #[serde(default)]
+    pub last_message_at: i64,
+    #[serde(default)]
+    pub message_count: u32,
+    /// Arquivada: some da lista ativa; uma nova mensagem desarquiva (se não estiver trancada).
+    #[serde(default)]
+    pub archived: bool,
+    /// Trancada: só a moderação escreve.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 /// Categoria de canais dentro de um servidor.
@@ -162,6 +197,23 @@ pub struct UserPrefs {
     /// Quem pode mandar mensagem direta e pedido de amizade (aplicado no servidor).
     #[serde(default)]
     pub privacy: PrivacySettings,
+    /// Fase 9: nível de notificação por servidor ou canal/thread/conversa:
+    /// "all" (tudo), "mentions" (só menções) ou "none" (nada). O canal vence o servidor.
+    #[serde(default)]
+    pub notify_levels: HashMap<String, String>,
+}
+
+impl UserPrefs {
+    pub const MAX_NOTIFY_LEVELS: usize = 500;
+
+    /// Mantém só níveis válidos e chaves curtas, no máximo 500 itens.
+    pub fn sanitize_notify_levels(levels: HashMap<String, String>) -> HashMap<String, String> {
+        levels
+            .into_iter()
+            .filter(|(k, v)| !k.is_empty() && k.len() <= 120 && matches!(v.as_str(), "all" | "mentions" | "none"))
+            .take(Self::MAX_NOTIFY_LEVELS)
+            .collect()
+    }
 }
 
 /// Configurações de privacidade. Valores desconhecidos caem no padrão.
@@ -313,6 +365,9 @@ pub struct RolePermissions {
     pub deafen_members: bool,
     #[serde(default)]
     pub move_members: bool,
+    /// Fase 8: ver o registro de auditoria e configurar o AutoMod.
+    #[serde(default)]
+    pub view_audit_log: bool,
 }
 
 impl Default for RolePermissions {
@@ -336,6 +391,7 @@ impl Default for RolePermissions {
             mute_members: false,
             deafen_members: false,
             move_members: false,
+            view_audit_log: false,
         }
     }
 }
@@ -361,6 +417,7 @@ impl RolePermissions {
             mute_members: true,
             deafen_members: true,
             move_members: true,
+            view_audit_log: true,
         }
     }
 
@@ -389,6 +446,7 @@ impl RolePermissions {
         self.mute_members |= other.mute_members;
         self.deafen_members |= other.deafen_members;
         self.move_members |= other.move_members;
+        self.view_audit_log |= other.view_audit_log;
     }
 }
 
@@ -452,6 +510,67 @@ pub struct GuildServer {
     /// Não vai para os clientes: o estado aparece em `UserInfo.server_muted/deafened`.
     #[serde(default, skip_serializing)]
     pub voice_moderation: HashMap<String, VoiceModeration>,
+    /// Regras do AutoMod (persistidas em `automod_config`; só moderadores as recebem).
+    #[serde(default, skip_serializing)]
+    pub automod: AutoModConfig,
+    /// Threads e postagens de fórum (persistidas em `threads`; enviadas à parte,
+    /// filtradas pelo acesso ao canal-pai).
+    #[serde(default, skip_serializing)]
+    pub threads: Vec<Thread>,
+}
+
+/// Fase 8 — regras automáticas aplicadas no servidor a mensagens de canais do servidor.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct AutoModConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Palavras/expressões proibidas (comparadas sem acento e sem maiúsculas;
+    /// `palavra*` também pega prefixos).
+    #[serde(default)]
+    pub blocked_words: Vec<String>,
+    /// Bloqueia links, exceto os domínios liberados.
+    #[serde(default)]
+    pub block_links: bool,
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+    /// Bloqueia convites (SANC-..., sancord://).
+    #[serde(default)]
+    pub block_invites: bool,
+    /// Máximo de menções de pessoas/cargos numa mensagem (0 = sem limite).
+    #[serde(default)]
+    pub max_mentions: u32,
+    /// Bloqueia a mesma mensagem repetida 3 vezes em 30 s.
+    #[serde(default)]
+    pub block_repeats: bool,
+    /// Cargos isentos (além de dono, administradores e quem gerencia mensagens).
+    #[serde(default)]
+    pub exempt_roles: Vec<String>,
+    /// Canal onde os bloqueios são avisados para a moderação (opcional).
+    #[serde(default)]
+    pub alert_channel_id: Option<String>,
+}
+
+/// Entrada do registro de auditoria de um servidor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuditEntry {
+    pub id: String,
+    pub server_id: String,
+    pub actor: String,
+    pub action: String,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub details: Option<String>,
+    pub created_at: i64,
+}
+
+/// Resultado de busca: a mensagem e onde ela está.
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchHit {
+    pub message: ChatMessage,
+    pub channel_name: String,
+    pub server_id: Option<String>,
+    pub server_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -520,6 +639,15 @@ impl GuildServer {
         self.categories.sort_by_key(|c| c.position);
         self.text_channels.sort_by_key(|c| c.position);
         self.voice_channels.sort_by_key(|c| c.position);
+    }
+
+    pub fn thread(&self, thread_id: &str) -> Option<&Thread> {
+        self.threads.iter().find(|t| t.id == thread_id)
+    }
+
+    /// Canal comum ou thread deste servidor.
+    pub fn has_channel_or_thread(&self, id: &str) -> bool {
+        self.find_channel(id).is_some() || self.thread(id).is_some()
     }
 
     pub fn find_channel(&self, channel_id: &str) -> Option<&Channel> {
@@ -808,6 +936,108 @@ pub struct ChatMessage {
     /// Menções resolvidas pelo servidor no envio (base para destaque e notificações).
     #[serde(default, skip_serializing_if = "MessageMentions::is_empty")]
     pub mentions: MessageMentions,
+    /// Enquete anexada à mensagem (Fase 8); votos ficam junto da mensagem.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll: Option<Poll>,
+    /// Fase 9 (seção 66): quem escreveu — pessoa, sistema, bot ou webhook.
+    /// Mensagens antigas não têm o campo: `author_id == "system"` também conta como sistema.
+    #[serde(default, skip_serializing_if = "AuthorKind::is_user")]
+    pub author_kind: AuthorKind,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthorKind {
+    #[default]
+    User,
+    System,
+    Bot,
+    Webhook,
+}
+
+impl AuthorKind {
+    pub fn is_user(&self) -> bool {
+        *self == AuthorKind::User
+    }
+}
+
+impl ChatMessage {
+    pub fn authored_by(&self, connection_id: &str, username: &str) -> bool {
+        self.author_kind() == AuthorKind::User &&
+            (self.author_id == connection_id || self.author_name.eq_ignore_ascii_case(username))
+    }
+    /// Tipo efetivo do autor, considerando mensagens antigas de sistema.
+    pub fn author_kind(&self) -> AuthorKind {
+        if self.author_id == "system" && self.author_kind == AuthorKind::User {
+            AuthorKind::System
+        } else {
+            self.author_kind
+        }
+    }
+}
+
+/// Pedido de criação de enquete enviado junto do `SendChat`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PollInput {
+    pub question: String,
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub multiple: bool,
+    /// 0 = sem prazo; máximo 7 dias (168 h).
+    #[serde(default)]
+    pub duration_hours: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PollOption {
+    pub id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Poll {
+    pub question: String,
+    pub options: Vec<PollOption>,
+    /// opção -> usernames (minúsculos) que votaram nela
+    #[serde(default)]
+    pub votes: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub multiple: bool,
+    #[serde(default)]
+    pub expires_at: Option<i64>,
+    #[serde(default)]
+    pub closed: bool,
+}
+
+impl Poll {
+    pub const MAX_OPTIONS: usize = 10;
+
+    pub fn is_open(&self, now: i64) -> bool {
+        !self.closed && self.expires_at.map_or(true, |t| now < t)
+    }
+}
+
+/// Evento agendado de um servidor (Fase 8).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ServerEvent {
+    pub id: String,
+    pub server_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Canal (de voz ou texto) onde acontece, ou um local livre.
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    pub starts_at: i64,
+    #[serde(default)]
+    pub ends_at: Option<i64>,
+    pub creator: String,
+    /// Interessados (username minúsculo)
+    #[serde(default)]
+    pub interested: Vec<String>,
+    pub created_at: i64,
 }
 
 /// Anexo já armazenado no servidor (`url` aponta para o download).
@@ -1081,7 +1311,57 @@ pub enum ClientMessage {
         /// IDs devolvidos por `POST /api/attachments`
         #[serde(default)]
         attachment_ids: Vec<String>,
+        /// Enquete (Fase 8)
+        #[serde(default)]
+        poll: Option<PollInput>,
     },
+
+    /// Votar numa enquete (substitui os votos anteriores; lista vazia retira o voto)
+    VotePoll { channel_id: String, message_id: String, option_ids: Vec<String> },
+    /// Encerrar enquete (autor ou quem gerencia mensagens)
+    ClosePoll { channel_id: String, message_id: String },
+
+    /// Threads e fóruns (Fase 8)
+    ListThreads { server_id: String },
+    CreateThread {
+        /// Canal de texto (thread) ou fórum (postagem)
+        channel_id: String,
+        name: String,
+        /// Mensagem do canal que origina a thread
+        #[serde(default)]
+        message_id: Option<String>,
+    },
+    UpdateThread {
+        thread_id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        archived: Option<bool>,
+        #[serde(default)]
+        locked: Option<bool>,
+    },
+    DeleteThread { thread_id: String },
+
+    /// Eventos do servidor (Fase 8)
+    ListEvents { server_id: String },
+    SaveEvent {
+        server_id: String,
+        /// Ausente = criar
+        #[serde(default)]
+        event_id: Option<String>,
+        title: String,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        channel_id: Option<String>,
+        #[serde(default)]
+        location: Option<String>,
+        starts_at: i64,
+        #[serde(default)]
+        ends_at: Option<i64>,
+    },
+    DeleteEvent { server_id: String, event_id: String },
+    SetEventInterest { server_id: String, event_id: String, interested: bool },
 
     /// Carregar histórico: antes de uma mensagem (rolar para cima), depois de
     /// uma mensagem (rolar para baixo numa janela antiga) ou ao redor de uma
@@ -1234,6 +1514,8 @@ pub enum ClientMessage {
         collapsed_categories: Option<Vec<String>>,
         #[serde(default)]
         privacy: Option<PrivacySettings>,
+        #[serde(default)]
+        notify_levels: Option<HashMap<String, String>>,
     },
 
     /// Deletar um canal personalizado
@@ -1402,6 +1684,46 @@ pub enum ClientMessage {
 
     /// Recusar uma chamada privada recebida (avisa quem está na chamada)
     DeclineCall { channel_id: String },
+
+    /// Fase 8: registro de auditoria (mais recentes primeiro; `before` = cursor em ms)
+    GetAuditLog {
+        server_id: String,
+        #[serde(default)]
+        before: Option<i64>,
+        #[serde(default)]
+        action: Option<String>,
+    },
+    GetAutoMod { server_id: String },
+    UpdateAutoMod { server_id: String, config: AutoModConfig },
+
+    /// Busca no histórico completo, só nos canais que o usuário pode ler.
+    SearchMessages {
+        #[serde(default)]
+        request_id: Option<String>,
+        #[serde(default)]
+        query: String,
+        /// Escopo: um servidor, um canal, ou `private_only` (DMs e grupos).
+        #[serde(default)]
+        server_id: Option<String>,
+        #[serde(default)]
+        channel_id: Option<String>,
+        #[serde(default)]
+        private_only: bool,
+        /// Filtros
+        #[serde(default)]
+        author: Option<String>,
+        /// "link" | "file" | "image"
+        #[serde(default)]
+        has: Option<String>,
+        #[serde(default)]
+        before: Option<i64>,
+        #[serde(default)]
+        after: Option<i64>,
+        #[serde(default)]
+        pinned: bool,
+        #[serde(default)]
+        mentions_me: bool,
+    },
 
     /// Atualizar estado de mídia (mute, deafen, compartilhamento de tela, câmera e qualidade)
     UpdateVoiceState {
@@ -1614,6 +1936,24 @@ pub enum ServerMessage {
 
     /// A chamada privada terminou (para de tocar em quem não atendeu)
     CallEnded { channel_id: String },
+
+    /// Fase 8
+    AuditLog { server_id: String, entries: Vec<AuditEntry>, has_more: bool },
+    /// Threads visíveis de um servidor (resposta a ListThreads)
+    ThreadList { server_id: String, threads: Vec<Thread> },
+    /// Thread criada ou alterada (só para quem vê o canal-pai)
+    ThreadUpdated { thread: Thread },
+    /// Para quem criou: abre a thread recém-criada
+    ThreadCreated { thread: Thread },
+    ThreadDeleted { server_id: String, thread_id: String, parent_id: String },
+    /// Lista completa dos eventos de um servidor (enviada a todos os membros a cada mudança)
+    ServerEvents { server_id: String, events: Vec<ServerEvent> },
+    AutoModSettings { server_id: String, config: AutoModConfig },
+    SearchResults {
+        request_id: Option<String>,
+        hits: Vec<SearchHit>,
+        has_more: bool,
+    },
 
     /// Repasse de Offer WebRTC
     WebRtcOffer {

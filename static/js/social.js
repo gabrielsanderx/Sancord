@@ -104,7 +104,7 @@ function groupIconEl(g, size = 32) {
   el.style.cssText = `width:${size}px;height:${size}px;font-size:${Math.round(size / 2.4)}px;`;
   if (g?.icon_url) {
     const img = document.createElement("img");
-    img.src = g.icon_url;
+    img.src = cachedMediaUrl(g.icon_url);
     img.alt = "";
     img.style.cssText = "width:100%;height:100%;object-fit:cover;border-radius:50%;";
     el.appendChild(img);
@@ -698,7 +698,7 @@ function onUserProfile(p) {
       icon.style.cssText = `background:${s.icon_color || "#5865f2"};border-radius:12px;`;
       if (s.icon_url) {
         const img = document.createElement("img");
-        img.src = s.icon_url;
+        img.src = cachedMediaUrl(s.icon_url);
         img.alt = "";
         img.style.cssText = "width:100%;height:100%;object-fit:cover;";
         icon.appendChild(img);

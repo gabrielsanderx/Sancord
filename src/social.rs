@@ -52,6 +52,8 @@ fn group_system_message(st: &mut ServerState, group_id: &str, content: String) {
         nonce: None,
         attachments: Vec::new(),
         mentions: MessageMentions::default(),
+        poll: None,
+        author_kind: crate::models::AuthorKind::System,
     };
     st.insert_message(msg.clone());
     st.send_to_dm_participants(group_id, ServerMessage::NewChatMessage { message: msg });

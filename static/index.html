@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sancord</title>
   <link rel="icon" type="image/svg+xml" href="/sancord-icon.svg" />
-  <link rel="stylesheet" href="/styles.css?v=17" />
+  <link rel="stylesheet" href="/styles.css?v=18" />
 </head>
 <body>
   <!-- Modal de Autenticação (Criar Conta / Entrar) -->
@@ -14,18 +14,18 @@
       <div class="brand-badge">
         <img src="/logo.png" alt="Sancord" class="brand-logo-img" />
       </div>
-      <h1>Bem-vindo de volta!</h1>
-      <p>Estamos felizes em ver você novamente no Sancord.</p>
+      <h1 data-i18n="auth.title">Bem-vindo de volta!</h1>
+      <p data-i18n="auth.subtitle">Estamos felizes em ver você novamente no Sancord.</p>
 
       <div class="auth-tabs">
-        <button type="button" id="tab-register" class="auth-tab active">Criar Conta</button>
-        <button type="button" id="tab-login" class="auth-tab">Já tenho conta</button>
+        <button type="button" id="tab-register" class="auth-tab active" data-i18n="auth.tab.register">Criar Conta</button>
+        <button type="button" id="tab-login" class="auth-tab" data-i18n="auth.tab.login">Já tenho conta</button>
       </div>
 
       <div id="auth-error" class="auth-error hidden"></div>
 
       <form id="login-form">
-        <label for="username-input">NOME DE USUÁRIO</label>
+        <label for="username-input" data-i18n="auth.username">NOME DE USUÁRIO</label>
         <input
           id="username-input"
           type="text"
@@ -35,11 +35,11 @@
           autofocus
         />
 
-        <label for="password-input">SENHA</label>
+        <label for="password-input" data-i18n="auth.password">SENHA</label>
         <input
           id="password-input"
           type="password"
-          placeholder="Mínimo de 8 caracteres para contas novas"
+          placeholder="Mínimo de 8 caracteres para contas novas" data-i18n-placeholder="auth.password.placeholder"
           maxlength="128"
           autocomplete="current-password"
           required
@@ -47,7 +47,7 @@
 
         <label class="auth-remember" for="remember-me-input">
           <input id="remember-me-input" type="checkbox" checked />
-          <span>Manter conectado neste dispositivo</span>
+          <span data-i18n="auth.remember">Manter conectado neste dispositivo</span>
         </label>
 
         <button type="submit" id="auth-submit-btn" class="btn-primary">
@@ -128,6 +128,11 @@
         </header>
 
         <div class="channels-scroll">
+          <!-- Eventos do servidor (Fase 8) -->
+          <button type="button" id="open-events-btn" class="home-friends-btn server-events-btn">
+            <span class="home-friends-left"><span aria-hidden="true">📅</span><span data-i18n="server.events">Eventos</span></span>
+            <span id="server-events-badge" class="home-pill-tag hidden">0</span>
+          </button>
           <!-- Árvore de categorias e canais (renderizada por static/js/servers.js) -->
           <div id="channel-tree" class="channel-tree" role="tree" aria-label="Canais do servidor"></div>
         </div>
@@ -136,7 +141,7 @@
       <!-- Modo Home: Amigos e Mensagens Diretas -->
       <div id="sidebar-home-view" class="sidebar-mode-view hidden">
         <header class="server-header home-dm-header">
-          <input type="text" id="dm-filter-input" class="dm-quick-search" placeholder="Encontre ou comece uma conversa" autocomplete="off" />
+          <input type="text" id="dm-filter-input" class="dm-quick-search" placeholder="Encontre ou comece uma conversa" data-i18n-placeholder="home.findConversation" autocomplete="off" />
         </header>
 
         <div class="channels-scroll">
@@ -144,7 +149,7 @@
             <button type="button" id="open-friends-tab-btn" class="home-friends-btn active">
               <span class="home-friends-left">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
-                <span>Amigos</span>
+                <span data-i18n="home.friends">Amigos</span>
               </span>
               <span id="friends-pending-badge" class="dm-count-badge hidden">0</span>
             </button>
@@ -152,7 +157,7 @@
             <button type="button" id="open-starred-tab-btn" class="home-friends-btn">
               <span class="home-friends-left">
                 <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
-                <span>Favoritas</span>
+                <span data-i18n="home.starred">Favoritas</span>
               </span>
               <span id="home-starred-badge" class="home-pill-tag hidden">0</span>
             </button>
@@ -160,14 +165,14 @@
             <button type="button" id="open-discover-servers-btn" class="home-friends-btn">
               <span class="home-friends-left">
                 <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm3.19 13.19L6 18l2.81-9.19L18 6l-2.81 9.19zM12 10.9c-.61 0-1.1.49-1.1 1.1s.49 1.1 1.1 1.1 1.1-.49 1.1-1.1-.49-1.1-1.1-1.1z"/></svg>
-                <span>Servidores</span>
+                <span data-i18n="home.servers">Servidores</span>
               </span>
               <span class="home-new-pill">NOVO</span>
             </button>
           </div>
 
           <div class="section-title-row dm-section-head">
-            <span class="section-title">Mensagens diretas</span>
+            <span class="section-title" data-i18n="home.dms">Mensagens diretas</span>
             <button type="button" id="dm-new-add-btn" class="add-channel-btn" title="Adicionar Amigo">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
             </button>
@@ -283,16 +288,16 @@
           </div>
           <span class="header-divider"></span>
           <div id="friends-tabs-bar" class="friends-tabs-bar">
-            <button type="button" class="friends-tab-btn active" data-friends-tab="online">Disponível</button>
-            <button type="button" class="friends-tab-btn" data-friends-tab="all">Todos</button>
+            <button type="button" class="friends-tab-btn active" data-friends-tab="online" data-i18n="friends.online">Disponível</button>
+            <button type="button" class="friends-tab-btn" data-friends-tab="all" data-i18n="friends.all">Todos</button>
             <button type="button" class="friends-tab-btn" data-friends-tab="pending">
-              Pendente <span id="friends-pending-pill" class="dm-count-badge hidden">0</span>
+              <span data-i18n="friends.pending">Pendente</span> <span id="friends-pending-pill" class="dm-count-badge hidden">0</span>
             </button>
             <button type="button" class="friends-tab-btn" data-friends-tab="requests">
-              Solicitações <span id="friends-requests-pill" class="dm-count-badge hidden">0</span>
+              <span data-i18n="friends.requests">Solicitações</span> <span id="friends-requests-pill" class="dm-count-badge hidden">0</span>
             </button>
-            <button type="button" class="friends-tab-btn" data-friends-tab="blocked">Bloqueados</button>
-            <button type="button" class="friends-tab-btn add-tab" data-friends-tab="add">Adicionar amigo</button>
+            <button type="button" class="friends-tab-btn" data-friends-tab="blocked" data-i18n="friends.blocked">Bloqueados</button>
+            <button type="button" class="friends-tab-btn add-tab" data-friends-tab="add" data-i18n="friends.add">Adicionar amigo</button>
           </div>
         </header>
 
@@ -326,7 +331,7 @@
             <!-- Sub-painel Lista de Amigos (Disponível / Todos / Pendente) -->
             <div id="friends-list-pane" class="friends-list-pane">
               <div class="friends-search-box">
-                <input type="text" id="friends-search-input" placeholder="Buscar amigo..." autocomplete="off" />
+                <input type="text" id="friends-search-input" placeholder="Buscar amigo..." data-i18n-placeholder="friends.search" autocomplete="off" />
               </div>
               <div class="friends-list-header" id="friends-list-count">DISPONÍVEL — 0</div>
               <ul id="friends-items-list" class="friends-items-list"></ul>
@@ -341,7 +346,7 @@
 
           <!-- Painel Direito: Ativo agora (estilo Discord) -->
           <aside class="active-now-aside">
-            <h3 class="active-now-heading">Ativo agora</h3>
+            <h3 class="active-now-heading" data-i18n="home.activeNow">Ativo agora</h3>
             <div id="active-now-list" class="active-now-list"></div>
           </aside>
         </div>
@@ -365,6 +370,10 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
             <span id="dm-call-btn-label">Ligar</span>
           </button>
+          <button id="dm-video-call-btn" class="header-tool-btn dm-call-btn hidden" title="Iniciar Chamada de Vídeo (liga a câmera ao entrar)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+            <span>Vídeo</span>
+          </button>
 
           <button id="toggle-stage-btn" class="header-tool-btn hidden" title="Mostrar ou Ocultar Palco da Call">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H8v2h8v-2h-2v-2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>
@@ -387,7 +396,17 @@
           </button>
 
           <div class="chat-search-wrap">
-            <input type="text" id="chat-search-input" placeholder="Buscar" autocomplete="off" />
+            <input type="text" id="chat-search-input" placeholder="Buscar" data-i18n-placeholder="chat.search" autocomplete="off" title="Enter busca em todo o histórico. Filtros: de:nome tem:link|arquivo|imagem fixadas antes:2026-11-01 depois:2026-10-01 menciona:eu" />
+            <div id="search-results-panel" class="pinned-popover search-results-panel hidden" role="dialog" aria-label="Resultados da busca">
+              <div class="pinned-popover-header">
+                <span id="search-results-title">🔎 Resultados</span>
+                <select id="search-scope" class="search-scope-select" title="Onde buscar">
+                  <option value="here">Neste servidor/conversa</option>
+                  <option value="all">Em tudo</option>
+                </select>
+              </div>
+              <div id="search-results-list" class="pinned-popover-list"></div>
+            </div>
           </div>
         </div>
       </header>
@@ -403,6 +422,14 @@
 
       <!-- Área de Mensagens do Chat -->
       <section id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-label="Mensagens"></section>
+      <!-- Fórum (Fase 8): lista de postagens no lugar das mensagens -->
+      <section id="forum-view" class="forum-view hidden" aria-label="Postagens do fórum">
+        <div class="forum-toolbar">
+          <input type="text" id="forum-filter" placeholder="Buscar postagens…" data-i18n-placeholder="forum.search" autocomplete="off" />
+          <button type="button" id="forum-new-post-btn" class="btn-primary small-btn" data-i18n="forum.newPost">+ Nova postagem</button>
+        </div>
+        <div id="forum-posts" class="forum-posts" aria-live="polite"></div>
+      </section>
 
       <!-- Barra "você está vendo mensagens antigas" -->
       <div id="jump-present-bar" class="jump-present-bar hidden">
@@ -447,6 +474,7 @@
             aria-autocomplete="list"
             aria-controls="composer-autocomplete"
           ></textarea>
+          <button type="button" id="poll-create-btn" class="attach-btn" title="Criar enquete">📊</button>
           <div class="emoji-picker-anchor">
             <button type="button" id="emoji-picker-btn" class="attach-btn emoji-btn" title="Inserir Emoji">
               <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
@@ -517,7 +545,7 @@
 
         <button type="button" class="settings-nav-item active" data-settings-tab="account" data-nav-label="Conta Minha Conta Informações Senha Segurança Status Família">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-          <span>Conta</span>
+          <span data-i18n="settings.account">Conta</span>
         </button>
         <div class="settings-subnav" id="settings-account-subnav">
           <button type="button" class="settings-subnav-item active" data-account-sub="info">Informações da conta</button>
@@ -528,11 +556,11 @@
 
         <button type="button" class="settings-nav-item" data-settings-tab="privacy" data-nav-label="Dados e privacidade">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
-          <span>Dados e privacidade</span>
+          <span data-i18n="settings.privacy">Dados e privacidade</span>
         </button>
         <button type="button" class="settings-nav-item" data-settings-tab="notifications" data-nav-label="Notificações">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4a2 2 0 0 0 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
-          <span>Notificações</span>
+          <span data-i18n="settings.notifications">Notificações</span>
         </button>
 
         <div class="settings-nav-sep"></div>
@@ -540,24 +568,24 @@
 
         <button type="button" class="settings-nav-item" data-settings-tab="voice" data-nav-label="Voz e vídeo Microfone Áudio">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
-          <span>Voz e vídeo</span>
+          <span data-i18n="settings.voice">Voz e vídeo</span>
         </button>
         <button type="button" class="settings-nav-item" data-settings-tab="appearance" data-nav-label="Aparência Tema Cores Mensagens">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
-          <span>Aparência</span>
+          <span data-i18n="settings.appearance">Aparência</span>
         </button>
         <button type="button" class="settings-nav-item" data-settings-tab="shortcuts" data-nav-label="Atalhos Teclado">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/></svg>
-          <span>Atalhos</span>
+          <span data-i18n="settings.shortcuts">Atalhos</span>
         </button>
 
         <div class="settings-nav-sep"></div>
         <button type="button" class="settings-nav-item" data-settings-tab="updates" data-nav-label="Atualizações Versão Verificar atualizações">
-          <span aria-hidden="true">↻</span><span>Atualizações</span>
+          <span aria-hidden="true">↻</span><span data-i18n="settings.updates">Atualizações</span>
         </button>
         <button type="button" id="settings-logout-btn" class="settings-nav-item danger">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
-          <span>Sair da Conta</span>
+          <span data-i18n="settings.logout">Sair da Conta</span>
         </button>
       </nav>
 
@@ -899,7 +927,24 @@
 
           <!-- Aba 2: Voz e Vídeo (Idêntica à referência Discord) -->
           <div id="settings-tab-voice" class="settings-panel hidden">
-            <h2>Voz</h2>
+            <h2>Voz e vídeo</h2>
+
+            <div class="settings-grid-2">
+              <div class="settings-field">
+                <label for="camera-device-select">Câmera</label>
+                <select id="camera-device-select" class="settings-select"><option value="">Padrão do Sistema</option></select>
+              </div>
+              <div class="settings-field">
+                <label for="camera-quality-select">Qualidade da câmera</label>
+                <select id="camera-quality-select" class="settings-select">
+                  <option value="480">480p · 30 FPS</option>
+                  <option value="720" selected>720p · 30 FPS</option>
+                  <option value="1080">1080p · 30 FPS</option>
+                </select>
+              </div>
+            </div>
+            <p class="settings-hint-text">A câmera só é ligada pelo botão de vídeo da chamada. Alterações valem ao ligá-la novamente; a qualidade efetiva depende do dispositivo e da conexão.</p>
+            <div class="settings-divider"></div>
 
             <div class="settings-grid-2">
               <div class="settings-field">
@@ -1156,6 +1201,15 @@
               </label>
             </div>
 
+            <div class="appearance-section-label" data-i18n="settings.language">Idioma</div>
+            <div class="settings-field" style="margin-bottom: 20px;">
+              <select id="settings-language" class="settings-select" aria-label="Idioma">
+                <option value="pt-BR">Português (Brasil)</option>
+                <option value="en">English (preview)</option>
+              </select>
+              <div class="settings-hint-text" data-i18n="settings.language.hint">O inglês ainda está em preparação: textos sem tradução aparecem em português.</div>
+            </div>
+
             <div class="appearance-section-label">Temas padrão</div>
             <div class="appearance-theme-swatches" id="appearance-theme-swatches">
               <button type="button" class="theme-swatch-tile swatch-light" data-app-theme="light" title="Claro">
@@ -1295,6 +1349,13 @@
                 </div>
                 <input type="checkbox" id="appearance-compact-mode" />
               </label>
+              <label class="dsp-toggle-row">
+                <div>
+                  <div class="dsp-title">Reduzir animações</div>
+                  <div class="dsp-sub">Desliga transições e animações da interface (também segue a opção do Windows).</div>
+                </div>
+                <input type="checkbox" id="appearance-reduce-motion" />
+              </label>
             </div>
 
             <div class="settings-field">
@@ -1333,6 +1394,7 @@
               <div class="shortcut-row"><span>Abrir menu de opções da mensagem</span><kbd>Botão Direito</kbd></div>
               <div class="shortcut-row"><span>Cancelar edição de mensagem ou fechar modais</span><kbd>ESC</kbd></div>
               <div class="shortcut-row"><span>Falar usando Push-to-Talk (configurável em Voz)</span><kbd id="shortcuts-ptt-badge">Space</kbd></div>
+              <div id="shortcuts-extra-rows"></div>
             </div>
             <div style="margin-top: 14px;">
               <button type="button" id="shortcuts-goto-voice-btn" class="btn-secondary small-btn">🎙️ Personalizar Push-to-Talk em Voz e Vídeo</button>
@@ -1653,6 +1715,12 @@
         <span>Responder</span>
       </span>
     </button>
+    <button type="button" class="msg-ctx-item" data-ctx-act="create-thread" id="ctx-thread-btn">
+      <span class="msg-ctx-item-left">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 3a2 2 0 0 0-1 3.73V14a4 4 0 0 0 4 4h7.27A2 2 0 1 0 19 16.27V16h-2v.27a2 2 0 0 0-.27.73H10a2 2 0 0 1-2-2V6.73A2 2 0 0 0 7 3z"/></svg>
+        <span>Criar thread</span>
+      </span>
+    </button>
     <button type="button" class="msg-ctx-item" data-ctx-act="forward">
       <span class="msg-ctx-item-left">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 9V5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11z"/></svg>
@@ -1901,11 +1969,14 @@
           </div>
         </div>
 
-        <button type="button" class="settings-nav-item active" data-srv-tab="overview">⚙️ <span>Visão Geral</span></button>
-        <button type="button" class="settings-nav-item" data-srv-tab="roles">🛡️ <span>Cargos &amp; Permissões</span></button>
-        <button type="button" class="settings-nav-item" data-srv-tab="channels">📁 <span>Canais</span></button>
-        <button type="button" class="settings-nav-item" data-srv-tab="members">👥 <span>Membros &amp; Moderação</span></button>
-        <button type="button" class="settings-nav-item" data-srv-tab="invites">🔗 <span>Convites</span></button>
+        <button type="button" class="settings-nav-item active" data-srv-tab="overview">⚙️ <span data-i18n="server.overview">Visão Geral</span></button>
+        <button type="button" class="settings-nav-item" data-srv-tab="roles">🛡️ <span data-i18n="server.roles">Cargos &amp; Permissões</span></button>
+        <button type="button" class="settings-nav-item" data-srv-tab="channels">📁 <span data-i18n="server.channels">Canais</span></button>
+        <button type="button" class="settings-nav-item" data-srv-tab="members">👥 <span data-i18n="server.members">Membros &amp; Moderação</span></button>
+        <button type="button" class="settings-nav-item" data-srv-tab="invites">🔗 <span data-i18n="server.invites">Convites</span></button>
+        <button type="button" class="settings-nav-item" data-srv-tab="automod">🛡️ <span data-i18n="server.automod">AutoMod</span></button>
+        <button type="button" class="settings-nav-item" data-srv-tab="audit">📜 <span data-i18n="server.audit">Registro de auditoria</span></button>
+        <button type="button" class="settings-nav-item" data-srv-tab="integrations">🔌 <span data-i18n="server.integrations">Integrações</span></button>
 
         <div class="settings-nav-sep"></div>
         <button type="button" id="srv-settings-delete-btn" class="settings-nav-item danger hidden">
@@ -2085,6 +2156,7 @@
                   <div class="dsp-toggles-list">
                     <label class="dsp-toggle-row"><div><div class="dsp-title">🔇 Silenciar membros</div><div class="dsp-sub">Silencia o microfone de alguém para todos nos canais de voz do servidor.</div></div><input type="checkbox" data-role-perm="mute_members" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">🎧 Ensurdecer membros</div><div class="dsp-sub">Impede alguém de ouvir (e de falar) nos canais de voz do servidor.</div></div><input type="checkbox" data-role-perm="deafen_members" /></label>
+                    <label class="dsp-toggle-row"><div><div class="dsp-title">📜 Ver registro de auditoria</div><div class="dsp-sub">Mostra quem fez cada ação administrativa e os bloqueios do AutoMod.</div></div><input type="checkbox" data-role-perm="view_audit_log" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">↔️ Mover e desconectar membros</div><div class="dsp-sub">Move pessoas entre canais de voz, desconecta e entra em canais cheios.</div></div><input type="checkbox" data-role-perm="move_members" /></label>
                   </div>
                 </div>
@@ -2156,6 +2228,71 @@
               <div class="pinned-empty">Carregando convites...</div>
             </div>
           </div>
+
+          <!-- Aba 6: AutoMod (Fase 8) -->
+          <div id="srv-tab-automod" class="settings-panel hidden">
+            <h2>AutoMod</h2>
+            <p class="settings-hint-text">Regras aplicadas pelo servidor antes de a mensagem ser publicada. Dono, administradores, quem gerencia mensagens e os cargos isentos não são afetados. Não vale para DMs.</p>
+            <div class="dsp-toggles-list" style="margin: 12px 0;">
+              <label class="dsp-toggle-row"><div><div class="dsp-title">Ativar AutoMod</div><div class="dsp-sub">Liga ou desliga todas as regras abaixo.</div></div><input type="checkbox" id="automod-enabled" /></label>
+            </div>
+            <div class="profile-editor-card">
+              <div class="settings-field">
+                <label for="automod-words">PALAVRAS PROIBIDAS (UMA POR LINHA)</label>
+                <textarea id="automod-words" rows="4" placeholder="ex.: palavrao&#10;golpe*  (o * pega palavras que começam assim)"></textarea>
+                <div class="settings-hint-text">Comparação sem acento e sem diferenciar maiúsculas. Até 200 itens.</div>
+              </div>
+            </div>
+            <div class="dsp-toggles-list" style="margin: 12px 0;">
+              <label class="dsp-toggle-row"><div><div class="dsp-title">Bloquear links</div><div class="dsp-sub">Exceto os domínios liberados abaixo.</div></div><input type="checkbox" id="automod-links" /></label>
+              <label class="dsp-toggle-row"><div><div class="dsp-title">Bloquear convites</div><div class="dsp-sub">Códigos SANC-… e links sancord://.</div></div><input type="checkbox" id="automod-invites" /></label>
+              <label class="dsp-toggle-row"><div><div class="dsp-title">Bloquear mensagens repetidas</div><div class="dsp-sub">A mesma mensagem 3 vezes em 30 segundos.</div></div><input type="checkbox" id="automod-repeats" /></label>
+            </div>
+            <div class="profile-editor-card">
+              <div class="settings-field">
+                <label for="automod-domains">DOMÍNIOS LIBERADOS (UM POR LINHA)</label>
+                <textarea id="automod-domains" rows="3" placeholder="ex.: youtube.com"></textarea>
+              </div>
+              <div class="settings-field">
+                <label for="automod-mentions">MÁXIMO DE MENÇÕES POR MENSAGEM (0 = SEM LIMITE)</label>
+                <input type="number" id="automod-mentions" min="0" max="50" value="0" />
+              </div>
+              <div class="settings-field">
+                <label for="automod-alert-channel">CANAL DE ALERTAS (OPCIONAL)</label>
+                <select id="automod-alert-channel" class="settings-select"></select>
+              </div>
+              <div class="settings-field">
+                <label>CARGOS ISENTOS</label>
+                <div id="automod-exempt-roles" class="sancord-checklist"></div>
+              </div>
+              <div id="automod-feedback" class="settings-hint-text"></div>
+              <button type="button" id="automod-save-btn" class="btn-primary small-btn">Salvar AutoMod</button>
+            </div>
+          </div>
+
+          <div id="srv-tab-integrations" class="settings-panel hidden">
+            <h2 data-i18n="server.integrations">Integrações</h2>
+            <p class="settings-hint-text" data-i18n="integrations.hint">Bots de envio e webhooks publicam texto neste canal. Não enviam anexos nem notificam menções. O AutoMod continua ativo.</p>
+            <label for="integration-channel" data-i18n="integrations.channel">Canal de destino</label>
+            <select id="integration-channel" class="settings-select"></select>
+            <div class="modal-actions">
+              <button type="button" id="integration-refresh" class="btn-secondary" data-i18n="common.refresh">Atualizar</button>
+              <button type="button" id="integration-create" class="btn-primary" data-i18n="integrations.create">Criar integração</button>
+            </div>
+            <div id="integration-list" class="srv-manage-list" aria-live="polite"></div>
+          </div>
+          <!-- Aba 7: Registro de auditoria (Fase 8) -->
+          <div id="srv-tab-audit" class="settings-panel hidden">
+            <h2>Registro de auditoria</h2>
+            <div class="srv-roles-header">
+              <select id="audit-action-filter" class="settings-select">
+                <option value="">Todas as ações</option>
+              </select>
+              <button type="button" id="audit-refresh-btn" class="btn-secondary small-btn">↻ Atualizar</button>
+            </div>
+            <div id="audit-list" class="srv-manage-list" aria-live="polite"></div>
+            <button type="button" id="audit-more-btn" class="btn-secondary small-btn hidden" style="margin-top: 10px;">Carregar mais</button>
+          </div>
         </div>
       </div>
     </div>
@@ -2217,22 +2354,56 @@
     </div>
   </div>
 
+  <!-- Eventos do servidor (Fase 8) -->
+  <!-- Navegação rápida (Fase 9) -->
+  <div id="quick-switcher" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Navegação rápida">
+    <div class="modal-card quick-switcher-card">
+      <input type="text" id="quick-switcher-input" placeholder="Para onde você quer ir?  # canal  @ pessoa  * servidor" data-i18n-placeholder="quick.placeholder" autocomplete="off" aria-controls="quick-switcher-list" />
+      <ul id="quick-switcher-list" class="quick-switcher-list" role="listbox"></ul>
+      <div class="quick-switcher-hint" data-i18n="quick.hint">↑↓ navegar • Enter abrir • Esc fechar • Ctrl+/ todos os atalhos</div>
+    </div>
+  </div>
+
+  <div id="events-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="events-modal-title">
+    <div class="modal-card events-modal-card">
+      <div class="events-modal-head">
+        <h2 id="events-modal-title">📅 Eventos</h2>
+        <div class="events-modal-actions">
+          <button type="button" id="events-create-btn" class="btn-primary small-btn hidden">+ Criar evento</button>
+          <button type="button" id="events-close-btn" class="btn-secondary small-btn">Fechar</button>
+        </div>
+      </div>
+      <div id="events-list" class="events-list" aria-live="polite"></div>
+    </div>
+  </div>
+
   <!-- Container invisível para elementos de áudio WebRTC remotos -->
   <div id="remote-audio-container" style="display: none;"></div>
 
   <!-- Componentes reutilizáveis (menus, diálogos, tooltips) e módulo de servidores/canais.
        Carregados antes do app.js; só definem funções usadas em tempo de execução. -->
-  <script src="/js/ui-kit.js?v=17"></script>
+  <!-- Traduções (Fase 9): carregado primeiro, define t() e applyI18n(). -->
+  <script src="/js/i18n.js?v=1"></script>
+  <script src="/js/ui-kit.js?v=18"></script>
   <script src="/js/transport.js?v=19"></script>
-  <script src="/js/servers.js?v=17"></script>
+  <script src="/js/servers.js?v=18"></script>
   <script src="/js/permissions.js?v=18"></script>
-  <script src="/app.js?v=17"></script>
+  <script src="/app.js?v=18"></script>
   <!-- Chat (mensagens, composer, anexos, não lidas): depende dos elementos do app.js. -->
   <script src="/js/chat.js?v=17"></script>
   <!-- Social (Fase 5): bloqueio, solicitações, grupos, privacidade e perfil completo. -->
-  <script src="/js/social.js?v=1"></script>
+  <script src="/js/social.js?v=2"></script>
   <!-- Voz (Fase 6): volume/silêncio por pessoa, moderação, toque e retomada de chamada. -->
   <script src="/js/voice.js?v=1"></script>
+  <!-- Avançados (Fase 8): busca no histórico, AutoMod e auditoria. -->
+  <script src="/js/advanced.js?v=1"></script>
+  <script src="/js/integrations.js?v=1"></script>
+  <!-- Enquetes e eventos (Fase 8). -->
+  <script src="/js/community.js?v=1"></script>
+  <!-- Threads e fóruns (Fase 8). -->
+  <script src="/js/threads.js?v=1"></script>
+  <!-- Polimento (Fase 9): notificações por canal, navegação rápida, atalhos e acessibilidade. -->
+  <script src="/js/polish.js?v=1"></script>
   <script src="/js/updater.js?v=1"></script>
 </body>
 </html>

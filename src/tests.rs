@@ -13,8 +13,16 @@ use tower::ServiceExt;
 mod phase4;
 #[path = "phase5_tests.rs"]
 mod phase5;
+#[path = "phase9_tests.rs"]
+mod phase9;
+#[path = "integrations_tests.rs"]
+mod integrations;
+#[path = "phase8_tests.rs"]
+mod phase8;
 #[path = "phase6_tests.rs"]
 mod phase6;
+#[path = "phase7_tests.rs"]
+mod phase7;
 
 struct TestServer {
     addr: std::net::SocketAddr,

@@ -57,6 +57,7 @@ impl RolePermissions {
             mute_members: false,
             deafen_members: false,
             move_members: false,
+            view_audit_log: false,
         }
     }
 
@@ -83,6 +84,7 @@ impl RolePermissions {
             "mute_members" => self.mute_members,
             "deafen_members" => self.deafen_members,
             "move_members" => self.move_members,
+            "view_audit_log" => self.view_audit_log,
             _ => false,
         }
     }
@@ -193,6 +195,7 @@ impl GuildServer {
             "mute_members",
             "deafen_members",
             "move_members",
+            "view_audit_log",
         ];
         for key in admin
             .iter()
@@ -291,6 +294,15 @@ impl GuildServer {
     }
 
     pub fn channel_permissions(&self, user: &str, channel_id: &str) -> RolePermissions {
+        // Thread: herda do canal-pai; trancada, só a moderação escreve.
+        if let Some(t) = self.thread(channel_id) {
+            let mut p = self.channel_permissions(user, &t.parent_id);
+            if t.locked && !p.manage_messages {
+                p.send_messages = false;
+                p.attach_files = false;
+            }
+            return p;
+        }
         let Some(ch) = self.find_channel(channel_id) else {
             return RolePermissions::none();
         };

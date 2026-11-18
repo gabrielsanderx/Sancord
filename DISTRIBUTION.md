@@ -1,5 +1,23 @@
 # Distribuição e atualizações do Sancord
 
+## Candidata local de homologação (18/11/2026)
+
+`scripts/build-desktop.ps1 -OutputDir qa-candidate-20261118/package` compila o cliente
+portátil e backend sem substituir `dist/` ou os executáveis da raiz. O default do
+script continua `dist`, preservando o workflow de release existente.
+
+A candidata ainda usa a versão de desenvolvimento do Cargo.toml e não é uma release
+estável nem pacote do updater. Não publicar esses arquivos diretamente como uma
+atualização: primeiro concluir `HOMOLOGACAO.md`, definir uma versão maior que a dos
+clientes instalados, validar Windows/MSVC e gerar os metadados assinados pelo workflow.
+
+O pacote de QA inclui `Abrir-Cliente-QA.ps1`: aponta só para o backend isolado 3110,
+desativa host/protocolo/updater e usa outro perfil. Iniciar antes a homologação pelo
+script do workspace. Não abrir o backend candidato diretamente sobre `data/`.
+
+SHA-256 de arquivos da candidata serve para conferir a cópia local; não substitui
+assinatura do updater, Authenticode ou teste de instalação/reinício.
+
 ## Arquitetura e limites
 
 O cliente usa Wry/Tao/WebView2, não Tauri. Preservamos o launcher portátil existente:
@@ -99,7 +117,7 @@ Restrinja as permissões da pasta da chave antes de gerar o arquivo.
 6. Usuários recebem **Atualização disponível**, versão e changelog. O download e o
    reinício exigem ação do usuário. Também existe **Configurações → Atualizações**.
 
-Para a primeira publicação da versão atual, use `v0.1.0` depois de configurar o Secret
+Para a primeira publicação da versão atual, use `v0.2.0` depois de configurar o Secret
 e validar o pacote. Não crie essa tag antes de querer distribuir o estado atual das fases.
 Tags com `-beta`, `-rc` ou outros sufixos são rejeitadas pelo fluxo estável. Execução manual
 do workflow de release gera artefatos assinados (exige o Secret), sem publicar no canal

@@ -368,6 +368,15 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
 </html>
 "#;
 
+/// Título da janela com o contador de menções/DMs não lidas, ex.: "(3) Sancord".
+fn desktop_title(base: &str, unread: u32) -> String {
+    match unread {
+        0 => base.to_string(),
+        n if n > 99 => format!("(99+) {base}"),
+        n => format!("({n}) {base}"),
+    }
+}
+
 fn http_get_text(url: &str, timeout_secs: u32) -> Option<String> {
     let out = Command::new("curl.exe")
         .args([
@@ -621,7 +630,7 @@ fn main() {
 
     let window = std::rc::Rc::new(
         WindowBuilder::new()
-            .with_title("Sancord")
+            .with_title(env::var("SANCORD_WINDOW_TITLE").unwrap_or_else(|_| "Sancord".into()))
             .with_window_icon(window_icon)
             .with_decorations(false)
             .with_inner_size(LogicalSize::new(1320.0, 830.0))
@@ -634,6 +643,7 @@ fn main() {
 
     let mut web_context = WebContext::new(Some(data_dir));
     let win_ipc = window.clone();
+    let base_title = env::var("SANCORD_WINDOW_TITLE").unwrap_or_else(|_| "Sancord".into());
     let ipc_proxy = proxy.clone();
     let nav_proxy = proxy.clone();
     let new_window_proxy = proxy.clone();
@@ -697,6 +707,19 @@ fn main() {
                 if from_loader && origin_of(url).is_some() {
                     let _ = ipc_proxy.send_event(UserEvent::Navigate(url.trim().to_string()));
                 }
+                return;
+            }
+            // Fase 9: aviso nativo. "attention" pisca na barra de tarefas (só se a janela
+            // não estiver em foco); "badge:N" mostra as menções pendentes no título.
+            if cmd == "attention" {
+                if !win_ipc.is_focused() {
+                    win_ipc.request_user_attention(Some(tao::window::UserAttentionType::Informational));
+                }
+                return;
+            }
+            if let Some(n) = cmd.strip_prefix("badge:") {
+                let count: u32 = n.trim().parse().unwrap_or(0).min(999);
+                win_ipc.set_title(&desktop_title(&base_title, count));
                 return;
             }
             match cmd.as_str() {
@@ -804,4 +827,16 @@ fn main() {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::desktop_title;
+
+    #[test]
+    fn window_title_shows_pending_mentions() {
+        assert_eq!(desktop_title("Sancord", 0), "Sancord");
+        assert_eq!(desktop_title("Sancord", 3), "(3) Sancord");
+        assert_eq!(desktop_title("Sancord QA", 250), "(99+) Sancord QA");
+    }
 }

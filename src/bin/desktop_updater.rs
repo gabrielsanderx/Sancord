@@ -51,6 +51,10 @@ impl Updater {
         }
     }
     pub fn command(self: &Arc<Self>, action: &str) {
+        if env::var("SANCORD_DISABLE_UPDATES").as_deref() == Ok("1") {
+            self.emit(json!({"phase":"not_configured", "message":"Atualizações desativadas nesta sessão de teste."}));
+            return;
+        }
         if action == "status" { self.refresh(); return; }
         if !matches!(action, "check" | "download" | "restart") || self.busy.swap(true, Ordering::SeqCst) { return; }
         let action = action.to_string(); let this = self.clone();

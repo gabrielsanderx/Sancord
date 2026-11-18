@@ -85,6 +85,11 @@ pub struct ServerState {
     pub voice_grants: HashMap<String, (bool, bool)>,
     /// Chamadas privadas em andamento (canal dmvoice:/gdmvoice: -> início e quem ligou).
     pub active_calls: HashMap<String, crate::voice::ActiveCall>,
+    /// AutoMod: mensagens recentes por autor (instante, hash) para detectar repetição.
+    pub automod_recent: HashMap<String, Vec<(i64, u64)>>,
+    /// Eventos agendados: server_id -> eventos (ordenados por início)
+    pub events: HashMap<String, Vec<crate::models::ServerEvent>>,
+    pub integrations: HashMap<String, crate::integrations::Integration>,
     account_key_by_id: HashMap<String, String>,
     persisted_servers: HashMap<String, u64>,
     persisted_accounts: HashMap<String, u64>,
@@ -129,6 +134,8 @@ fn default_hub(text_channels: Vec<Channel>, voice_channels: Vec<Channel>) -> Gui
         created_at: 0,
         member_joined_at: HashMap::new(),
         voice_moderation: HashMap::new(),
+        automod: Default::default(),
+        threads: Vec::new(),
     }
 }
 
@@ -209,6 +216,21 @@ impl ServerState {
         let attachments_vec = db.load_attachments()?;
         let read_states_vec = db.load_read_states()?;
         let group_dms_vec = db.load_group_dms()?;
+        let integrations = db.load_integrations()?.into_iter().map(|i| (i.id.clone(), i)).collect();
+        let mut events_by_server: HashMap<String, Vec<crate::models::ServerEvent>> = HashMap::new();
+        for e in db.load_events()? {
+            events_by_server.entry(e.server_id.clone()).or_default().push(e);
+        }
+        for th in db.load_threads()? {
+            if let Some(srv) = servers.iter_mut().find(|s| s.id == th.server_id) {
+                srv.threads.push(th);
+            }
+        }
+        for (sid, cfg) in db.load_automod()? {
+            if let Some(srv) = servers.iter_mut().find(|s| s.id == sid) {
+                srv.automod = cfg;
+            }
+        }
         for (sid, user, vm) in db.load_voice_moderation()? {
             if let Some(srv) = servers.iter_mut().find(|s| s.id == sid) {
                 srv.voice_moderation.insert(user, vm);
@@ -268,6 +290,9 @@ impl ServerState {
             group_dms: group_dms_vec.into_iter().map(|g| (g.id.clone(), g)).collect(),
             voice_grants: HashMap::new(),
             active_calls: HashMap::new(),
+            automod_recent: HashMap::new(),
+            events: events_by_server,
+            integrations,
             account_key_by_id: HashMap::new(),
             persisted_servers: HashMap::new(),
             persisted_accounts: HashMap::new(),
@@ -341,6 +366,8 @@ impl ServerState {
                 nonce: None,
                 attachments: Vec::new(),
                 mentions: MessageMentions::default(),
+                poll: None,
+                author_kind: crate::models::AuthorKind::System,
             });
         }
 
@@ -504,7 +531,14 @@ impl ServerState {
             .servers
             .iter()
             .filter(|s| s.is_member(username_lower))
-            .flat_map(|s| s.text_channels.iter().filter(|c| self.can_view_channel(username_lower, &c.id)).map(|c| c.id.clone()))
+            .flat_map(|s| {
+                s.text_channels
+                    .iter()
+                    .map(|c| c.id.clone())
+                    .chain(s.threads.iter().map(|t| t.id.clone()))
+                    .filter(|id| self.can_view_channel(username_lower, id))
+                    .collect::<Vec<_>>()
+            })
             .collect();
         out.extend(
             self.chat_history
@@ -1080,7 +1114,7 @@ impl ServerState {
     pub fn find_server_by_text_channel(&self, channel_id: &str) -> Option<&GuildServer> {
         self.servers
             .iter()
-            .find(|s| s.text_channels.iter().any(|c| c.id == channel_id))
+            .find(|s| s.text_channels.iter().any(|c| c.id == channel_id) || s.thread(channel_id).is_some())
     }
 
     pub fn has_public_voice_channel(&self, channel_id: &str) -> bool {

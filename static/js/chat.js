@@ -115,11 +115,20 @@ function myLower() {
 }
 
 function isOwnMessage(msg) {
+  if (msg.author_kind && msg.author_kind !== "user") return false;
   return msg.author_id === state.selfUser?.id || (msg.author_name || "").toLowerCase() === myLower();
+}
+
+/** Tipo do autor: "user" | "system" | "bot" | "webhook" (mensagens antigas: author_id "system"). */
+function authorKindOf(msg) {
+  if (msg?.author_kind && msg.author_kind !== "user") return msg.author_kind;
+  return msg?.author_id === "system" ? "system" : "user";
 }
 
 function serverForChannel(channelId) {
   if (!channelId || isPrivateTextId(channelId)) return null;
+  const thread = state.threadIndex?.get(channelId);
+  if (thread) return (state.servers || []).find((s) => s.id === thread.server_id) || null;
   return (state.servers || []).find((s) => (s.text_channels || []).some((c) => c.id === channelId)) || null;
 }
 
@@ -533,7 +542,7 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
     msg.pinned && "pinned-msg",
     isStarred && "starred-msg",
     mentioned && "mention-highlight",
-    msg.author_id === "system" && "system-msg",
+    authorKindOf(msg) === "system" && "system-msg",
   ].filter(Boolean).join(" ");
   div.dataset.msgId = msg.id;
   div.dataset.author = authorLower;
@@ -568,7 +577,7 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
     ? ""
     : `<div class="message-meta">
          <span class="message-author clickable-profile styled-name ${nameCls}" style="${liveUser?.name_style === "gradient" ? "" : `color:${safeColor};--name-color:${safeColor};`}">${escapeHtml(msg.author_name)}</span>
-         ${msg.author_id === "system" ? `<span class="bot-tag">SISTEMA</span>` : ""}
+         ${authorKindOf(msg) !== "user" ? `<span class="bot-tag author-${authorKindOf(msg)}">${typeof t === "function" ? t(`author.${authorKindOf(msg)}`) : "SISTEMA"}</span>` : ""}
          <time class="message-time" ${msg.created_at ? `datetime="${new Date(msg.created_at).toISOString()}" title="${escapeHtml(new Date(msg.created_at).toLocaleString("pt-BR"))}"` : ""}>${escapeHtml(formatMessageTime(msg))}</time>
          ${msg.pinned ? `<span class="pin-tag">📌 Fixada</span>` : ""}
          ${isStarred ? `<span class="star-tag">★ Favorita</span>` : ""}
@@ -606,6 +615,12 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
   if (editButton) editButton.disabled = !permissions.send_messages;
   const atts = buildAttachmentsNode({ ...msg, attachments: [...(msg.attachments || [])] });
   if (atts) contentWrap.appendChild(atts);
+  // Enquete (Fase 8): static/js/community.js.
+  const pollNode = msg.poll && typeof buildPollNode === "function" ? buildPollNode(msg) : null;
+  if (pollNode) contentWrap.appendChild(pollNode);
+  // Thread iniciada nesta mensagem (static/js/threads.js).
+  const threadLink = typeof buildThreadLinkNode === "function" ? buildThreadLinkNode(msg) : null;
+  if (threadLink) contentWrap.appendChild(threadLink);
   const reactions = buildReactionsNode(msg);
   if (reactions) contentWrap.appendChild(reactions);
 
@@ -711,7 +726,7 @@ chatMessagesEl?.addEventListener("keydown", (e) => {
 // Lista de mensagens: agrupamento, separadores de dia, divisor de não lidas
 // ---------------------------------------------------------------------------
 function shouldGroup(prev, msg) {
-  if (!prev || msg.reply_to || prev.author_id === "system" || msg.author_id === "system") return false;
+  if (!prev || msg.reply_to || authorKindOf(prev) !== "user" || authorKindOf(msg) !== "user") return false;
   if ((prev.author_name || "").toLowerCase() !== (msg.author_name || "").toLowerCase()) return false;
   if (!prev.created_at || !msg.created_at) return false;
   if (dayKey(prev.created_at) !== dayKey(msg.created_at)) return false;
@@ -887,7 +902,12 @@ function flashMessage(el) {
 /** Abre o canal (se preciso) e rola até a mensagem, carregando do servidor se não estiver em memória. */
 function jumpToMessage(channelId, messageId) {
   if (!channelId || !messageId) return;
-  if (getActiveTextChannelId() !== channelId) {
+  // Na tela inicial sem DM aberta, getActiveTextChannelId() ainda devolve o último
+  // canal de servidor: confere também a visão para não "pular" sem sair da home.
+  const viewing = isPrivateTextId(channelId)
+    ? state.activeView === "home" && state.activeDmId === channelId
+    : state.activeView !== "home" && getActiveTextChannelId() === channelId;
+  if (!viewing) {
     if (isPrivateTextId(channelId)) {
       openDmConversation(channelId);
     } else {
@@ -1185,6 +1205,13 @@ function updateDocumentTitle() {
   let mentions = 0;
   for (const rs of state.readStates?.values?.() || []) mentions += rs.mention_count || 0;
   document.title = mentions > 0 ? `(${mentions}) Sancord` : "Sancord";
+  // No .exe a janela não usa o título da página: avisa o app nativo (só quando muda).
+  if (state.lastBadgeSent !== mentions) {
+    state.lastBadgeSent = mentions;
+    try {
+      window.ipc?.postMessage(`badge:${mentions}`);
+    } catch (_) {}
+  }
 }
 
 /** Processa uma nova mensagem para não lidas, som e notificação. Retorna se deve anexar à tela. */
@@ -1201,7 +1228,12 @@ function onNewMessageForUnread(message) {
     const willSee = active && !document.hidden && document.hasFocus() && isNearBottom(160) && !hs.hasNewer && state.suppressAckFor !== chId;
     if (mentioned && !willSee) {
       rs.mention_count = (rs.mention_count || 0) + 1;
+    }
+    // Notificação e aviso na barra de tarefas seguem o nível do canal/servidor.
+    const policy = typeof notificationPolicy === "function" ? notificationPolicy(message) : { notify: mentioned };
+    if (policy.notify && !willSee) {
       maybeDesktopNotify(message);
+      if (typeof requestWindowAttention === "function") requestWindowAttention();
     }
   }
   if (isPrivateTextId(chId)) {

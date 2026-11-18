@@ -35,7 +35,7 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use tracing::{error, info, warn};
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// Metadados de um arquivo enviado (o conteúdo fica em `data/uploads/`).
 #[derive(Debug, Clone, PartialEq)]
@@ -133,6 +133,8 @@ pub struct SessionRecord {
 /// Operações de escrita enfileiradas para a thread do banco.
 #[derive(Debug)]
 pub enum WriteOp {
+    UpsertIntegration(Box<crate::integrations::Integration>),
+    DeleteIntegration { id: String },
     UpsertUser { id: String, username_lower: String, data: String },
     /// Regrava todas as linhas de um servidor (dados, categorias, canais, membros, cargos, bans).
     ReplaceServer(Box<GuildServer>),
@@ -147,6 +149,12 @@ pub enum WriteOp {
     UpsertGroupDm(Box<crate::models::GroupDm>),
     DeleteGroupDm { id: String },
     InsertReport { id: String, reporter: String, target: String, message_id: Option<String>, reason: String, created_at: i64 },
+    InsertAudit(Box<crate::models::AuditEntry>),
+    UpsertEvent(Box<crate::models::ServerEvent>),
+    UpsertThread(Box<crate::models::Thread>),
+    DeleteThread { id: String },
+    DeleteEvent { id: String },
+    PutAutoMod { server_id: String, data: String },
     /// Moderação de voz; muted=false e deafened=false apaga a linha.
     SetVoiceModeration { server_id: String, user_lower: String, muted: bool, deafened: bool },
     RenameVoiceModeration { from: String, to: String },
@@ -344,7 +352,121 @@ fn migrate_schema(conn: &Connection) -> DbResult<()> {
         )?;
         txn.commit()?;
     }
+    if version < 7 {
+        // v7 (Avançados): auditoria, AutoMod e índice de busca de texto completo.
+        // O índice FTS5 é "external content": guarda só os termos e aponta para
+        // `messages`; os gatilhos o mantêm em dia e o 'rebuild' indexa o histórico.
+        let txn = conn.unchecked_transaction()?;
+        txn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id TEXT PRIMARY KEY,
+                server_id TEXT NOT NULL,
+                actor_lower TEXT NOT NULL,
+                action TEXT NOT NULL,
+                target TEXT,
+                details TEXT,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_server_time ON audit_log(server_id, created_at DESC);
+            CREATE TABLE IF NOT EXISTS automod_config (
+                server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+                data TEXT NOT NULL
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                content, author_name,
+                content='messages', content_rowid='rowid',
+                tokenize='unicode61 remove_diacritics 2'
+            );
+            CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content, author_name) VALUES (new.rowid, new.content, new.author_name);
+            END;
+            CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, content, author_name) VALUES ('delete', old.rowid, old.content, old.author_name);
+            END;
+            CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content, author_name ON messages
+            WHEN old.content IS NOT new.content OR old.author_name IS NOT new.author_name BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, content, author_name) VALUES ('delete', old.rowid, old.content, old.author_name);
+                INSERT INTO messages_fts(rowid, content, author_name) VALUES (new.rowid, new.content, new.author_name);
+            END;
+            INSERT INTO messages_fts(messages_fts) VALUES ('rebuild');
+            PRAGMA user_version = 7;
+            "#,
+        )?;
+        txn.commit()?;
+    }
+    if version < 8 {
+        // v8: eventos agendados dos servidores.
+        conn.execute_batch(
+            r#"
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS server_events (
+                id TEXT PRIMARY KEY,
+                server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                starts_at INTEGER NOT NULL,
+                data TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_events_server ON server_events(server_id, starts_at);
+            PRAGMA user_version = 8;
+            COMMIT;
+            "#,
+        )?;
+    }
+    if version < 9 {
+        // v9: threads e postagens de fórum. As mensagens continuam em `messages`
+        // (channel_id = id da thread); aqui ficam só os metadados.
+        conn.execute_batch(
+            r#"
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS threads (
+                id TEXT PRIMARY KEY,
+                server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                parent_id TEXT NOT NULL,
+                data TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_threads_server ON threads(server_id);
+            CREATE INDEX IF NOT EXISTS idx_threads_parent ON threads(parent_id);
+            PRAGMA user_version = 9;
+            COMMIT;
+            "#,
+        )?;
+    }
+    if version < 10 {
+        conn.execute_batch("BEGIN;
+            CREATE TABLE IF NOT EXISTS channel_integrations (
+                id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                channel_id TEXT NOT NULL, data TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_integrations_channel ON channel_integrations(channel_id);
+            PRAGMA user_version = 10;
+            COMMIT;")?;
+    }
     Ok(())
+}
+
+/// Filtros já validados de uma busca (o servidor decide `channels`).
+#[derive(Debug, Clone, Default)]
+pub struct SearchFilter {
+    pub channels: Vec<String>,
+    /// Termos já normalizados; vazio = sem filtro de texto.
+    pub terms: Vec<String>,
+    pub author_lower: Option<String>,
+    pub has: Option<String>,
+    pub before: Option<i64>,
+    pub after: Option<i64>,
+    pub pinned: bool,
+    pub mentions_user: Option<String>,
+    pub limit: usize,
+}
+
+/// Monta a expressão FTS5 com cada termo entre aspas e como prefixo
+/// (o usuário não consegue injetar operadores da sintaxe FTS).
+pub fn fts_query(terms: &[String]) -> String {
+    terms
+        .iter()
+        .map(|t| format!("\"{}\"*", t.replace('"', "")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn upsert_group_dm(conn: &Connection, g: &crate::models::GroupDm) -> DbResult<()> {
@@ -606,6 +728,11 @@ fn upsert_invite(conn: &Connection, inv: &Invite) -> DbResult<()> {
 fn apply(conn: &Connection, op: WriteOp) -> DbResult<()> {
     let now = crate::auth::now_ms();
     match op {
+        WriteOp::UpsertIntegration(i) => {
+            conn.execute("INSERT INTO channel_integrations(id,server_id,channel_id,data) VALUES(?1,?2,?3,?4)
+                ON CONFLICT(id) DO UPDATE SET data=excluded.data", params![i.id,i.server_id,i.channel_id,serde_json::to_string(&*i)?])?;
+        }
+        WriteOp::DeleteIntegration { id } => { conn.execute("DELETE FROM channel_integrations WHERE id=?1", params![id])?; }
         WriteOp::UpsertUser { id, username_lower, data } => {
             conn.execute(
                 "INSERT INTO users (id, username_lower, data, updated_at) VALUES (?1, ?2, ?3, ?4)
@@ -688,6 +815,42 @@ fn apply(conn: &Connection, op: WriteOp) -> DbResult<()> {
             conn.execute(
                 "UPDATE OR REPLACE voice_moderation SET user_lower = ?2 WHERE user_lower = ?1",
                 params![from, to],
+            )?;
+        }
+        WriteOp::UpsertThread(th) => {
+            conn.execute(
+                "INSERT INTO threads (id, server_id, parent_id, data) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(id) DO UPDATE SET parent_id = excluded.parent_id, data = excluded.data",
+                params![th.id, th.server_id, th.parent_id, serde_json::to_string(&*th)?],
+            )?;
+        }
+        WriteOp::DeleteThread { id } => {
+            conn.execute("DELETE FROM threads WHERE id = ?1", params![id])?;
+            conn.execute("DELETE FROM messages WHERE channel_id = ?1", params![id])?;
+            conn.execute("DELETE FROM read_states WHERE channel_id = ?1", params![id])?;
+        }
+        WriteOp::UpsertEvent(e) => {
+            conn.execute(
+                "INSERT INTO server_events (id, server_id, starts_at, data) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(id) DO UPDATE SET starts_at = excluded.starts_at, data = excluded.data",
+                params![e.id, e.server_id, e.starts_at, serde_json::to_string(&*e)?],
+            )?;
+        }
+        WriteOp::DeleteEvent { id } => {
+            conn.execute("DELETE FROM server_events WHERE id = ?1", params![id])?;
+        }
+        WriteOp::InsertAudit(e) => {
+            conn.execute(
+                "INSERT OR IGNORE INTO audit_log (id, server_id, actor_lower, action, target, details, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![e.id, e.server_id, e.actor, e.action, e.target, e.details, e.created_at],
+            )?;
+        }
+        WriteOp::PutAutoMod { server_id, data } => {
+            conn.execute(
+                "INSERT INTO automod_config (server_id, data) VALUES (?1, ?2)
+                 ON CONFLICT(server_id) DO UPDATE SET data = excluded.data",
+                params![server_id, data],
             )?;
         }
         WriteOp::DeleteGroupDm { id } => {
@@ -937,6 +1100,8 @@ impl Db {
                         categories: Vec::new(),
                         member_joined_at: HashMap::new(),
                         voice_moderation: HashMap::new(),
+                        automod: Default::default(),
+                        threads: Vec::new(),
                     })
                 })?;
                 rows.collect::<Result<Vec<_>, _>>()?
@@ -1354,6 +1519,146 @@ impl Db {
         })
     }
 
+    /// Auditoria de um servidor, mais recentes primeiro. Devolve até `limit` e se há mais.
+    pub fn audit_log(&self, server_id: &str, before: Option<i64>, action: Option<&str>, limit: usize) -> DbResult<(Vec<crate::models::AuditEntry>, bool)> {
+        self.with_reader(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, server_id, actor_lower, action, target, details, created_at FROM audit_log
+                 WHERE server_id = ?1 AND created_at < ?2 AND (?3 IS NULL OR action = ?3)
+                 ORDER BY created_at DESC, id DESC LIMIT ?4",
+            )?;
+            let rows = stmt.query_map(
+                params![server_id, before.unwrap_or(i64::MAX), action, (limit + 1) as i64],
+                |r| {
+                    Ok(crate::models::AuditEntry {
+                        id: r.get(0)?,
+                        server_id: r.get(1)?,
+                        actor: r.get(2)?,
+                        action: r.get(3)?,
+                        target: r.get(4)?,
+                        details: r.get(5)?,
+                        created_at: r.get(6)?,
+                    })
+                },
+            )?;
+            let mut list = rows.collect::<Result<Vec<_>, _>>()?;
+            let more = list.len() > limit;
+            list.truncate(limit);
+            Ok((list, more))
+        })
+    }
+
+    pub fn load_threads(&self) -> DbResult<Vec<crate::models::Thread>> {
+        self.with_reader(|c| {
+            let mut stmt = c.prepare("SELECT data FROM threads")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                match serde_json::from_str(&row?) {
+                    Ok(t) => out.push(t),
+                    Err(err) => warn!("Thread ilegível ignorada: {err}"),
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn load_events(&self) -> DbResult<Vec<crate::models::ServerEvent>> {
+        self.with_reader(|c| {
+            let mut stmt = c.prepare("SELECT data FROM server_events ORDER BY starts_at")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                match serde_json::from_str(&row?) {
+                    Ok(e) => out.push(e),
+                    Err(err) => warn!("Evento ilegível ignorado: {err}"),
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn load_integrations(&self) -> DbResult<Vec<crate::integrations::Integration>> {
+        self.with_reader(|c| {
+            let mut stmt = c.prepare("SELECT data FROM channel_integrations")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows { out.push(serde_json::from_str(&row?)?); }
+            Ok(out)
+        })
+    }
+
+    pub fn load_automod(&self) -> DbResult<Vec<(String, crate::models::AutoModConfig)>> {
+        self.with_reader(|c| {
+            let mut stmt = c.prepare("SELECT server_id, data FROM automod_config")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (sid, data) = row?;
+                match serde_json::from_str(&data) {
+                    Ok(cfg) => out.push((sid, cfg)),
+                    Err(e) => warn!("AutoMod ilegível do servidor {sid} ignorado: {e}"),
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    /// Busca no histórico persistido. O chamador limita `channels` ao que a pessoa pode ler.
+    pub fn search_messages(&self, f: &SearchFilter) -> DbResult<(Vec<ChatMessage>, bool)> {
+        if f.channels.is_empty() {
+            return Ok((Vec::new(), false));
+        }
+        self.with_reader(|c| {
+            let channels = serde_json::to_string(&f.channels)?;
+            let fts = (!f.terms.is_empty()).then(|| fts_query(&f.terms));
+            let sql = format!(
+                "SELECT m.data FROM messages m
+                 {join}
+                 WHERE m.channel_id IN (SELECT value FROM json_each(?1))
+                   {fts_cond}
+                   AND (?3 IS NULL OR lower(m.author_name) = ?3)
+                   AND (?4 IS NULL OR m.created_at < ?4)
+                   AND (?5 IS NULL OR m.created_at > ?5)
+                   AND (?6 = 0 OR m.pinned = 1)
+                   AND (?7 IS NULL
+                        OR (?7 = 'link' AND (m.content LIKE '%http://%' OR m.content LIKE '%https://%'))
+                        OR (?7 = 'file' AND json_array_length(json_extract(m.data, '$.attachments')) > 0)
+                        OR (?7 = 'image' AND (json_extract(m.data, '$.image_url') IS NOT NULL
+                            OR EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.attachments')) a
+                                       WHERE json_extract(a.value, '$.kind') = 'image'))))
+                   AND (?8 IS NULL OR EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.mentions.users')) u WHERE u.value = ?8)
+                        OR json_extract(m.data, '$.mentions.everyone') = 1)
+                 ORDER BY m.created_at DESC, m.id DESC LIMIT ?9",
+                join = if fts.is_some() { "JOIN messages_fts ON messages_fts.rowid = m.rowid" } else { "" },
+                fts_cond = if fts.is_some() { "AND messages_fts MATCH ?2" } else { "AND ?2 IS NULL" },
+            );
+            let mut stmt = c.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params![
+                    channels,
+                    fts,
+                    f.author_lower,
+                    f.before,
+                    f.after,
+                    f.pinned as i64,
+                    f.has,
+                    f.mentions_user,
+                    (f.limit + 1) as i64
+                ],
+                |r| r.get::<_, String>(0),
+            )?;
+            let raw = rows.collect::<Result<Vec<_>, _>>()?;
+            let more = raw.len() > f.limit;
+            let list = raw
+                .into_iter()
+                .take(f.limit)
+                .filter_map(|s| serde_json::from_str(&s).ok())
+                .collect();
+            Ok((list, more))
+        })
+    }
+
     /// Denúncias registradas (para a futura tela de moderação e para testes).
     pub fn count_reports(&self, target_lower: &str) -> DbResult<i64> {
         self.with_reader(|c| {
@@ -1558,6 +1863,8 @@ mod tests {
             nonce: Some("n".into()),
             attachments: Vec::new(),
             mentions: Default::default(),
+            poll: None,
+            author_kind: crate::models::AuthorKind::User,
         }
     }
 
@@ -1703,6 +2010,8 @@ mod tests {
             created_at: 1000,
             member_joined_at: HashMap::from([("bia".to_string(), 5000)]),
             voice_moderation: HashMap::new(),
+            automod: Default::default(),
+            threads: Vec::new(),
         };
         srv.ensure_layout(1000);
         srv

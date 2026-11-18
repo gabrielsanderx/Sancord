@@ -9,14 +9,18 @@
 pub mod auth;
 mod access;
 pub mod chat;
+pub mod community;
 pub mod config;
 pub mod db;
 pub mod discovery;
 pub mod http;
+pub mod integrations;
 pub mod models;
+pub mod moderation;
 pub mod permissions;
 pub mod social;
 pub mod state;
+pub mod threads;
 pub mod uploads;
 pub mod updates;
 pub mod validate;
@@ -59,6 +63,10 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/health", get(http::health_handler))
         .route("/api/public-url", get(http::public_url_handler))
         .route("/api/invite/:code", get(http::invite_preview_handler))
+        .route("/api/channels/:channel/integrations", get(integrations::list).post(integrations::create))
+        .route("/api/integrations/:id/rotate", post(integrations::rotate))
+        .route("/api/integrations/:id/revoke", post(integrations::revoke))
+        .route("/api/integrations/:id/messages", post(integrations::publish).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)))
         .route(
             "/api/attachments",
             post(uploads::upload_handler)

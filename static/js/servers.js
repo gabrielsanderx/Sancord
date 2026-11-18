@@ -11,11 +11,16 @@ const CHANNEL_KIND_ICONS = {
 
 function channelIconSvg(kind) {
   if (kind === "announcement") return CHANNEL_KIND_ICONS.announcement;
+  if (kind === "forum") return CHANNEL_KIND_ICONS.forum;
+  if (kind === "thread") return CHANNEL_KIND_ICONS.thread;
   if (kind === "voice") return SVG_ICONS.speaker;
   return SVG_ICONS.hash;
 }
 
-const KIND_LABELS = { text: "Texto", voice: "Voz", announcement: "Anúncios" };
+const KIND_LABELS = { text: "Texto", voice: "Voz", announcement: "Anúncios", forum: "Fórum" };
+// Fórum (balões) e thread (ramificação) — Fase 8.
+CHANNEL_KIND_ICONS.forum = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 6h-2v9H6v2c0 .55.45 1 1 1h11l4 4V7c0-.55-.45-1-1-1zm-4 6V3c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1v14l4-4h10c.55 0 1-.45 1-1z"/></svg>`;
+CHANNEL_KIND_ICONS.thread = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 3a2 2 0 0 0-1 3.73V14a4 4 0 0 0 4 4h7.27A2 2 0 1 0 19 16.27V16h-2v.27a2 2 0 0 0-.27.73H10a2 2 0 0 1-2-2V6.73A2 2 0 0 0 7 3z"/></svg>`;
 
 // ---------------------------------------------------------------------------
 // Preferências sincronizadas (barra de servidores, pastas, silenciados)
@@ -57,6 +62,7 @@ function canPostIn(srv, ch) {
   const p = getChannelPermissions(srv, ch);
   if (!ch || p.view_channel === false || !p.send_messages) return false;
   if (ch?.kind === "announcement") return Boolean(p.manage_messages || p.administrator);
+  if (ch?.kind === "forum") return false;
   return true;
 }
 
@@ -386,6 +392,10 @@ function buildTextChannelRow(srv, ch, canManage) {
   }
   if (canManage) li.appendChild(buildEditButton(srv, ch));
   const open = () => {
+    if (ch.kind === "forum" && typeof openForumView === "function") {
+      openForumView(srv, ch);
+      return;
+    }
     state.currentTextChannel = ch.id;
     switchToServerView();
   };
@@ -398,7 +408,13 @@ function buildTextChannelRow(srv, ch, canManage) {
     openChannelMenu(e, srv, ch);
   });
   if (canManage) attachChannelDnD(li, srv, ch);
-  return li;
+  if (state.forumViewChannel === ch.id) li.classList.add("active");
+  // Threads ativas aparecem aninhadas sob o canal de texto (static/js/threads.js).
+  const nested = ch.kind !== "forum" && typeof buildNestedThreadRows === "function" ? buildNestedThreadRows(srv, ch) : [];
+  if (nested.length === 0) return li;
+  const frag = document.createDocumentFragment();
+  frag.append(li, ...nested);
+  return frag;
 }
 
 function buildVoiceChannelNode(srv, ch, canManage) {
@@ -495,6 +511,7 @@ function openChannelMenu(e, srv, ch) {
       },
     },
     { label: "Copiar link do canal", icon: "🔗", onSelect: async () => copyTextSafe(await channelLink(srv, ch), "Link do canal copiado!") },
+    ...(!isVoice && typeof notifyMenuItems === "function" ? notifyMenuItems(ch.id) : []),
     perms.manage_channels && { separator: true },
     perms.manage_channels && { label: "Editar canal", icon: "⚙️", onSelect: () => openEditChannelDialog(srv, ch) },
     perms.manage_channels && { label: "Permissões do canal", icon: "🔒", onSelect: () => openPermissionsDialog(srv, ch) },
@@ -570,6 +587,7 @@ function openServerMenu(e, srv, { anchor = null } = {}) {
     perms.manage_channels && { label: "Criar categoria", icon: "📁", onSelect: () => { ensureActive(); openCreateCategoryDialog(); } },
     { separator: true },
     { label: muted ? "Reativar notificações" : "Silenciar servidor", icon: muted ? "🔔" : "🔕", onSelect: () => toggleServerMuted(srv) },
+    ...(typeof notifyMenuItems === "function" ? notifyMenuItems(srv.id) : []),
     { label: "Copiar ID do servidor", icon: "🆔", onSelect: () => copyTextSafe(srv.id, "ID do servidor copiado!") },
     (!isOwner && srv.id !== "sancord") && { separator: true },
     (!isOwner && srv.id !== "sancord") && {
@@ -621,6 +639,7 @@ async function openCreateChannelDialog({ kind = "text", categoryId = null } = {}
           { value: "text", label: "Texto", icon: "#", hint: "Mensagens, imagens, links e opiniões." },
           { value: "voice", label: "Voz", icon: "🔊", hint: "Conversar por voz, vídeo e compartilhar a tela." },
           { value: "announcement", label: "Anúncios", icon: "📢", hint: "Avisos importantes: todos leem, só moderadores publicam." },
+          { value: "forum", label: "Fórum", icon: "💬", hint: "Cada assunto vira uma postagem com a própria conversa." },
         ],
       },
       { name: "name", label: "NOME DO CANAL", value: "", placeholder: "novo-canal", maxlength: 28, required: true },
@@ -674,7 +693,7 @@ async function openEditChannelDialog(srv, ch) {
     title: `Editar ${isVoice ? "canal de voz" : "canal"}`,
     fields: [
       { name: "name", label: "NOME DO CANAL", value: ch.name, maxlength: 28, required: true },
-      !isVoice && {
+      !isVoice && ch.kind !== "forum" && {
         name: "kind",
         label: "TIPO",
         type: "cards",
@@ -703,7 +722,7 @@ async function openEditChannelDialog(srv, ch) {
     channel_id: ch.id,
     name: values.name.trim(),
     topic: isVoice ? null : values.topic.trim(),
-    kind: isVoice ? null : values.kind,
+    kind: isVoice || ch.kind === "forum" ? null : values.kind,
     user_limit: isVoice ? Math.max(0, Math.min(99, parseInt(values.user_limit, 10) || 0)) : null,
   });
   const newCat = values.category_id || null;
@@ -772,7 +791,7 @@ function buildServerIconInner(srv) {
   holder.className = "guild-icon-inner";
   if (srv.icon_url) {
     const img = document.createElement("img");
-    img.src = srv.icon_url;
+    img.src = cachedMediaUrl(srv.icon_url);
     img.alt = "";
     img.className = "guild-logo-img";
     img.draggable = false;

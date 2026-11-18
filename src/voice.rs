@@ -81,6 +81,8 @@ pub(crate) fn private_system_message(st: &mut ServerState, conversation: &str, c
         nonce: None,
         attachments: Vec::new(),
         mentions: MessageMentions::default(),
+        poll: None,
+        author_kind: crate::models::AuthorKind::System,
     };
     st.insert_message(msg.clone());
     if let Some(author) = notify_except {
