@@ -55,6 +55,11 @@
         <button type="submit" id="auth-submit-btn" class="btn-primary">
           Criar Conta e Entrar
         </button>
+        <div style="margin-top: 10px; text-align: center;">
+          <button type="button" id="open-recover-password-btn" class="btn-secondary small-btn" style="width: 100%;">
+            🔑 Esqueci minha senha (usar código de recuperação)
+          </button>
+        </div>
       </form>
     </div>
   </div>
@@ -648,6 +653,14 @@
 
                   <div class="account-field-row">
                     <div>
+                      <div class="account-field-label">E-MAIL DA CONTA (OPCIONAL)</div>
+                      <div id="account-info-email" class="account-field-val">Não cadastrado</div>
+                    </div>
+                    <button type="button" id="account-edit-email-btn" class="btn-secondary small-btn">Editar</button>
+                  </div>
+
+                  <div class="account-field-row">
+                    <div>
                       <div class="account-field-label">ID DA CONTA SANCORD</div>
                       <div id="account-info-id" class="account-field-val monospace-val">—</div>
                     </div>
@@ -681,8 +694,33 @@
                   endereço público) e ficam guardadas lá, onde podem ser lidas — elas não têm
                   criptografia de ponta a ponta.
                 </p>
-                <div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                   <button type="button" id="open-change-pw-modal-btn" class="btn-primary small-btn">Mudar senha</button>
+                  <button type="button" id="generate-recovery-code-btn" class="btn-secondary small-btn">🔑 Gerar código de recuperação</button>
+                </div>
+              </div>
+
+              <div class="profile-editor-card" style="margin-top: 14px;">
+                <div class="srv-roles-header" style="margin-bottom: 10px;">
+                  <div>
+                    <div class="cust-label" style="margin-bottom: 2px;">Sessões e dispositivos conectados</div>
+                    <div class="settings-hint-text">Gerencie os dispositivos com sessão ativa na sua conta.</div>
+                  </div>
+                  <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <button type="button" id="refresh-sessions-btn" class="btn-secondary small-btn">↻ Atualizar</button>
+                    <button type="button" id="revoke-other-sessions-btn" class="btn-secondary small-btn danger-text">Encerrar outras sessões</button>
+                  </div>
+                </div>
+                <div id="account-sessions-list" class="srv-manage-list" aria-live="polite"></div>
+              </div>
+
+              <div class="profile-editor-card" style="margin-top: 14px; border-color: rgba(242, 63, 67, 0.35);">
+                <div class="cust-label" style="color: var(--danger);">Excluir conta</div>
+                <p class="settings-hint-text" style="margin-bottom: 10px;">
+                  Exclui permanentemente sua conta, sessões, amizades e preferências deste servidor Sancord. Caso você seja dono de algum servidor, transfira a posse ou exclua-o primeiro.
+                </p>
+                <div>
+                  <button type="button" id="delete-own-account-btn" class="btn-secondary small-btn danger-text">🗑️ Excluir minha conta</button>
                 </div>
               </div>
             </div>

@@ -60,6 +60,7 @@ pub fn build_router(state: SharedState) -> Router {
     Router::new()
         .route("/api/register", post(http::register_handler))
         .route("/api/login", post(http::login_handler))
+        .route("/api/recover-password", post(http::recover_password_handler))
         .route("/api/session", post(http::session_handler))
         .route("/api/logout", post(http::logout_handler))
         .route("/api/health", get(http::health_handler))

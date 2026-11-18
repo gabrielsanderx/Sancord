@@ -40,6 +40,8 @@ const AUDIT_LABELS = {
   voice_disconnect: "desconectou da voz",
   automod_update: "alterou o AutoMod",
   automod_block: "bloqueou uma mensagem de",
+  server_transfer_ownership: "transferiu a posse do servidor para",
+  message_bulk_delete: "limpou mensagens em",
 };
 
 const auditState = { serverId: null, entries: [], hasMore: false, loading: false };
@@ -427,6 +429,153 @@ function timeoutMenuItems(srv, target, displayName) {
   return until
     ? [{ label: `Remover castigo (até ${formatTimeoutEnd(until)})`, icon: "⏱️", onSelect: () => removeMemberTimeout(srv, target, displayName) }]
     : [{ label: "Aplicar castigo…", icon: "⏱️", danger: true, onSelect: () => openTimeoutDialog(srv, target, displayName) }];
+}
+
+const BAN_DELETE_CHOICES = [
+  [0, "Não apagar nenhuma mensagem"],
+  [3600, "Última 1 hora"],
+  [86400, "Últimas 24 horas"],
+  [604800, "Últimos 7 dias"],
+];
+
+function canKickMember(srv, target) {
+  const me = state.selfUser?.username?.toLowerCase();
+  const who = String(target || "").toLowerCase();
+  if (!srv || srv.id === "sancord" || !me || !who || who === me || isServerOwner(srv, who)) return false;
+  if (!(srv.members || []).includes(who)) return false;
+  if (isServerOwner(srv, me)) return true;
+  const mine = getServerPermissionsFor(srv, me);
+  if (!mine.kick_members && !mine.administrator) return false;
+  const top = (name) => Math.max(0, ...getUserServerRoles(srv, name).map((r) => r.position || 0));
+  return top(who) < top(me);
+}
+
+function canBanMember(srv, target) {
+  const me = state.selfUser?.username?.toLowerCase();
+  const who = String(target || "").toLowerCase();
+  if (!srv || srv.id === "sancord" || !me || !who || who === me || isServerOwner(srv, who)) return false;
+  if (isServerOwner(srv, me)) return true;
+  const mine = getServerPermissionsFor(srv, me);
+  if (!mine.ban_members && !mine.administrator) return false;
+  const top = (name) => Math.max(0, ...getUserServerRoles(srv, name).map((r) => r.position || 0));
+  return top(who) < top(me);
+}
+
+function canTransferOwnership(srv, target) {
+  const me = state.selfUser?.username?.toLowerCase();
+  const who = String(target || "").toLowerCase();
+  if (!srv || srv.id === "sancord" || !me || !who || who === me) return false;
+  return isServerOwner(srv, me) && (srv.members || []).includes(who);
+}
+
+async function openKickDialog(srv, target, displayName) {
+  const values = await SancordUI.formDialog({
+    title: `Expulsar ${displayName} de ${srv.name}?`,
+    description: "A pessoa será removida do servidor, mas poderá entrar novamente se receber um novo convite.",
+    fields: [
+      { name: "reason", label: "MOTIVO DA EXPULSÃO (OPCIONAL, VAI PARA A AUDITORIA)", type: "textarea", rows: 2, maxlength: 240, placeholder: "Ex: Violação das regras do canal" },
+    ],
+    submitLabel: "Expulsar",
+    danger: true,
+  });
+  if (!values) return;
+  sendWs("KickServerMember", {
+    server_id: srv.id,
+    target_username: String(target || "").toLowerCase(),
+    reason: (values.reason || "").trim() || null,
+  });
+}
+
+async function openBanDialog(srv, target, displayName) {
+  const values = await SancordUI.formDialog({
+    title: `Banir ${displayName} de ${srv.name}?`,
+    description: "A pessoa será removida permanentemente e não poderá voltar com convites até ser desbanida.",
+    fields: [
+      {
+        name: "delete_secs",
+        label: "HISTÓRICO DE MENSAGENS A APAGAR",
+        type: "select",
+        value: "0",
+        options: BAN_DELETE_CHOICES.map(([secs, label]) => ({ value: String(secs), label })),
+      },
+      { name: "reason", label: "MOTIVO DO BANIMENTO (OPCIONAL, VAI PARA A AUDITORIA)", type: "textarea", rows: 2, maxlength: 240, placeholder: "Ex: Spam / links maliciosos" },
+    ],
+    submitLabel: "Banir membro",
+    danger: true,
+  });
+  if (!values) return;
+  sendWs("BanServerMember", {
+    server_id: srv.id,
+    target_username: String(target || "").toLowerCase(),
+    reason: (values.reason || "").trim() || null,
+    delete_message_seconds: Number(values.delete_secs) || 0,
+  });
+}
+
+async function openTransferOwnershipDialog(srv, target, displayName) {
+  const values = await SancordUI.formDialog({
+    title: `Transferir posse de "${srv.name}"?`,
+    description: `Você está prestes a transferir a posse definitiva de "${srv.name}" para ${displayName}. Digite o nome exato do servidor para confirmar.`,
+    fields: [
+      { name: "confirm_name", label: `DIGITE "${srv.name}" PARA CONFIRMAR`, value: "", required: true, maxlength: 60 },
+    ],
+    submitLabel: "Transferir posse",
+    danger: true,
+  });
+  if (!values) return;
+  if ((values.confirm_name || "").trim() !== srv.name) {
+    showUiToast("O nome digitado não corresponde ao nome do servidor.");
+    return;
+  }
+  sendWs("TransferServerOwnership", {
+    server_id: srv.id,
+    new_owner_username: String(target || "").toLowerCase(),
+  });
+}
+
+async function openBulkDeleteDialog(srv, ch) {
+  const values = await SancordUI.formDialog({
+    title: `Limpar mensagens em #${ch.name}`,
+    description: "Apaga em lote as mensagens mais recentes deste canal (mensagens fixadas são preservadas).",
+    fields: [
+      {
+        name: "count",
+        label: "QUANTIDADE DE MENSAGENS RECENTES",
+        type: "select",
+        value: "10",
+        options: [
+          { value: "10", label: "Últimas 10 mensagens" },
+          { value: "25", label: "Últimas 25 mensagens" },
+          { value: "50", label: "Últimas 50 mensagens" },
+          { value: "100", label: "Últimas 100 mensagens" },
+        ],
+      },
+      { name: "author", label: "FILTRAR POR AUTOR (OPCIONAL)", value: "", maxlength: 24, placeholder: "Deixe em branco para todos os autores" },
+    ],
+    submitLabel: "Apagar mensagens",
+    danger: true,
+  });
+  if (!values) return;
+  sendWs("BulkDeleteMessages", {
+    channel_id: ch.id,
+    count: Number(values.count) || 10,
+    author_username: (values.author || "").trim() || null,
+  });
+}
+
+/** Todos os itens de moderação de membro (castigo, expulsar, banir, transferir posse). */
+function memberModerationMenuItems(srv, target, displayName) {
+  const out = [...timeoutMenuItems(srv, target, displayName)];
+  if (canKickMember(srv, target)) {
+    out.push({ label: "Expulsar do servidor…", icon: "👢", danger: true, onSelect: () => openKickDialog(srv, target, displayName) });
+  }
+  if (canBanMember(srv, target)) {
+    out.push({ label: "Banir do servidor…", icon: "🔨", danger: true, onSelect: () => openBanDialog(srv, target, displayName) });
+  }
+  if (canTransferOwnership(srv, target)) {
+    out.push({ label: "Transferir posse do servidor…", icon: "👑", danger: true, onSelect: () => openTransferOwnershipDialog(srv, target, displayName) });
+  }
+  return out;
 }
 
 /** Castigos ativos da própria pessoa: [{ server, until }], do que termina antes. */

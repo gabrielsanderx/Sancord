@@ -129,6 +129,56 @@ pub fn validate_new_password(password: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Valida e normaliza um endereço de e-mail opcional (`""` remove o e-mail).
+pub fn validate_email(raw: &str) -> Result<Option<String>, &'static str> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.len() > 120 || trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("Informe um endereço de e-mail válido.");
+    }
+    let Some((local, domain)) = trimmed.split_once('@') else {
+        return Err("Informe um endereço de e-mail válido.");
+    };
+    if local.is_empty()
+        || domain.len() < 3
+        || domain.contains('@')
+        || !domain.contains('.')
+        || domain.starts_with('.')
+        || domain.ends_with('.')
+    {
+        return Err("Informe um endereço de e-mail válido.");
+    }
+    Ok(Some(trimmed.to_lowercase()))
+}
+
+/// Gera um código de recuperação de uso único no formato `SANC-XXXX-XXXX-XXXX`.
+pub fn generate_recovery_code() -> String {
+    const ALPHABET: &[u8] = b"23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+    let mut bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut bytes);
+    let chars: Vec<char> = bytes
+        .iter()
+        .map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char)
+        .collect();
+    format!(
+        "SANC-{}-{}-{}",
+        chars[0..4].iter().collect::<String>(),
+        chars[4..8].iter().collect::<String>(),
+        chars[8..12].iter().collect::<String>(),
+    )
+}
+
+/// Normaliza o código de recuperação para comparação (maiúsculas, sem traços/espaços).
+pub fn normalize_recovery_code(raw: &str) -> String {
+    raw.trim()
+        .to_uppercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
 /// Limitador simples de tentativas de login por nome de usuário.
 /// Por IP não funciona aqui: atrás do túnel Cloudflare todos chegam como 127.0.0.1.
 #[derive(Default)]

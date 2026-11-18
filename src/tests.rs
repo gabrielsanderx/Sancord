@@ -29,6 +29,8 @@ mod timeouts;
 mod slowmode;
 #[path = "forum_tag_tests.rs"]
 mod forum_tags;
+#[path = "stage_ab_tests.rs"]
+mod stage_ab;
 
 struct TestServer {
     addr: std::net::SocketAddr,

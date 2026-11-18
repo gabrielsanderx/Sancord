@@ -35,7 +35,7 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use tracing::{error, info, warn};
 
-pub const SCHEMA_VERSION: i64 = 13;
+pub const SCHEMA_VERSION: i64 = 14;
 
 /// Metadados de um arquivo enviado (o conteúdo fica em `data/uploads/`).
 #[derive(Debug, Clone, PartialEq)]
@@ -163,7 +163,10 @@ pub enum WriteOp {
     RenameMemberTimeout { from: String, to: String },
     UpsertMessage(Box<ChatMessage>),
     DeleteMessage { id: String },
+    DeleteMessagesByIds { ids: Vec<String> },
     DeleteChannelMessages { channel_id: String },
+    /// Remove uma conta e todos os dados vinculados a ela nas tabelas normalizadas.
+    DeleteUser { id: String, username_lower: String },
     /// Usado quando um usuário muda de nome: IDs de DM contêm o username.
     RenameChannel { from: String, to: String },
     PutKv { key: String, value: String },
@@ -485,6 +488,20 @@ fn migrate_schema(conn: &Connection) -> DbResult<()> {
         txn.execute_batch("PRAGMA user_version = 13;")?;
         txn.commit()?;
     }
+    if version < 14 {
+        // v14: motivo opcional do banimento na tabela `bans`.
+        let txn = conn.unchecked_transaction()?;
+        let present: i64 = txn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('bans') WHERE name = 'reason'",
+            [],
+            |r| r.get(0),
+        )?;
+        if present == 0 {
+            txn.execute_batch("ALTER TABLE bans ADD COLUMN reason TEXT;")?;
+        }
+        txn.execute_batch("PRAGMA user_version = 14;")?;
+        txn.commit()?;
+    }
     Ok(())
 }
 
@@ -612,6 +629,7 @@ fn migrate_v2(conn: &Connection) -> DbResult<()> {
             user_lower TEXT NOT NULL,
             user_id TEXT,
             created_at INTEGER NOT NULL,
+            reason TEXT,
             PRIMARY KEY (server_id, user_lower)
         );
         CREATE TABLE IF NOT EXISTS invites (
@@ -744,11 +762,12 @@ fn replace_server(conn: &Connection, srv: &GuildServer) -> DbResult<()> {
     }
     {
         let mut stmt = conn.prepare(
-            "INSERT OR IGNORE INTO bans (server_id, user_lower, user_id, created_at)
-             VALUES (?1, ?2, (SELECT id FROM users WHERE username_lower = ?2), ?3)",
+            "INSERT OR IGNORE INTO bans (server_id, user_lower, user_id, created_at, reason)
+             VALUES (?1, ?2, (SELECT id FROM users WHERE username_lower = ?2), ?3, ?4)",
         )?;
         for (i, b) in srv.banned_usernames.iter().enumerate() {
-            stmt.execute(params![srv.id, b, now + i as i64])?;
+            let reason = srv.ban_reasons.get(b).cloned();
+            stmt.execute(params![srv.id, b, now + i as i64, reason])?;
         }
     }
     Ok(())
@@ -936,8 +955,27 @@ fn apply(conn: &Connection, op: WriteOp) -> DbResult<()> {
         WriteOp::DeleteMessage { id } => {
             conn.execute("DELETE FROM messages WHERE id = ?1", params![id])?;
         }
+        WriteOp::DeleteMessagesByIds { ids } => {
+            if !ids.is_empty() {
+                let mut stmt = conn.prepare("DELETE FROM messages WHERE id = ?1")?;
+                for id in ids {
+                    stmt.execute(params![id])?;
+                }
+            }
+        }
         WriteOp::DeleteChannelMessages { channel_id } => {
             conn.execute("DELETE FROM messages WHERE channel_id = ?1", params![channel_id])?;
+        }
+        WriteOp::DeleteUser { id, username_lower } => {
+            conn.execute("DELETE FROM users WHERE id = ?1 OR username_lower = ?2", params![id, username_lower])?;
+            conn.execute("DELETE FROM sessions WHERE user_id = ?1", params![id])?;
+            conn.execute("DELETE FROM user_prefs WHERE user_id = ?1", params![id])?;
+            conn.execute("DELETE FROM read_states WHERE user_id = ?1", params![id])?;
+            conn.execute("DELETE FROM server_members WHERE user_lower = ?1", params![username_lower])?;
+            conn.execute("DELETE FROM member_roles WHERE user_lower = ?1", params![username_lower])?;
+            conn.execute("DELETE FROM member_timeouts WHERE user_lower = ?1", params![username_lower])?;
+            conn.execute("DELETE FROM voice_moderation WHERE user_lower = ?1", params![username_lower])?;
+            conn.execute("DELETE FROM group_dm_members WHERE user_lower = ?1", params![username_lower])?;
         }
         WriteOp::RenameChannel { from, to } => {
             conn.execute(
@@ -1166,6 +1204,7 @@ impl Db {
                         member_roles: HashMap::new(),
                         members: Vec::new(),
                         banned_usernames: Vec::new(),
+                        ban_reasons: HashMap::new(),
                         categories: Vec::new(),
                         member_joined_at: HashMap::new(),
                         voice_moderation: HashMap::new(),
@@ -1287,11 +1326,20 @@ impl Db {
                 }
             }
 
-            let mut stmt = c.prepare("SELECT server_id, user_lower FROM bans ORDER BY created_at, rowid")?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let mut stmt = c.prepare("SELECT server_id, user_lower, reason FROM bans ORDER BY created_at, rowid")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            })?;
             for row in rows {
-                let (sid, user) = row?;
+                let (sid, user, reason) = row?;
                 if let Some(i) = slot(&sid) {
+                    if let Some(r) = reason.filter(|s| !s.trim().is_empty()) {
+                        servers[i].ban_reasons.insert(user.clone(), r);
+                    }
                     servers[i].banned_usernames.push(user);
                 }
             }
@@ -2088,6 +2136,7 @@ mod tests {
             member_roles: HashMap::from([("bia".to_string(), vec!["everyone".to_string()])]),
             members: vec!["ana".into(), "bia".into()],
             banned_usernames: vec!["carlos".into()],
+            ban_reasons: HashMap::from([("carlos".to_string(), "spam".to_string())]),
             categories: Vec::new(),
             is_community: true,
             created_at: 1000,

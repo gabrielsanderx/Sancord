@@ -28,6 +28,7 @@ function updatePrefs(partial) {
 
 function onUserPrefsUpdated(payload) {
   state.prefs = payload?.prefs || state.prefs;
+  if (typeof applySyncedUserPrefs === "function") applySyncedUserPrefs(state.prefs);
   renderGuildRailV2();
   renderChannelTree();
 }
@@ -587,6 +588,12 @@ function openChannelMenu(e, srv, ch) {
     },
     { label: "Copiar link do canal", icon: "🔗", onSelect: async () => copyTextSafe(await channelLink(srv, ch), "Link do canal copiado!") },
     ...(!isVoice && typeof notifyMenuItems === "function" ? notifyMenuItems(ch.id) : []),
+    !isVoice && (perms.manage_messages || perms.administrator) && typeof openBulkDeleteDialog === "function" && {
+      label: "Limpar mensagens…",
+      icon: "🧹",
+      danger: true,
+      onSelect: () => openBulkDeleteDialog(srv, ch),
+    },
     perms.manage_channels && { separator: true },
     perms.manage_channels && { label: "Editar canal", icon: "⚙️", onSelect: () => openEditChannelDialog(srv, ch) },
     perms.manage_channels && { label: "Permissões do canal", icon: "🔒", onSelect: () => openPermissionsDialog(srv, ch) },

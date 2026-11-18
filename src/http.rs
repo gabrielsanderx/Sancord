@@ -5,7 +5,10 @@
 //! para compatibilidade com o frontend, mas agora com códigos HTTP corretos.
 
 use crate::auth::{self, PasswordCheck};
-use crate::models::{Account, AuthRequest, AuthResponse, InvitePreviewResponse, SessionRequest};
+use crate::models::{
+    Account, AuthRequest, AuthResponse, InvitePreviewResponse, RecoverPasswordRequest,
+    SessionRequest,
+};
 use crate::state::{ServerState, SharedState, PROTOCOL_VERSION};
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
@@ -110,6 +113,8 @@ pub async fn register_handler(State(state): State<SharedState>, Json(req): Json<
         profile_effect: None,
         password_salt_key: None,
         created_at: Some(format_pt_date_now()),
+        email: None,
+        recovery_code_hash: None,
         token: String::new(),
     };
     st.accounts.insert(key, account.clone());
@@ -200,18 +205,96 @@ pub async fn logout_handler(State(state): State<SharedState>, Json(req): Json<Se
     let hash = auth::hash_token(&req.token);
     let mut st = state.write().await;
     st.revoke_session(&hash);
-    let conns: Vec<String> = st
-        .conn_sessions
-        .iter()
-        .filter(|(_, h)| **h == hash)
-        .map(|(c, _)| c.clone())
-        .collect();
-    for c in conns {
-        if let Some(peer) = st.peers.get(&c) {
-            peer.kick.notify_one();
-        }
-    }
     StatusCode::NO_CONTENT
+}
+
+/// Redefine a senha usando o código único de recuperação gerado pelo titular da conta.
+pub async fn recover_password_handler(
+    State(state): State<SharedState>,
+    Json(req): Json<RecoverPasswordRequest>,
+) -> AuthReply {
+    let key = req.username.trim().to_lowercase();
+    if key.is_empty() {
+        return auth_err(StatusCode::BAD_REQUEST, "Informe seu nome de usuário.");
+    }
+    let code_norm = auth::normalize_recovery_code(&req.recovery_code);
+    if code_norm.is_empty() {
+        return auth_err(StatusCode::BAD_REQUEST, "Informe o código de recuperação.");
+    }
+    if let Err(msg) = auth::validate_new_password(&req.new_password) {
+        return auth_err(StatusCode::BAD_REQUEST, msg);
+    }
+    let now = auth::now_ms();
+
+    let (account_id, stored_code_hash) = {
+        let mut st = state.write().await;
+        if st.login_limiter.is_blocked(&key, now) {
+            return auth_err(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Muitas tentativas falhas. Aguarde alguns minutos e tente novamente.",
+            );
+        }
+        let Some(acc) = st.accounts.get(&key) else {
+            st.login_limiter.record_failure(&key, now);
+            return auth_err(
+                StatusCode::UNAUTHORIZED,
+                "Usuário não encontrado ou código de recuperação inválido.",
+            );
+        };
+        let Some(code_hash) = acc.recovery_code_hash.clone() else {
+            st.login_limiter.record_failure(&key, now);
+            return auth_err(
+                StatusCode::UNAUTHORIZED,
+                "Esta conta não possui um código de recuperação ativo.",
+            );
+        };
+        (acc.id.clone(), code_hash)
+    };
+
+    let new_pw = req.new_password.clone();
+    let hash_for_check = stored_code_hash.clone();
+    let salt_for_check = key.clone();
+    let check = tokio::task::spawn_blocking(move || {
+        if auth::verify_password(&hash_for_check, &code_norm, &salt_for_check) == PasswordCheck::Invalid {
+            return Ok(None);
+        }
+        auth::hash_password(&new_pw).map(Some)
+    })
+    .await;
+
+    let new_pw_hash = match check {
+        Ok(Ok(Some(h))) => h,
+        Ok(Ok(None)) => {
+            let mut st = state.write().await;
+            st.login_limiter.record_failure(&key, now);
+            warn!("Código de recuperação incorreto para '{key}'");
+            return auth_err(StatusCode::UNAUTHORIZED, "Código de recuperação inválido.");
+        }
+        other => {
+            error!("Falha na recuperação de senha: {other:?}");
+            return auth_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Erro interno ao redefinir senha. Tente novamente.",
+            );
+        }
+    };
+
+    let mut st = state.write().await;
+    let Some(acc) = st.accounts.get_mut(&key) else {
+        return auth_err(StatusCode::UNAUTHORIZED, "Conta não encontrada.");
+    };
+    if acc.recovery_code_hash.as_deref() != Some(stored_code_hash.as_str()) {
+        return auth_err(StatusCode::UNAUTHORIZED, "Este código de recuperação já foi utilizado.");
+    }
+    acc.password_hash = new_pw_hash;
+    acc.recovery_code_hash = None;
+    let updated_acc = acc.clone();
+    st.login_limiter.clear(&key);
+    st.save_accounts();
+    st.revoke_other_sessions(&account_id, None);
+    let token = st.create_session(&account_id, req.remember);
+    info!("Senha de '{key}' redefinida via código de recuperação (uso único consumido).");
+    auth_ok(token, &updated_acc)
 }
 
 pub async fn health_handler(State(state): State<SharedState>) -> Json<serde_json::Value> {

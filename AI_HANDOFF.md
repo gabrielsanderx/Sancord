@@ -878,3 +878,46 @@ pendente. Os fontes já têm as duas coisas.
     `codex/visual-0.2.1` (ou direto para `main`), rodar o workflow `release.yml`, criar a
     tag `v0.2.1` e atualizar o `SancordServer.exe` + `Sancord.exe` de produção (migrando
     o banco principal de v10 para v13).
+
+### Release v0.2.1 publicada e produção atualizada — 18/11/2026
+
+- **Commit final:** `8123c3cb4c886a241280e29b9afedf3870f13c19` (pai `06a29d4`).
+  - Branches `main`, `release/0.2.1` e `codex/visual-0.2.1` avançadas sem `force` (fast-forward).
+  - Tag `v0.2.1` criada apontando para `8123c3cb4c886a241280e29b9afedf3870f13c19`.
+- **CI e Release no GitHub Actions:**
+  - **Windows CI (`main`):** [Run 44379587188](https://github.com/gabrielsanderx/Sancord/actions/runs/44379587188) concluído com `success`.
+  - **Stable Windows release (`v0.2.1`):** [Run 44379590944](https://github.com/gabrielsanderx/Sancord/actions/runs/44379590944) concluído com `success` em todos os 5 jobs (`tests / test`, `package`, `sign`, `verify-package` e `publish`).
+  - Release pública marcada como `latest`: https://github.com/gabrielsanderx/Sancord/releases/tag/v0.2.1
+- **Coleta e verificação local dos assets publicados (`qa-candidate-0.2.1/published-v0.2.1/`):**
+  - `sancord-release verify` aprovado ("Assinatura e integridade válidas.").
+  - Ensaio HTTPS com o artefato real publicado (`https_downloads_real_ci_artifact_with_embedded_release_key`): **1 aprovado** (total: **241 testes aprovados**).
+  - Hashes SHA-256 dos arquivos publicados na `v0.2.1`:
+    - `Sancord.exe` (`10.676.224` bytes): `51cf4f210633bd1fe7af1e5e1d50a4960698a68a7c46faa7da5db4a0aee65b0d`
+    - `SancordServer.exe` (`10.463.744` bytes): `c3b9f4e754d008c97e896d40ca45072262bbe997eea2cbdf0a38404c56d3375d`
+    - `Sancord-0.2.1-windows-x64.zip` (`5.890.540` bytes): `4f254f2187839e7eeb04b28da3459b82edc997a73d08feab856956a778b98d8a`
+    - `sancord-update.json` (`1.741` bytes): `8b0732b0906efd55f22cac3ca2c4ee05855912fb2ccee03e7e63eca6f600d896`
+    - `sancord-update.sig` (`128` bytes): `9d93dffaa78f88a2f40e59c1d92124b63b04ac6c8b94ad483483f81b750160d2`
+- **Produção atualizada para `0.2.1`:**
+  - Backup completo pré-`0.2.1` verificado em `D:\Sancord\data-backup-pre-0.2.1-20261118-1623/` (`11` arquivos de `data/`, `2.582.411` bytes + `SancordServer-0.2.0.exe` e `Sancord-0.2.0.exe`).
+  - `D:\Sancord\SancordServer.exe`, `D:\Sancord\Sancord.exe` e `D:\Sancord\dist\` atualizados com os binários oficiais assinados da release `v0.2.1`.
+  - Servidor de produção iniciado na porta `3000` (mantendo o túnel `cloudflared` ativo); `/api/health` respondeu `version: "0.2.1"`, `ok: true`, `protocol_version: 2` tanto localmente (`http://127.0.0.1:3000/api/health`) quanto pelo túnel público (`https://treasure-practitioner-fred-reason.trycloudflare.com/api/health`).
+
+## Implementação das Etapas A (restante) e B — v0.2.2 (schema v14) — 18/11/2026
+
+- **Etapa A.3 (Autostart de produção no Windows):**
+  - Criados `scripts/start-host.ps1` e `scripts/install-autostart.ps1` (`-Action Install|Uninstall|Status`), registrando `SancordHost` em `HKCU:\Software\Microsoft\Windows\CurrentVersion\Run` para subir `SancordServer.exe` e `cloudflared.exe` automaticamente no login do Windows.
+- **Etapa A.5 (Preferências sincronizadas na conta):**
+  - `UserPrefs` estendido com `user_notes`, `ignored_users` e `starred_messages` (com sanitização e migração automática na primeira conexão em `static/app.js` e `static/js/servers.js`); lista local legada `sancord_blocked_users` removida.
+- **Etapa B.1 (E-mail opcional e recuperação de senha):**
+  - `Account` estendido com `email` e `recovery_code_hash` (Argon2id, uso único); adicionados `UpdateAccountEmail`, `GenerateRecoveryCode`, `POST /api/recover-password` e diálogo de recuperação na tela de login (`#open-recover-password-btn`).
+- **Etapa B.2 (Sessões e dispositivos ativos):**
+  - Adicionados `ListSessions` e `RevokeSession` (incluindo `"others"` e desconexão imediata de WebSockets órfãos via `kick_orphaned_connections` e drenagem de mensagens finais antes do frame Close em `ws.rs`), com painel em Configurações → Minha Conta → Senha e segurança.
+- **Etapa B.3 (Transferência de posse do servidor):**
+  - Adicionado `TransferServerOwnership` com confirmação pelo nome do servidor, atualização do cargo Fundador e registro de auditoria `server_transfer_ownership`.
+- **Etapa B.4 (Kick/Ban com motivo, limpeza de histórico no ban e exclusão em lote):**
+  - Esquema SQLite migrado para **v14** (`ALTER TABLE bans ADD COLUMN reason TEXT`); `BanServerMember` aceita `reason` e `delete_message_seconds` (até 7 dias); `KickServerMember` aceita `reason`; adicionado `BulkDeleteMessages` (até 100 mensagens não fixadas, filtro opcional por autor) e evento `MessagesBulkDeleted`.
+- **Etapa B.5 (Exclusão da própria conta):**
+  - Adicionado `DeleteAccount` com verificação da senha atual, bloqueio caso o usuário ainda seja dono de algum servidor e limpeza completa em memória e no SQLite (`WriteOp::DeleteUser`).
+- **Validação:**
+  - **248 testes automatizados aprovados** (`111` núcleo Rust + `8` desktop + `1` manutenção + `128` frontend).
+  - Ensaio de migração em cópia somente-leitura do banco real (`scripts/test-migration.ps1`): `v13 → v14; 31 tabelas antigas preservadas por hash; integridade OK`.

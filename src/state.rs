@@ -131,6 +131,7 @@ fn default_hub(text_channels: Vec<Channel>, voice_channels: Vec<Channel>) -> Gui
         member_roles: HashMap::new(),
         members: Vec::new(),
         banned_usernames: Vec::new(),
+        ban_reasons: HashMap::new(),
         categories: Vec::new(),
         is_community: true,
         created_at: 0,
@@ -452,6 +453,78 @@ impl ServerState {
         self.rebuild_account_index();
     }
 
+    /// Remove completamente uma conta e todas as referências a ela em memória e no banco.
+    pub fn remove_account(&mut self, account_id: &str, username_lower: &str) {
+        self.accounts.remove(username_lower);
+        self.persisted_accounts.remove(account_id);
+        self.rebuild_account_index();
+        self.user_prefs.remove(account_id);
+        self.upload_times.remove(account_id);
+        self.read_states.retain(|(u, _), _| u != account_id);
+
+        let mut touched_servers = Vec::new();
+        for srv in &mut self.servers {
+            let was_member = srv.members.iter().any(|m| m == username_lower);
+            srv.members.retain(|m| m != username_lower);
+            srv.member_roles.remove(username_lower);
+            srv.member_joined_at.remove(username_lower);
+            srv.voice_moderation.remove(username_lower);
+            srv.member_timeouts.remove(username_lower);
+            if was_member {
+                touched_servers.push(srv.id.clone());
+            }
+        }
+        self.save_servers();
+        for sid in touched_servers {
+            if let Some(srv) = self.find_server(&sid).cloned() {
+                self.broadcast_to_server(&sid, ServerMessage::ServerUpdated { server: srv });
+            }
+        }
+
+        let fs = &mut self.friends_store;
+        for map in [
+            &mut fs.friends,
+            &mut fs.incoming_requests,
+            &mut fs.outgoing_requests,
+            &mut fs.blocked,
+        ] {
+            map.remove(username_lower);
+            for list in map.values_mut() {
+                list.retain(|x| x != username_lower);
+            }
+        }
+        fs.open_dms.remove(username_lower);
+        fs.dm_requests.remove(username_lower);
+        fs.ignored_dms.remove(username_lower);
+        self.save_friends();
+
+        let group_ids: Vec<String> = self
+            .group_dms
+            .values()
+            .filter(|g| g.members.iter().any(|m| m == username_lower))
+            .map(|g| g.id.clone())
+            .collect();
+        for gid in group_ids {
+            if let Some(g) = self.group_dms.get_mut(&gid) {
+                g.members.retain(|m| m != username_lower);
+                if g.members.is_empty() {
+                    self.group_dms.remove(&gid);
+                    self.db.write(WriteOp::DeleteGroupDm { id: gid });
+                    continue;
+                }
+                if g.owner == username_lower {
+                    g.owner = g.members[0].clone();
+                }
+            }
+            self.save_group(&gid);
+        }
+
+        self.db.write(WriteOp::DeleteUser {
+            id: account_id.to_string(),
+            username_lower: username_lower.to_string(),
+        });
+    }
+
     /// Timestamp monotônico para novas mensagens (evita empates na ordenação).
     pub fn next_message_ts(&mut self) -> i64 {
         let now = auth::now_ms();
@@ -482,6 +555,17 @@ impl ServerState {
             list.retain(|m| m.id != message_id);
         }
         self.db.write(WriteOp::DeleteMessage { id: message_id.to_string() });
+    }
+
+    pub fn remove_messages_by_ids(&mut self, channel_id: &str, ids: &[String]) {
+        if ids.is_empty() {
+            return;
+        }
+        let set: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        if let Some(list) = self.chat_history.get_mut(channel_id) {
+            list.retain(|m| !set.contains(m.id.as_str()));
+        }
+        self.db.write(WriteOp::DeleteMessagesByIds { ids: ids.to_vec() });
     }
 
     pub fn delete_channel_history(&mut self, channel_id: &str) {
@@ -738,6 +822,7 @@ impl ServerState {
     pub fn revoke_session(&mut self, token_hash: &str) {
         self.sessions.remove(token_hash);
         self.db.write(WriteOp::DeleteSession { token_hash: token_hash.to_string() });
+        self.kick_orphaned_connections();
     }
 
     /// Revoga as demais sessões do usuário (ex.: após troca de senha).
@@ -748,6 +833,56 @@ impl ServerState {
             user_id: user_id.to_string(),
             keep_token_hash: keep_token_hash.map(|s| s.to_string()),
         });
+        self.kick_orphaned_connections();
+    }
+
+    /// Encerra imediatamente conexões WebSocket cujo token de sessão não está mais ativo.
+    pub fn kick_orphaned_connections(&self) {
+        let conns: Vec<String> = self
+            .conn_sessions
+            .iter()
+            .filter(|(_, h)| !self.sessions.contains_key(*h))
+            .map(|(c, _)| c.clone())
+            .collect();
+        for c in conns {
+            if let Some(peer) = self.peers.get(&c) {
+                peer.kick.notify_one();
+            }
+        }
+    }
+
+    /// Lista as sessões ativas de uma conta, ordenadas com a sessão atual primeiro.
+    pub fn sessions_for_account(
+        &self,
+        account_id: &str,
+        current_token_hash: Option<&str>,
+    ) -> Vec<crate::models::SessionInfo> {
+        let now = auth::now_ms();
+        let mut list: Vec<crate::models::SessionInfo> = self
+            .sessions
+            .values()
+            .filter(|s| s.user_id == account_id && s.expires_at > now)
+            .map(|s| {
+                let id: String = s.token_hash.chars().take(16).collect();
+                let current = current_token_hash.is_some_and(|h| h == s.token_hash);
+                let connected = self.conn_sessions.values().any(|h| h == &s.token_hash);
+                crate::models::SessionInfo {
+                    id,
+                    created_at: s.created_at,
+                    last_seen_at: s.last_seen_at,
+                    expires_at: s.expires_at,
+                    remember: s.remember,
+                    current,
+                    connected,
+                }
+            })
+            .collect();
+        list.sort_by(|a, b| {
+            b.current
+                .cmp(&a.current)
+                .then_with(|| b.last_seen_at.cmp(&a.last_seen_at))
+        });
+        list
     }
 
     // ---------------------------------------------------------------------

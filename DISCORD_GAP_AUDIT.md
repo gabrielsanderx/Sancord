@@ -8,11 +8,11 @@ Documento vivo. Atualize as linhas quando um item mudar de estado e anote a data
 |---|---|
 | Data da auditoria | 18/11/2026 |
 | Quem auditou | Claude (sessão de código), a pedido do usuário |
-| Sancord publicado | **v0.2.0**: tag `v0.2.0` = commit `390aeee` (branch `main`), release estável no GitHub e servidor de produção na 0.2.0 (banco v10) |
-| Sancord nos fontes (não publicado) | `390aeee` + alterações locais sem commit: timeout de membro (schema v11), modo lento (v12) e tags de fórum (v13) |
-| Tamanho | Rust ~19 mil linhas (39 arquivos); front-end `app.js` ~7,7 mil linhas, 14 módulos JS e `styles.css` ~7,8 mil linhas |
+| Sancord publicado | **v0.2.1**: tag `v0.2.1` = commit `8123c3cb` (branch `main`), release estável no GitHub e servidor/cliente de produção na 0.2.1 (banco v13) |
+| Sancord nos fontes (não publicado) | Sincronizado com `v0.2.1` (`8123c3cb`): timeout de membro (schema v11), modo lento (v12), tags de fórum (v13), Etapa A itens 1 e 2 e refatoração visual desktop |
+| Tamanho | Rust ~19 mil linhas (39 arquivos); front-end `app.js` ~7,7 mil linhas, 15 módulos JS, `styles.css` ~7,8 mil linhas e `ui.css` ~1,1 mil linhas |
 | Protocolo | 84 tipos de pedido do cliente (`ClientMessage`) e 47 tipos de evento do servidor (`ServerMessage`) |
-| Testes | 219 aprovados: 106 núcleo, 8 desktop, 1 manutenção e 104 front-end |
+| Testes | 240 padrão + 1 artefato assinado = 241 aprovados: 106 núcleo, 8 desktop, 1 manutenção, 125 front-end e 1 HTTPS real |
 | Referência Discord | Notas oficiais de atualização até **09/11/2026**; reforma visual de **25/03/2025** (temas Light, Ash, Dark e Onyx, 3 densidades, lista de canais redimensionável); criptografia de chamadas DAVE concluída em **maio/2026**; artigos de suporte sobre encaminhamento, polls, soundboard, texto em voz, stages e passkeys (as datas dos artigos variam, ver Fontes) |
 
 **Como foi verificado:**
@@ -853,3 +853,5 @@ Pouco trabalho, muito efeito, risco baixo:
 
 - 18/11/2026 — primeira auditoria completa (Claude).
 - 18/11/2026 — Etapa A, item 1, feito nos fontes (versão 0.2.1, não publicada): opções mortas ligadas ou removidas, textos de segurança corrigidos, Status da conta real e Central da Família renomeada para Foco e segurança.
+- 18/11/2026 — Etapa A, item 2, concluído e publicado (**v0.2.1**, commit `8123c3cb`, run `44379590944`): refatoração visual desktop (`ui.css` + `icons.js`), ajustes de contraste e responsividade, release assinada publicada no GitHub e produção atualizada para 0.2.1 (banco migrado de v10 para v13).
+- 18/11/2026 — Etapa A (itens 3 e 5) e Etapa B completa (itens 1 a 5) implementadas e validadas (**v0.2.2**, schema `v14`): autostart do host no Windows (`scripts/install-autostart.ps1` + `scripts/start-host.ps1`), sincronização de notas/favoritas/ignorados na conta (`UserPrefs`), e-mail opcional e recuperação de senha por código único (`POST /api/recover-password`), gerenciamento de sessões e dispositivos ativos (`ListSessions`/`RevokeSession`), transferência de posse de servidor (`TransferServerOwnership`), expulsão/banimento com motivo persistido (`bans.reason`), limpeza de histórico no banimento, exclusão de mensagens em lote (`BulkDeleteMessages`) e exclusão da própria conta (`DeleteAccount`).

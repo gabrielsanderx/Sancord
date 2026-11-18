@@ -225,10 +225,22 @@ pub struct UserPrefs {
     /// "all" (tudo), "mentions" (só menções) ou "none" (nada). O canal vence o servidor.
     #[serde(default)]
     pub notify_levels: HashMap<String, String>,
+    /// Notas privadas sobre outros usuários: username_lower -> texto da nota.
+    #[serde(default)]
+    pub user_notes: HashMap<String, String>,
+    /// Usuários silenciados localmente (mensagens recolhidas/ocultas): username_lower.
+    #[serde(default)]
+    pub ignored_users: Vec<String>,
+    /// IDs de mensagens marcadas com estrela (favoritadas) pelo usuário.
+    #[serde(default)]
+    pub starred_messages: Vec<String>,
 }
 
 impl UserPrefs {
     pub const MAX_NOTIFY_LEVELS: usize = 500;
+    pub const MAX_USER_NOTES: usize = 200;
+    pub const MAX_IGNORED_USERS: usize = 500;
+    pub const MAX_STARRED_MESSAGES: usize = 500;
 
     /// Mantém só níveis válidos e chaves curtas, no máximo 500 itens.
     pub fn sanitize_notify_levels(levels: HashMap<String, String>) -> HashMap<String, String> {
@@ -236,6 +248,57 @@ impl UserPrefs {
             .into_iter()
             .filter(|(k, v)| !k.is_empty() && k.len() <= 120 && matches!(v.as_str(), "all" | "mentions" | "none"))
             .take(Self::MAX_NOTIFY_LEVELS)
+            .collect()
+    }
+
+    pub fn sanitize_user_notes(notes: HashMap<String, String>) -> HashMap<String, String> {
+        notes
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let key = k.trim().to_lowercase();
+                let val: String = v
+                    .trim()
+                    .chars()
+                    .filter(|c| !c.is_control() || *c == '\n')
+                    .take(500)
+                    .collect();
+                if !key.is_empty() && key.len() <= 32 && !val.is_empty() {
+                    Some((key, val))
+                } else {
+                    None
+                }
+            })
+            .take(Self::MAX_USER_NOTES)
+            .collect()
+    }
+
+    pub fn sanitize_ignored_users(list: Vec<String>) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        list.into_iter()
+            .filter_map(|u| {
+                let key = u.trim().to_lowercase();
+                if !key.is_empty() && key.len() <= 32 && seen.insert(key.clone()) {
+                    Some(key)
+                } else {
+                    None
+                }
+            })
+            .take(Self::MAX_IGNORED_USERS)
+            .collect()
+    }
+
+    pub fn sanitize_starred_messages(list: Vec<String>) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        list.into_iter()
+            .filter_map(|id| {
+                let clean = id.trim().to_string();
+                if !clean.is_empty() && clean.len() <= 64 && seen.insert(clean.clone()) {
+                    Some(clean)
+                } else {
+                    None
+                }
+            })
+            .take(Self::MAX_STARRED_MESSAGES)
             .collect()
     }
 }
@@ -526,6 +589,9 @@ pub struct GuildServer {
     pub members: Vec<String>,
     #[serde(default)]
     pub banned_usernames: Vec<String>,
+    /// Motivo opcional de cada banimento: username_lower -> motivo.
+    #[serde(default)]
+    pub ban_reasons: HashMap<String, String>,
     #[serde(default)]
     pub categories: Vec<Category>,
     /// Servidor de comunidade (aberto) ou privado (amigos/grupo).
@@ -845,6 +911,12 @@ pub struct Account {
     pub password_salt_key: Option<String>,
     #[serde(default)]
     pub created_at: Option<String>,
+    /// E-mail opcional associado à conta (visível apenas para o próprio titular).
+    #[serde(default)]
+    pub email: Option<String>,
+    /// Hash do código de recuperação de senha (uso único).
+    #[serde(default)]
+    pub recovery_code_hash: Option<String>,
     /// Token legado (texto puro) das versões antigas. Só é lido durante a
     /// migração dos JSON e convertido em sessão com hash; nunca é gravado.
     #[serde(default, skip_serializing)]
@@ -867,6 +939,27 @@ pub struct AuthRequest {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionRequest {
     pub token: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RecoverPasswordRequest {
+    pub username: String,
+    pub recovery_code: String,
+    pub new_password: String,
+    #[serde(default = "default_remember")]
+    pub remember: bool,
+}
+
+/// Resumo seguro de uma sessão ativa da conta (nunca expõe o token nem o hash completo).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionInfo {
+    pub id: String,
+    pub created_at: i64,
+    pub last_seen_at: i64,
+    pub expires_at: i64,
+    pub remember: bool,
+    pub current: bool,
+    pub connected: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1560,7 +1653,7 @@ pub enum ClientMessage {
     /// Revogar um convite
     RevokeInvite { server_id: String, code: String },
 
-    /// Atualizar preferências sincronizadas (barra de servidores, pastas, silenciados)
+    /// Atualizar preferências sincronizadas (barra de servidores, pastas, silenciados, notas, ignorados, favoritos)
     UpdateUserPrefs {
         #[serde(default)]
         guild_layout: Option<Vec<GuildLayoutItem>>,
@@ -1572,6 +1665,12 @@ pub enum ClientMessage {
         privacy: Option<PrivacySettings>,
         #[serde(default)]
         notify_levels: Option<HashMap<String, String>>,
+        #[serde(default)]
+        user_notes: Option<HashMap<String, String>>,
+        #[serde(default)]
+        ignored_users: Option<Vec<String>>,
+        #[serde(default)]
+        starred_messages: Option<Vec<String>>,
     },
 
     /// Deletar um canal personalizado
@@ -1684,12 +1783,58 @@ pub enum ClientMessage {
     KickServerMember {
         server_id: String,
         target_username: String,
+        #[serde(default)]
+        reason: Option<String>,
     },
 
     /// Banir membro permanentemente de um servidor
     BanServerMember {
         server_id: String,
         target_username: String,
+        #[serde(default)]
+        reason: Option<String>,
+        /// Segundos recentes de histórico de mensagens do membro banido a apagar (0 = manter tudo, máx 7 dias).
+        #[serde(default)]
+        delete_message_seconds: Option<u64>,
+    },
+
+    /// Transferir posse definitiva do servidor para outro membro atual (somente dono atual)
+    TransferServerOwnership {
+        server_id: String,
+        new_owner_username: String,
+    },
+
+    /// Apagar em lote as últimas `count` mensagens de um canal (até 100), opcionalmente filtrando por autor
+    BulkDeleteMessages {
+        channel_id: String,
+        count: usize,
+        #[serde(default)]
+        author_username: Option<String>,
+    },
+
+    /// Listar sessões ativas da própria conta
+    ListSessions,
+
+    /// Revogar uma sessão específica pelo ID curto (`SessionInfo.id`)
+    RevokeSession {
+        session_id: String,
+    },
+
+    /// Atualizar (ou remover) e-mail da conta mediante confirmação da senha atual
+    UpdateAccountEmail {
+        #[serde(default)]
+        email: Option<String>,
+        current_password: String,
+    },
+
+    /// Gerar código único de recuperação de senha mediante confirmação da senha atual
+    GenerateRecoveryCode {
+        current_password: String,
+    },
+
+    /// Excluir permanentemente a própria conta mediante confirmação da senha atual
+    DeleteAccount {
+        current_password: String,
     },
 
     /// Castigo (timeout): `duration_secs` = 0 remove; máximo de 28 dias.
@@ -2088,5 +2233,26 @@ pub enum ServerMessage {
         from_username: String,
         from_color: String,
         from_avatar: Option<String>,
+    },
+
+    /// Lista de sessões ativas da conta do usuário
+    SessionsList {
+        sessions: Vec<SessionInfo>,
+    },
+
+    /// E-mail privado da conta do usuário (enviado na conexão e ao atualizar)
+    AccountEmailUpdated {
+        email: Option<String>,
+    },
+
+    /// Código de recuperação gerado (exibido uma única vez ao usuário)
+    RecoveryCodeGenerated {
+        recovery_code: String,
+    },
+
+    /// Lote de mensagens apagadas de um canal (moderação ou banimento com limpeza)
+    MessagesBulkDeleted {
+        channel_id: String,
+        message_ids: Vec<String>,
     },
 }

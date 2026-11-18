@@ -187,11 +187,12 @@ const state = {
   })(),
   blockedUsers: (() => {
     try {
-      return new Set(JSON.parse(localStorage.getItem("sancord_blocked_users") || "[]"));
-    } catch (_) {
-      return new Set();
-    }
+      localStorage.removeItem("sancord_blocked_users");
+    } catch (_) {}
+    return new Set();
   })(),
+  accountEmail: null,
+  activeSessions: [],
   unreadDividerByChannel: new Map(),
   servers: [],
   activeServerId: "sancord",
@@ -199,18 +200,75 @@ const state = {
   pendingInviteCode: new URLSearchParams(window.location.search).get("invite") || "",
 };
 
+function applySyncedUserPrefs(prefs) {
+  if (!prefs || typeof prefs !== "object") return;
+  const migrationPatch = {};
+  if (Array.isArray(prefs.starred_messages)) {
+    if (prefs.starred_messages.length === 0 && state.starredMsgIds?.size > 0) {
+      migrationPatch.starred_messages = Array.from(state.starredMsgIds);
+      prefs.starred_messages = migrationPatch.starred_messages;
+    } else {
+      state.starredMsgIds = new Set(prefs.starred_messages);
+      try {
+        localStorage.setItem("sancord_starred_msgs", JSON.stringify(prefs.starred_messages));
+      } catch (_) {}
+    }
+  }
+  if (Array.isArray(prefs.ignored_users)) {
+    if (prefs.ignored_users.length === 0 && state.ignoredUsers?.size > 0) {
+      migrationPatch.ignored_users = Array.from(state.ignoredUsers);
+      prefs.ignored_users = migrationPatch.ignored_users;
+    } else {
+      state.ignoredUsers = new Set(prefs.ignored_users.map((u) => String(u).toLowerCase()));
+      try {
+        localStorage.setItem("sancord_ignored_users", JSON.stringify(prefs.ignored_users));
+      } catch (_) {}
+    }
+  }
+  if (prefs.user_notes && typeof prefs.user_notes === "object") {
+    const serverKeys = Object.keys(prefs.user_notes);
+    if (serverKeys.length === 0) {
+      try {
+        const localNotes = JSON.parse(localStorage.getItem("sancord_user_notes") || "{}");
+        if (localNotes && typeof localNotes === "object" && Object.keys(localNotes).length > 0) {
+          migrationPatch.user_notes = localNotes;
+          prefs.user_notes = localNotes;
+        }
+      } catch (_) {}
+    } else {
+      try {
+        localStorage.setItem("sancord_user_notes", JSON.stringify(prefs.user_notes));
+      } catch (_) {}
+    }
+  }
+  if (Object.keys(migrationPatch).length > 0) {
+    sendWs("UpdateUserPrefs", migrationPatch);
+  }
+  updateHomeStarredBadge();
+}
+
 function saveStarredMessages() {
+  const list = Array.from(state.starredMsgIds);
   try {
-    localStorage.setItem("sancord_starred_msgs", JSON.stringify(Array.from(state.starredMsgIds)));
+    localStorage.setItem("sancord_starred_msgs", JSON.stringify(list));
   } catch (_) {}
+  if (state.prefs) {
+    state.prefs.starred_messages = list;
+    sendWs("UpdateUserPrefs", { starred_messages: list });
+  }
   updateHomeStarredBadge();
 }
 
 function saveModerationLists() {
+  const list = Array.from(state.ignoredUsers);
   try {
-    localStorage.setItem("sancord_ignored_users", JSON.stringify(Array.from(state.ignoredUsers)));
-    localStorage.setItem("sancord_blocked_users", JSON.stringify(Array.from(state.blockedUsers)));
+    localStorage.setItem("sancord_ignored_users", JSON.stringify(list));
+    localStorage.removeItem("sancord_blocked_users");
   } catch (_) {}
+  if (state.prefs) {
+    state.prefs.ignored_users = list;
+    sendWs("UpdateUserPrefs", { ignored_users: list });
+  }
 }
 
 function updateHomeStarredBadge() {
@@ -224,9 +282,13 @@ updateHomeStarredBadge();
 
 function getUserProfileNote(username) {
   if (!username) return "";
+  const key = username.toLowerCase();
+  if (state.prefs?.user_notes && typeof state.prefs.user_notes === "object" && key in state.prefs.user_notes) {
+    return state.prefs.user_notes[key] || "";
+  }
   try {
     const map = JSON.parse(localStorage.getItem("sancord_user_notes") || "{}");
-    return map[username.toLowerCase()] || "";
+    return map[key] || "";
   } catch (_) {
     return "";
   }
@@ -234,13 +296,22 @@ function getUserProfileNote(username) {
 
 function setUserProfileNote(username, note) {
   if (!username) return;
+  const key = username.toLowerCase();
+  const clean = (note || "").trim();
+  const map = { ...(state.prefs?.user_notes || {}) };
   try {
-    const map = JSON.parse(localStorage.getItem("sancord_user_notes") || "{}");
-    const clean = (note || "").trim();
-    if (clean) map[username.toLowerCase()] = clean;
-    else delete map[username.toLowerCase()];
+    const localMap = JSON.parse(localStorage.getItem("sancord_user_notes") || "{}");
+    Object.assign(map, localMap, state.prefs?.user_notes || {});
+  } catch (_) {}
+  if (clean) map[key] = clean;
+  else delete map[key];
+  try {
     localStorage.setItem("sancord_user_notes", JSON.stringify(map));
   } catch (_) {}
+  if (state.prefs) {
+    state.prefs.user_notes = map;
+    sendWs("UpdateUserPrefs", { user_notes: map });
+  }
 }
 
 function getActiveTextChannelId() {
@@ -1126,6 +1197,7 @@ async function handleServerMessage(msg) {
 
     case "Welcome": {
       state.prefs = payload.prefs || { guild_layout: [], muted_servers: [], collapsed_categories: [] };
+      applySyncedUserPrefs(state.prefs);
       state.historyPageSize = payload.history_page_size || 50;
       state.historyState = new Map();
       state.selfUser = payload.user;
@@ -1433,6 +1505,51 @@ async function handleServerMessage(msg) {
         if (!pinnedPopover.classList.contains("hidden")) {
           renderPinnedPopover();
         }
+      }
+      break;
+    }
+
+    case "MessagesBulkDeleted": {
+      const { channel_id, message_ids = [] } = payload;
+      const idSet = new Set(message_ids);
+      if (state.chatHistory[channel_id]) {
+        state.chatHistory[channel_id] = state.chatHistory[channel_id].filter(
+          (m) => !idSet.has(m.id)
+        );
+      }
+      if (channel_id === getActiveTextChannelId()) {
+        renderChatMessages({ preserveScroll: true });
+        updatePinnedBadge();
+        if (!pinnedPopover.classList.contains("hidden")) {
+          renderPinnedPopover();
+        }
+      }
+      break;
+    }
+
+    case "AccountEmailUpdated": {
+      state.accountEmail = payload?.email || null;
+      renderAccountEmailUI();
+      break;
+    }
+
+    case "SessionsList": {
+      state.activeSessions = payload?.sessions || [];
+      renderAccountSessionsUI();
+      break;
+    }
+
+    case "RecoveryCodeGenerated": {
+      const code = payload?.recovery_code || "";
+      if (code) {
+        SancordUI.confirm({
+          title: "🔑 Seu código único de recuperação",
+          message: `Guarde este código em um local seguro (ele só funciona uma única vez e substitui qualquer código anterior):\n\n${code}`,
+          confirmLabel: "Copiar código",
+          cancelLabel: "Fechar",
+        }).then((ok) => {
+          if (ok) copyTextSafe(code, "Código de recuperação copiado!");
+        });
       }
       break;
     }
@@ -4467,7 +4584,9 @@ function renderMembersSidebar() {
         { header: u.display_name || u.username },
         { label: "Ver perfil", icon: "👤", onSelect: openProfile },
       ];
-      const mod = timeoutMenuItems(srv, u.username, u.display_name || u.username);
+      const mod = typeof memberModerationMenuItems === "function"
+        ? memberModerationMenuItems(srv, u.username, u.display_name || u.username)
+        : timeoutMenuItems(srv, u.username, u.display_name || u.username);
       if (mod.length) items.push({ separator: true }, { header: "Moderação do servidor" }, ...mod);
       SancordUI.contextMenu(e.clientX, e.clientY, items);
     });
@@ -4702,6 +4821,60 @@ loginForm.addEventListener("submit", async (e) => {
     authSubmitBtn.classList.remove("is-loading");
   }
 });
+
+async function openRecoverPasswordDialog() {
+  const values = await SancordUI.formDialog({
+    title: "🔑 Recuperar senha com código único",
+    description: "Informe o nome de usuário da sua conta, o código de recuperação gerado anteriormente (formato SANC-XXXX-XXXX-XXXX) e escolha uma nova senha.",
+    fields: [
+      { name: "username", label: "NOME DE USUÁRIO", value: usernameInput?.value.trim() || "", required: true, maxlength: 24, placeholder: "Ex: Gabriel" },
+      { name: "recovery_code", label: "CÓDIGO DE RECUPERAÇÃO", value: "", required: true, maxlength: 32, placeholder: "SANC-XXXX-XXXX-XXXX" },
+      { name: "new_password", label: "NOVA SENHA (MÍN. 8 CARACTERES)", type: "password", value: "", required: true, maxlength: 128 },
+      { name: "confirm_password", label: "CONFIRMAR NOVA SENHA", type: "password", value: "", required: true, maxlength: 128 },
+    ],
+    submitLabel: "Redefinir senha e entrar",
+  });
+  if (!values) return;
+  const username = (values.username || "").trim();
+  const recovery_code = (values.recovery_code || "").trim();
+  const new_password = values.new_password || "";
+  const confirm_password = values.confirm_password || "";
+  if (!username || !recovery_code || !new_password) return;
+  if (new_password.length < 8) {
+    showAuthError("A nova senha deve ter pelo menos 8 caracteres.");
+    return;
+  }
+  if (new_password !== confirm_password) {
+    showAuthError("A confirmação da nova senha não confere.");
+    return;
+  }
+  const remember = document.getElementById("remember-me-input")?.checked ?? true;
+  try {
+    const res = await SancordNet.fetch("/api/recover-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, recovery_code, new_password, remember }),
+    });
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (_) {}
+    if (!res.ok || !data?.ok) {
+      showAuthError(data?.message || `Não foi possível redefinir a senha (erro ${res.status}).`);
+      return;
+    }
+    storeSession(data.token, data.username, remember);
+    if (passwordInput) passwordInput.value = "";
+    loginModal.classList.add("hidden");
+    connectWebSocket(data.token);
+    showUiToast("Senha redefinida com sucesso!");
+  } catch (err) {
+    console.error("[Sancord] Falha na recuperação de senha:", err);
+    showAuthError("Não foi possível conectar ao servidor para redefinir a senha.");
+  }
+}
+
+document.getElementById("open-recover-password-btn")?.addEventListener("click", openRecoverPasswordDialog);
 
 function logoutAccount() {
   leaveVoiceChannel();
@@ -7486,6 +7659,127 @@ document.getElementById("account-copy-id-btn")?.addEventListener("click", () => 
   copyTextSafe(state.selfUser?.id || "", "ID da conta copiado!");
 });
 
+function renderAccountEmailUI() {
+  const el = document.getElementById("account-info-email");
+  if (!el) return;
+  el.textContent = state.accountEmail || "Não cadastrado";
+}
+
+function renderAccountSessionsUI() {
+  const listEl = document.getElementById("account-sessions-list");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  const sessions = state.activeSessions || [];
+  if (sessions.length === 0) {
+    listEl.innerHTML = `<div class="settings-hint-text">Nenhuma sessão encontrada.</div>`;
+    return;
+  }
+  const fmt = (ms) => {
+    try {
+      return new Date(ms).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch (_) {
+      return "";
+    }
+  };
+  for (const s of sessions) {
+    const row = document.createElement("div");
+    row.className = "srv-manage-row";
+    const info = document.createElement("div");
+    const statusBadge = s.current
+      ? `<span class="security-pill ok" style="margin-left:6px;">Sessão atual</span>`
+      : s.connected
+      ? `<span class="security-pill" style="margin-left:6px;">Conectado agora</span>`
+      : "";
+    info.innerHTML = `
+      <div>
+        <strong>Dispositivo Sancord (${escapeHtml(s.id.slice(0, 8))})</strong>${statusBadge}
+      </div>
+      <div class="settings-hint-text">
+        Criada em ${escapeHtml(fmt(s.created_at))} • Última atividade: ${escapeHtml(fmt(s.last_seen_at))} • ${s.remember ? "Sessão longa (30 dias)" : "Sessão temporária (24 h)"}
+      </div>
+    `;
+    const actions = document.createElement("div");
+    if (!s.current) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary small-btn danger-text";
+      btn.textContent = "Encerrar";
+      btn.addEventListener("click", async () => {
+        if (await SancordUI.confirm({ title: "Encerrar sessão?", message: "Desconectar este dispositivo imediatamente?", confirmLabel: "Encerrar sessão", danger: true })) {
+          sendWs("RevokeSession", { session_id: s.id });
+        }
+      });
+      actions.appendChild(btn);
+    }
+    row.append(info, actions);
+    listEl.appendChild(row);
+  }
+}
+
+document.getElementById("account-edit-email-btn")?.addEventListener("click", async () => {
+  const values = await SancordUI.formDialog({
+    title: "E-mail da conta",
+    description: "Associe um endereço de e-mail à sua conta (visível apenas para você). Deixe o campo de e-mail em branco para removê-lo.",
+    fields: [
+      { name: "email", label: "ENDEREÇO DE E-MAIL (OPCIONAL)", value: state.accountEmail || "", maxlength: 120, placeholder: "voce@exemplo.com" },
+      { name: "current_password", label: "SENHA ATUAL PARA CONFIRMAR", type: "password", value: "", required: true, maxlength: 128 },
+    ],
+    submitLabel: "Salvar e-mail",
+  });
+  if (!values || !values.current_password) return;
+  sendWs("UpdateAccountEmail", {
+    email: (values.email || "").trim() || null,
+    current_password: values.current_password,
+  });
+});
+
+document.getElementById("generate-recovery-code-btn")?.addEventListener("click", async () => {
+  const values = await SancordUI.formDialog({
+    title: "🔑 Gerar código de recuperação de senha",
+    description: "O código gerado permite redefinir sua senha na tela de login caso você a esqueça. Ele funciona uma única vez e invalida qualquer código gerado anteriormente.",
+    fields: [
+      { name: "current_password", label: "CONFIRME SUA SENHA ATUAL", type: "password", value: "", required: true, maxlength: 128 },
+    ],
+    submitLabel: "Gerar código único",
+  });
+  if (!values || !values.current_password) return;
+  sendWs("GenerateRecoveryCode", { current_password: values.current_password });
+});
+
+document.getElementById("refresh-sessions-btn")?.addEventListener("click", () => {
+  sendWs("ListSessions");
+});
+
+document.getElementById("revoke-other-sessions-btn")?.addEventListener("click", async () => {
+  const ok = await SancordUI.confirm({
+    title: "Encerrar todas as outras sessões?",
+    message: "Todos os outros dispositivos conectados à sua conta serão desconectados imediatamente. Sua sessão atual continuará ativa.",
+    confirmLabel: "Encerrar outras sessões",
+    danger: true,
+  });
+  if (ok) sendWs("RevokeSession", { session_id: "others" });
+});
+
+document.getElementById("delete-own-account-btn")?.addEventListener("click", async () => {
+  const myUsername = state.selfUser?.username || "";
+  const values = await SancordUI.formDialog({
+    title: "Excluir sua conta permanentemente?",
+    description: `Esta ação não pode ser desfeita. Digite seu nome de usuário (${myUsername}) e sua senha atual para excluir definitivamente sua conta.`,
+    fields: [
+      { name: "confirm_user", label: `DIGITE "${myUsername}" PARA CONFIRMAR`, value: "", required: true, maxlength: 24 },
+      { name: "current_password", label: "SENHA ATUAL", type: "password", value: "", required: true, maxlength: 128 },
+    ],
+    submitLabel: "Excluir conta permanentemente",
+    danger: true,
+  });
+  if (!values || !values.current_password) return;
+  if ((values.confirm_user || "").trim().toLowerCase() !== myUsername.toLowerCase()) {
+    showUiToast("O nome de usuário digitado não confere.");
+    return;
+  }
+  sendWs("DeleteAccount", { current_password: values.current_password });
+});
+
 document.getElementById("open-change-pw-modal-btn")?.addEventListener("click", () => {
   const form = document.getElementById("account-password-form");
   const fb = document.getElementById("account-pw-feedback");
@@ -7576,12 +7870,18 @@ exportSettingsBtn?.addEventListener("click", () => {
 });
 
 clearLocalNotesBtn?.addEventListener("click", async () => {
-  if (!await SancordUI.confirm({title:"Limpar notas e favoritas?",message:"Remover todas as notas pessoais e mensagens favoritas deste aparelho?",confirmLabel:"Limpar",danger:true})) return;
+  if (!await SancordUI.confirm({title:"Limpar notas e favoritas?",message:"Remover todas as notas pessoais e mensagens favoritas da sua conta?",confirmLabel:"Limpar",danger:true})) return;
   localStorage.removeItem("sancord_user_notes");
   localStorage.removeItem("sancord_starred_msgs");
   state.starredMsgIds.clear();
+  if (state.prefs) {
+    state.prefs.user_notes = {};
+    state.prefs.starred_messages = [];
+    sendWs("UpdateUserPrefs", { user_notes: {}, starred_messages: [] });
+  }
+  updateHomeStarredBadge();
   renderChatMessages();
-  showUiToast("Notas e favoritas locais limpas!");
+  showUiToast("Notas e favoritas limpas!");
 });
 
 notifDesktopToggle?.addEventListener("change", async (e) => {
@@ -8268,25 +8568,25 @@ function populateServerSettingsUI(srv) {
             ${mRoles.map((r) => `<span class="role-chip-pill" style="border-color:${r.color};color:${r.color};">${escapeHtml(r.name)}</span>`).join("") || `<span class="settings-hint-text">Sem cargos extras</span>`}
           </div>
         </div>
-        <div style="display:flex;gap:6px;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
           ${canTimeout ? `<button type="button" class="btn-secondary small-btn" data-act="timeout">${timeoutUntil ? "Remover castigo" : "Castigo"}</button>` : ""}
           ${canModThis && (isOwner || perms.kick_members || perms.administrator) ? `<button type="button" class="btn-secondary small-btn" data-act="kick">Expulsar</button>` : ""}
           ${canModThis && (isOwner || perms.ban_members || perms.administrator) ? `<button type="button" class="btn-secondary small-btn danger-text" data-act="ban">Banir</button>` : ""}
+          ${canModThis && isOwner && srv.id !== "sancord" ? `<button type="button" class="btn-secondary small-btn" data-act="transfer" title="Transferir posse do servidor para este membro">👑 Transferir posse</button>` : ""}
         </div>
       `;
       row.querySelector('[data-act="timeout"]')?.addEventListener("click", () => {
         if (timeoutUntil) removeMemberTimeout(srv, mLow, displayName);
         else openTimeoutDialog(srv, mLow, displayName);
       });
-      row.querySelector('[data-act="kick"]')?.addEventListener("click", async () => {
-        if (await SancordUI.confirm({title:"Expulsar membro?",message:`Expulsar ${displayName} de ${srv.name}?`,confirmLabel:"Expulsar",danger:true})) {
-          sendWs("KickServerMember", { server_id: srv.id, target_username: mLow });
-        }
+      row.querySelector('[data-act="kick"]')?.addEventListener("click", () => {
+        if (typeof openKickDialog === "function") openKickDialog(srv, mLow, displayName);
       });
-      row.querySelector('[data-act="ban"]')?.addEventListener("click", async () => {
-        if (await SancordUI.confirm({title:"Banir membro?",message:`Banir ${displayName} de ${srv.name}?`,confirmLabel:"Banir",danger:true})) {
-          sendWs("BanServerMember", { server_id: srv.id, target_username: mLow });
-        }
+      row.querySelector('[data-act="ban"]')?.addEventListener("click", () => {
+        if (typeof openBanDialog === "function") openBanDialog(srv, mLow, displayName);
+      });
+      row.querySelector('[data-act="transfer"]')?.addEventListener("click", () => {
+        if (typeof openTransferOwnershipDialog === "function") openTransferOwnershipDialog(srv, mLow, displayName);
       });
       memList.appendChild(row);
     }
@@ -8299,9 +8599,16 @@ function populateServerSettingsUI(srv) {
   if (banList) {
     banList.innerHTML = "";
     for (const bLow of banned) {
+      const reason = srv.ban_reasons?.[bLow];
       const row = document.createElement("div");
       row.className = "srv-manage-row";
-      row.innerHTML = `<span>🔨 <strong>${escapeHtml(bLow)}</strong></span><button type="button" class="btn-secondary small-btn">Desbanir</button>`;
+      row.innerHTML = `
+        <div>
+          <span>🔨 <strong>${escapeHtml(bLow)}</strong></span>
+          ${reason ? `<div class="settings-hint-text">Motivo: ${escapeHtml(reason)}</div>` : ""}
+        </div>
+        <button type="button" class="btn-secondary small-btn">Desbanir</button>
+      `;
       row.querySelector("button")?.addEventListener("click", () => {
         sendWs("UnbanServerMember", { server_id: srv.id, target_username: bLow });
       });

@@ -279,7 +279,8 @@ impl ServerState {
             }
             MessagesPage { channel_id, .. }
             | PinnedMessages { channel_id, .. }
-            | MessageDeleted { channel_id, .. } => {
+            | MessageDeleted { channel_id, .. }
+            | MessagesBulkDeleted { channel_id, .. } => {
                 if !self.can_read_text_channel(recipient, channel_id) {
                     return false;
                 }

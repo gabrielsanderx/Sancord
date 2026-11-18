@@ -437,6 +437,13 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
                     }
                 }
                 _ = kick_send.notified() => {
+                    while let Ok(server_msg) = rx.try_recv() {
+                        if let Ok(json_text) = serde_json::to_string(&server_msg) {
+                            if ws_sender.send(Message::Text(json_text)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
                     let _ = ws_sender.send(Message::Close(Some(CloseFrame {
                         code: 1013,
                         reason: "lagging".into(),
@@ -485,6 +492,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
 /// sincronizar tudo que o cliente perdeu enquanto estava offline.
 async fn join_authenticated(user_id: &str, acc: Account, state: &SharedState) {
     let account_id = acc.id.clone();
+    let account_email = acc.email.clone();
     let mut st = state.write().await;
     {
         {
@@ -556,6 +564,15 @@ async fn join_authenticated(user_id: &str, acc: Account, state: &SharedState) {
                 ice_servers: st.config.ice_servers.clone(),
             };
             st.send_to(user_id, welcome);
+            st.send_to(
+                user_id,
+                ServerMessage::AccountEmailUpdated {
+                    email: account_email,
+                },
+            );
+            let current_hash = st.conn_sessions.get(user_id).cloned();
+            let sessions = st.sessions_for_account(&account_id, current_hash.as_deref());
+            st.send_to(user_id, ServerMessage::SessionsList { sessions });
 
             st.broadcast_except(
                 user_id,
@@ -1909,6 +1926,9 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             collapsed_categories,
             privacy,
             notify_levels,
+            user_notes,
+            ignored_users,
+            starred_messages,
         } => {
             let mut st = state.write().await;
             let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
@@ -1938,6 +1958,15 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             }
             if let Some(levels) = notify_levels {
                 prefs.notify_levels = crate::models::UserPrefs::sanitize_notify_levels(levels);
+            }
+            if let Some(notes) = user_notes {
+                prefs.user_notes = crate::models::UserPrefs::sanitize_user_notes(notes);
+            }
+            if let Some(ignored) = ignored_users {
+                prefs.ignored_users = crate::models::UserPrefs::sanitize_ignored_users(ignored);
+            }
+            if let Some(starred) = starred_messages {
+                prefs.starred_messages = crate::models::UserPrefs::sanitize_starred_messages(starred);
             }
             st.set_prefs(&account_id, prefs);
             // Revalida (remove servidores que não são do usuário) e sincroniza todas as abas.
@@ -2537,6 +2566,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 member_roles,
                 members: vec![me_lower.clone()],
                 banned_usernames: Vec::new(),
+                ban_reasons: HashMap::new(),
                 categories,
                 is_community,
                 created_at: now,
@@ -3147,11 +3177,15 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         ClientMessage::KickServerMember {
             server_id,
             target_username,
+            reason,
         } => {
             if server_id == "sancord" {
                 return;
             }
             let target_lower = target_username.trim().to_lowercase();
+            let clean_reason = reason
+                .map(|r| r.trim().chars().filter(|c| !c.is_control()).take(240).collect::<String>())
+                .filter(|r| !r.is_empty());
             let mut st = state.write().await;
             let Some(me) = st.users.get(user_id).cloned() else {
                 return;
@@ -3180,7 +3214,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             };
 
             st.save_servers();
-            crate::moderation::audit(&st, &server_id, &me_lower, "member_kick", Some(&target_lower), None);
+            crate::moderation::audit(&st, &server_id, &me_lower, "member_kick", Some(&target_lower), clean_reason.clone());
+            let removal_msg = match &clean_reason {
+                Some(r) => format!("Você foi expulso de '{}'. Motivo: {}", srv_name, r),
+                None => format!("Você foi expulso de '{}'.", srv_name),
+            };
             let target_uids: Vec<String> = st
                 .users
                 .iter()
@@ -3192,7 +3230,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     &uid,
                     ServerMessage::ServerRemoved {
                         server_id: server_id.clone(),
-                        reason: Some(format!("Você foi expulso de '{}'.", srv_name)),
+                        reason: Some(removal_msg.clone()),
                     },
                 );
             }
@@ -3210,18 +3248,24 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         ClientMessage::BanServerMember {
             server_id,
             target_username,
+            reason,
+            delete_message_seconds,
         } => {
             if server_id == "sancord" {
                 return;
             }
             let target_lower = target_username.trim().to_lowercase();
+            let clean_reason = reason
+                .map(|r| r.trim().chars().filter(|c| !c.is_control()).take(240).collect::<String>())
+                .filter(|r| !r.is_empty());
+            let delete_secs = delete_message_seconds.unwrap_or(0).min(7 * 24 * 3600);
             let mut st = state.write().await;
             let Some(me) = st.users.get(user_id).cloned() else {
                 return;
             };
             let me_lower = me.username.to_lowercase();
 
-            let (updated_srv, srv_name) = {
+            let (updated_srv, srv_name, srv_channels) = {
                 let Some(srv) = st.find_server_mut(&server_id) else {
                     return;
                 };
@@ -3242,11 +3286,62 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 if !srv.banned_usernames.contains(&target_lower) {
                     srv.banned_usernames.push(target_lower.clone());
                 }
-                (srv.clone(), srv.name.clone())
+                if let Some(r) = &clean_reason {
+                    srv.ban_reasons.insert(target_lower.clone(), r.clone());
+                } else {
+                    srv.ban_reasons.remove(&target_lower);
+                }
+                let channels: Vec<String> = srv
+                    .text_channels
+                    .iter()
+                    .map(|c| c.id.clone())
+                    .chain(srv.threads.iter().map(|t| t.id.clone()))
+                    .collect();
+                (srv.clone(), srv.name.clone(), channels)
             };
 
+            if delete_secs > 0 {
+                let cutoff = crate::auth::now_ms() - (delete_secs as i64) * 1000;
+                for ch_id in srv_channels {
+                    let ids: Vec<String> = st
+                        .chat_history
+                        .get(&ch_id)
+                        .map(|list| {
+                            list.iter()
+                                .filter(|m| {
+                                    m.created_at >= cutoff
+                                        && m.author_kind() == crate::models::AuthorKind::User
+                                        && m.author_name.eq_ignore_ascii_case(&target_lower)
+                                })
+                                .map(|m| m.id.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if !ids.is_empty() {
+                        st.remove_messages_by_ids(&ch_id, &ids);
+                        st.broadcast_to_server(
+                            &server_id,
+                            ServerMessage::MessagesBulkDeleted {
+                                channel_id: ch_id,
+                                message_ids: ids,
+                            },
+                        );
+                    }
+                }
+            }
+
             st.save_servers();
-            crate::moderation::audit(&st, &server_id, &me_lower, "member_ban", Some(&target_lower), None);
+            let audit_details = match (&clean_reason, delete_secs > 0) {
+                (Some(r), true) => Some(format!("{r} (histórico recente apagado)")),
+                (Some(r), false) => Some(r.clone()),
+                (None, true) => Some("histórico recente apagado".to_string()),
+                (None, false) => None,
+            };
+            crate::moderation::audit(&st, &server_id, &me_lower, "member_ban", Some(&target_lower), audit_details);
+            let removal_msg = match &clean_reason {
+                Some(r) => format!("Você foi banido de '{}'. Motivo: {}", srv_name, r),
+                None => format!("Você foi banido de '{}'.", srv_name),
+            };
             let target_uids: Vec<String> = st
                 .users
                 .iter()
@@ -3258,7 +3353,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     &uid,
                     ServerMessage::ServerRemoved {
                         server_id: server_id.clone(),
-                        reason: Some(format!("Você foi banido de '{}'.", srv_name)),
+                        reason: Some(removal_msg.clone()),
                     },
                 );
             }
@@ -3285,11 +3380,424 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     return;
                 }
                 srv.banned_usernames.retain(|b| b != &target_lower);
+                srv.ban_reasons.remove(&target_lower);
                 srv.clone()
             };
             st.save_servers();
             crate::moderation::audit(&st, &server_id, &me_lower, "member_unban", Some(&target_lower), None);
             st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
+        }
+
+        ClientMessage::TransferServerOwnership {
+            server_id,
+            new_owner_username,
+        } => {
+            if server_id == "sancord" {
+                state.read().await.feedback(
+                    user_id,
+                    false,
+                    "transfer_ownership",
+                    "A posse do hub principal não pode ser transferida.",
+                );
+                return;
+            }
+            let target_lower = new_owner_username.trim().to_lowercase();
+            let mut st = state.write().await;
+            let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
+                return;
+            };
+            if target_lower.is_empty() || target_lower == me_lower {
+                st.feedback(
+                    user_id,
+                    false,
+                    "transfer_ownership",
+                    "Escolha outro membro do servidor para receber a posse.",
+                );
+                return;
+            }
+            if !st.accounts.contains_key(&target_lower) {
+                st.feedback(user_id, false, "transfer_ownership", "Usuário de destino não encontrado.");
+                return;
+            }
+            let target_display = st
+                .accounts
+                .get(&target_lower)
+                .map(|a| a.username.clone())
+                .unwrap_or_else(|| new_owner_username.trim().to_string());
+
+            let result: Result<GuildServer, &'static str> = (|| {
+                let srv = st.find_server_mut(&server_id).ok_or("Servidor não encontrado.")?;
+                if !srv.is_owner(&me_lower) {
+                    return Err("Apenas o dono atual pode transferir a posse do servidor.");
+                }
+                if !srv.is_member(&target_lower) {
+                    return Err("O novo dono precisa ser um membro atual do servidor.");
+                }
+                if !srv.members.contains(&me_lower) {
+                    srv.members.push(me_lower.clone());
+                }
+                if !srv.members.contains(&target_lower) {
+                    srv.members.push(target_lower.clone());
+                }
+                srv.owner_username = target_lower.clone();
+                if let Some(founder_role_id) = srv
+                    .roles
+                    .iter()
+                    .find(|r| r.id.starts_with("role-owner-") || r.name == "Fundador")
+                    .map(|r| r.id.clone())
+                {
+                    let list = srv.member_roles.entry(target_lower.clone()).or_default();
+                    if !list.contains(&founder_role_id) {
+                        list.push(founder_role_id);
+                    }
+                }
+                Ok(srv.clone())
+            })();
+
+            match result {
+                Ok(updated_srv) => {
+                    st.save_servers();
+                    crate::moderation::audit(
+                        &st,
+                        &server_id,
+                        &me_lower,
+                        "server_transfer_ownership",
+                        Some(&target_lower),
+                        None,
+                    );
+                    st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
+                    st.feedback(
+                        user_id,
+                        true,
+                        "transfer_ownership",
+                        format!("Posse do servidor transferida para {}!", target_display),
+                    );
+                }
+                Err(msg) => st.feedback(user_id, false, "transfer_ownership", msg),
+            }
+        }
+
+        ClientMessage::BulkDeleteMessages {
+            channel_id,
+            count,
+            author_username,
+        } => {
+            if count == 0 {
+                state.read().await.feedback(
+                    user_id,
+                    false,
+                    "bulk_delete",
+                    "Informe quantas mensagens deseja apagar (1 a 100).",
+                );
+                return;
+            }
+            let clamp_count = count.clamp(1, 100);
+            let author_filter = author_username
+                .map(|a| a.trim().to_lowercase())
+                .filter(|a| !a.is_empty());
+
+            let mut st = state.write().await;
+            let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
+                return;
+            };
+            let Some(srv) = st.find_server_by_text_channel(&channel_id).cloned() else {
+                st.feedback(
+                    user_id,
+                    false,
+                    "bulk_delete",
+                    "Limpeza em lote só está disponível em canais de servidores.",
+                );
+                return;
+            };
+            let perms = srv.channel_permissions(&me_lower, &channel_id);
+            if !srv.is_owner(&me_lower) && !perms.administrator && !perms.manage_messages {
+                st.feedback(
+                    user_id,
+                    false,
+                    "bulk_delete",
+                    "Você precisa da permissão 'Gerenciar mensagens' para limpar mensagens em lote.",
+                );
+                return;
+            }
+
+            let ids: Vec<String> = st
+                .chat_history
+                .get(&channel_id)
+                .map(|list| {
+                    list.iter()
+                        .rev()
+                        .filter(|m| !m.pinned)
+                        .filter(|m| {
+                            author_filter
+                                .as_ref()
+                                .map_or(true, |af| m.author_name.to_lowercase() == *af)
+                        })
+                        .take(clamp_count)
+                        .map(|m| m.id.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if ids.is_empty() {
+                st.feedback(
+                    user_id,
+                    false,
+                    "bulk_delete",
+                    "Nenhuma mensagem não fixada encontrada com esses critérios.",
+                );
+                return;
+            }
+
+            let deleted_len = ids.len();
+            st.remove_messages_by_ids(&channel_id, &ids);
+            let details = match &author_filter {
+                Some(af) => format!("{} mensagem(ns) de {}", deleted_len, af),
+                None => format!("{} mensagem(ns)", deleted_len),
+            };
+            crate::moderation::audit(
+                &st,
+                &srv.id,
+                &me_lower,
+                "message_bulk_delete",
+                Some(&channel_id),
+                Some(details),
+            );
+            st.broadcast_to_server(
+                &srv.id,
+                ServerMessage::MessagesBulkDeleted {
+                    channel_id,
+                    message_ids: ids,
+                },
+            );
+            st.feedback(
+                user_id,
+                true,
+                "bulk_delete",
+                format!("{} mensagem(ns) apagada(s).", deleted_len),
+            );
+        }
+
+        ClientMessage::ListSessions => {
+            let st = state.read().await;
+            let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
+                return;
+            };
+            let Some(account_id) = st.accounts.get(&me_lower).map(|a| a.id.clone()) else {
+                return;
+            };
+            let curr = st.conn_sessions.get(user_id).cloned();
+            let sessions = st.sessions_for_account(&account_id, curr.as_deref());
+            st.send_to(user_id, ServerMessage::SessionsList { sessions });
+        }
+
+        ClientMessage::RevokeSession { session_id } => {
+            let mut st = state.write().await;
+            let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
+                return;
+            };
+            let Some(account_id) = st.accounts.get(&me_lower).map(|a| a.id.clone()) else {
+                return;
+            };
+            let curr = st.conn_sessions.get(user_id).cloned();
+            if session_id == "others" {
+                st.revoke_other_sessions(&account_id, curr.as_deref());
+                let sessions = st.sessions_for_account(&account_id, curr.as_deref());
+                st.send_to(user_id, ServerMessage::SessionsList { sessions });
+                st.feedback(user_id, true, "revoke_session", "Todas as outras sessões foram encerradas.");
+                return;
+            }
+            let target_hash = st
+                .sessions
+                .values()
+                .find(|s| {
+                    s.user_id == account_id
+                        && session_id.len() >= 8
+                        && s.token_hash.starts_with(&session_id)
+                })
+                .map(|s| s.token_hash.clone());
+            let Some(hash) = target_hash else {
+                st.feedback(user_id, false, "revoke_session", "Sessão não encontrada.");
+                return;
+            };
+            st.revoke_session(&hash);
+            let sessions = st.sessions_for_account(&account_id, curr.as_deref());
+            st.send_to(user_id, ServerMessage::SessionsList { sessions });
+            st.feedback(user_id, true, "revoke_session", "Sessão encerrada com sucesso.");
+        }
+
+        ClientMessage::UpdateAccountEmail {
+            email,
+            current_password,
+        } => {
+            let clean_email = match crate::auth::validate_email(email.as_deref().unwrap_or("")) {
+                Ok(e) => e,
+                Err(msg) => {
+                    state.read().await.feedback(user_id, false, "update_email", msg);
+                    return;
+                }
+            };
+            let (account_id, stored_hash, salt_key) = {
+                let st = state.read().await;
+                let Some(me) = st.users.get(user_id) else {
+                    return;
+                };
+                let me_lower = me.username.to_lowercase();
+                let Some(acc) = st.accounts.get(&me_lower) else {
+                    return;
+                };
+                (
+                    acc.id.clone(),
+                    acc.password_hash.clone(),
+                    acc.password_salt_key.clone().unwrap_or(me_lower),
+                )
+            };
+            let cur = current_password;
+            let valid = tokio::task::spawn_blocking(move || {
+                crate::auth::verify_password(&stored_hash, &cur, &salt_key)
+                    != crate::auth::PasswordCheck::Invalid
+            })
+            .await
+            .unwrap_or(false);
+
+            let mut st = state.write().await;
+            if !valid {
+                st.feedback(user_id, false, "update_email", "Senha atual incorreta.");
+                return;
+            }
+            let key = st.account_by_id(&account_id).map(|a| a.username.to_lowercase());
+            if let Some(k) = key {
+                if let Some(acc) = st.accounts.get_mut(&k) {
+                    acc.email = clean_email.clone();
+                }
+                st.save_accounts();
+                send_to_username(
+                    &st,
+                    &k,
+                    ServerMessage::AccountEmailUpdated {
+                        email: clean_email.clone(),
+                    },
+                );
+                let msg = if clean_email.is_some() {
+                    "E-mail da conta atualizado!"
+                } else {
+                    "E-mail removido da conta."
+                };
+                st.feedback(user_id, true, "update_email", msg);
+            }
+        }
+
+        ClientMessage::GenerateRecoveryCode { current_password } => {
+            let (account_id, stored_hash, salt_key) = {
+                let st = state.read().await;
+                let Some(me) = st.users.get(user_id) else {
+                    return;
+                };
+                let me_lower = me.username.to_lowercase();
+                let Some(acc) = st.accounts.get(&me_lower) else {
+                    return;
+                };
+                (
+                    acc.id.clone(),
+                    acc.password_hash.clone(),
+                    acc.password_salt_key.clone().unwrap_or(me_lower),
+                )
+            };
+            let cur = current_password;
+            let outcome = tokio::task::spawn_blocking(move || {
+                use crate::auth::{
+                    generate_recovery_code, hash_password, normalize_recovery_code,
+                    verify_password, PasswordCheck,
+                };
+                if verify_password(&stored_hash, &cur, &salt_key) == PasswordCheck::Invalid {
+                    return Err("Senha atual incorreta.");
+                }
+                let code = generate_recovery_code();
+                let norm = normalize_recovery_code(&code);
+                let hash = hash_password(&norm)
+                    .map_err(|_| "Não foi possível gerar o código de recuperação.")?;
+                Ok((code, hash))
+            })
+            .await
+            .unwrap_or(Err("Não foi possível gerar o código de recuperação."));
+
+            let mut st = state.write().await;
+            match outcome {
+                Ok((code, hash)) => {
+                    let key = st.account_by_id(&account_id).map(|a| a.username.to_lowercase());
+                    if let Some(acc) = key.and_then(|k| st.accounts.get_mut(&k)) {
+                        acc.recovery_code_hash = Some(hash);
+                    }
+                    st.save_accounts();
+                    st.send_to(user_id, ServerMessage::RecoveryCodeGenerated { recovery_code: code });
+                    st.feedback(
+                        user_id,
+                        true,
+                        "generate_recovery_code",
+                        "Código de recuperação gerado! Guarde-o em local seguro (uso único).",
+                    );
+                }
+                Err(msg) => st.feedback(user_id, false, "generate_recovery_code", msg),
+            }
+        }
+
+        ClientMessage::DeleteAccount { current_password } => {
+            let (account_id, me_lower, stored_hash, salt_key) = {
+                let st = state.read().await;
+                let Some(me) = st.users.get(user_id) else {
+                    return;
+                };
+                let me_lower = me.username.to_lowercase();
+                if st.servers.iter().any(|s| s.id != "sancord" && s.is_owner(&me_lower)) {
+                    st.feedback(
+                        user_id,
+                        false,
+                        "delete_account",
+                        "Transfira a posse ou exclua os servidores dos quais você é dono antes de excluir sua conta.",
+                    );
+                    return;
+                }
+                let Some(acc) = st.accounts.get(&me_lower) else {
+                    return;
+                };
+                (
+                    acc.id.clone(),
+                    me_lower.clone(),
+                    acc.password_hash.clone(),
+                    acc.password_salt_key.clone().unwrap_or(me_lower),
+                )
+            };
+            let cur = current_password;
+            let valid = tokio::task::spawn_blocking(move || {
+                crate::auth::verify_password(&stored_hash, &cur, &salt_key)
+                    != crate::auth::PasswordCheck::Invalid
+            })
+            .await
+            .unwrap_or(false);
+
+            let mut st = state.write().await;
+            if !valid {
+                st.feedback(user_id, false, "delete_account", "Senha atual incorreta.");
+                return;
+            }
+            if st.servers.iter().any(|s| s.id != "sancord" && s.is_owner(&me_lower)) {
+                st.feedback(
+                    user_id,
+                    false,
+                    "delete_account",
+                    "Transfira a posse ou exclua os servidores dos quais você é dono antes de excluir sua conta.",
+                );
+                return;
+            }
+            send_to_username(
+                &st,
+                &me_lower,
+                ServerMessage::AuthFailed {
+                    message: "Sua conta foi excluída permanentemente.".to_string(),
+                },
+            );
+            st.remove_account(&account_id, &me_lower);
+            st.revoke_other_sessions(&account_id, None);
+            st.broadcast_friends_sync_all();
         }
 
         ClientMessage::ChangePassword {
@@ -3411,8 +3919,33 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                             *b = new_lower.clone();
                         }
                     }
+                    if let Some(reason) = srv.ban_reasons.remove(&old_lower) {
+                        srv.ban_reasons.insert(new_lower.clone(), reason);
+                    }
                     if let Some(t) = srv.member_joined_at.remove(&old_lower) {
                         srv.member_joined_at.insert(new_lower.clone(), t);
+                    }
+                }
+                let mut updated_prefs = Vec::new();
+                for (uid, prefs) in &mut st.user_prefs {
+                    let mut changed = false;
+                    if let Some(note) = prefs.user_notes.remove(&old_lower) {
+                        prefs.user_notes.insert(new_lower.clone(), note);
+                        changed = true;
+                    }
+                    for ig in &mut prefs.ignored_users {
+                        if ig == &old_lower {
+                            *ig = new_lower.clone();
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        updated_prefs.push((uid.clone(), prefs.clone()));
+                    }
+                }
+                for (uid, prefs) in updated_prefs {
+                    if let Ok(data) = serde_json::to_string(&prefs) {
+                        st.db.write(crate::db::WriteOp::PutUserPrefs { user_id: uid, data });
                     }
                 }
                 st.db.write(crate::db::WriteOp::RenameVoiceModeration {

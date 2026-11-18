@@ -1,5 +1,25 @@
 # Histórico de versões
 
+## 0.2.2
+
+- Preferências sincronizadas na conta (`UserPrefs`): notas privadas de perfil,
+  usuários ignorados e mensagens favoritas agora acompanham a conta entre dispositivos
+  e sessões; lista local legada de bloqueios (`sancord_blocked_users`) removida.
+- E-mail opcional da conta e recuperação de senha por código único (`SANC-XXXX-XXXX-XXXX`,
+  hash Argon2id de uso único e `POST /api/recover-password`) direto na tela de login.
+- Gerenciamento de sessões e dispositivos ativos em Configurações → Minha Conta →
+  Senha e segurança (`ListSessions`, `RevokeSession`, encerramento imediato de conexões
+  WebSocket revogadas).
+- Transferência de posse do servidor (`TransferServerOwnership`) com confirmação e
+  registro de auditoria (`server_transfer_ownership`), além de exclusão da própria conta
+  (`DeleteAccount`) protegida por senha e verificação de posse de servidores.
+- Expulsão e banimento com motivo persistido no SQLite (esquema `v14`, coluna
+  `bans.reason`), opção de apagar histórico recente do membro banido (1 h, 24 h ou 7 dias)
+  e limpeza de mensagens em lote (`BulkDeleteMessages`) para moderadores.
+- Scripts de inicialização e autostart do host no Windows (`scripts/start-host.ps1` e
+  `scripts/install-autostart.ps1`).
+- Banco migra para a versão 14 ao iniciar o servidor.
+
 ## 0.2.1
 
 - Refatoração visual desktop: tokens e paleta próprios, ícones SVG consistentes,
