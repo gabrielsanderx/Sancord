@@ -231,6 +231,7 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sancord</title>
+  <link rel="stylesheet" href="/styles.css" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -362,6 +363,7 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
       }
     });
   </script>
+  <script src="/js/updater.js"></script>
 </body>
 </html>
 "#;

@@ -70,7 +70,10 @@ Backups desta implementação: `qa-updater/baseline/` (ignorados pelo Git).
   [ensaio de empacotamento e assinatura](https://github.com/gabrielsanderx/Sancord/actions/runs/44210124727).
 - O cadastro do Secret foi confirmado por consulta de metadados, sem ler seu valor.
   O ensaio manual agora testa também a assinatura em job separado da publicação.
+  O ensaio passou após corrigir o formato do Secret; a publicação foi pulada.
   Confirmar o sucesso da assinatura antes da primeira tag. Não publicar uma versão
   experimental das fases atuais apenas para demonstrar o updater.
 - Há uma chave pública única; rotação automática de chaves não foi implementada.
   Não afirmar que basta trocar a pública para os clientes antigos aceitarem outra chave.
+- O updater também está carregado na tela de conexão: não depende de conseguir entrar
+  no backend para mostrar atualizações. Há um teste dos recursos internos para esse caso.

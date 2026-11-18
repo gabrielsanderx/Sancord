@@ -57,6 +57,14 @@ mod tests {
         }
     }
     #[test]
+    fn updater_is_available_before_backend_connection() {
+        let page = response(Request::get(CONNECT_URL).body(vec![]).unwrap());
+        let html = String::from_utf8_lossy(page.body());
+        assert!(html.contains("src=\"/js/updater.js\""));
+        assert!(html.contains("href=\"/styles.css\""));
+        assert_eq!(response(Request::get("/js/updater.js").body(vec![]).unwrap()).status(), StatusCode::OK);
+    }
+    #[test]
     fn remote_pages_never_become_app_pages() {
         assert!(is_app_page(APP_URL));
         assert!(is_app_page("http://sancord.localhost/index.html?endpoint=http%3A%2F%2Flocalhost%3A3000"));
