@@ -145,9 +145,12 @@ sem permissão de escrita. Nunca use o banco de produção para esse ensaio.
 - Falha ao iniciar após atualização: feche o aplicativo e restaure manualmente o
   arquivo `Sancord-before-...exe` para `Sancord.exe`. Perfis e banco permanecem separados.
 - Perda da privada: não gere outra esperando que os clientes antigos a aceitem.
-  Restaure o backup protegido. Para rotação planejada, assine uma release de transição
-  com a chave antiga e embuta nela a chave pública nova; só a release seguinte usa
-  a privada nova. Comprometimento exige avaliar distribuição manual por canal confiável.
+  Restaure o backup protegido. O assinador atual exige que a privada corresponda à
+  pública compilada: trocar somente o arquivo de configuração não implementa rotação.
+  Uma rotação planejada exige preparar e testar uma migração de confiança, inclusive
+  para clientes que ficaram offline e não receberam uma versão intermediária. Esse
+  fluxo ainda não é automatizado. Comprometimento exige avaliar distribuição manual
+  por canal confiável; não tente contornar a verificação de assinatura.
 - O updater não altera serviços do anfitrião, não executa comandos remotos, não usa
   `taskkill` e não altera permissões de administrador.
 

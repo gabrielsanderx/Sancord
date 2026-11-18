@@ -63,3 +63,12 @@ Backups desta implementação: `qa-updater/baseline/` (ignorados pelo Git).
   o ciclo público ainda não foram validados; não declarar conclusão desse ensaio.
 - Nenhuma tag/release foi criada durante a implementação. Conferir o estado remoto
   e a autorização do usuário antes de qualquer publicação posterior.
+- O usuário autorizou o primeiro push; a branch main foi enviada no commit `5162ac6`.
+  [CI Windows/MSVC completo aprovado](https://github.com/gabrielsanderx/Sancord/actions/runs/44208760294).
+  O workflow de distribuição também foi iniciado manualmente, sem publicação:
+  [ensaio de empacotamento](https://github.com/gabrielsanderx/Sancord/actions/runs/44208930903).
+- O usuário informou que vai configurar o Secret. A última consulta ainda não o
+  encontrou; confirmar o cadastro antes da primeira tag. Não publicar uma versão
+  experimental das fases atuais apenas para demonstrar o updater.
+- Há uma chave pública única; rotação automática de chaves não foi implementada.
+  Não afirmar que basta trocar a pública para os clientes antigos aceitarem outra chave.
