@@ -58,7 +58,20 @@ impl RolePermissions {
             deafen_members: false,
             move_members: false,
             view_audit_log: false,
+            moderate_members: false,
         }
+    }
+
+    /// Castigo (timeout): mantém ver e ler; tira tudo que publica algo ou usa voz.
+    pub fn restrict_for_timeout(&mut self) {
+        self.send_messages = false;
+        self.attach_files = false;
+        self.add_reactions = false;
+        self.pin_messages = false;
+        self.mention_everyone = false;
+        self.connect_voice = false;
+        self.speak_voice = false;
+        self.stream_video = false;
     }
 
     pub fn value(&self, name: &str) -> bool {
@@ -85,6 +98,7 @@ impl RolePermissions {
             "deafen_members" => self.deafen_members,
             "move_members" => self.move_members,
             "view_audit_log" => self.view_audit_log,
+            "moderate_members" => self.moderate_members,
             _ => false,
         }
     }
@@ -196,6 +210,7 @@ impl GuildServer {
             "deafen_members",
             "move_members",
             "view_audit_log",
+            "moderate_members",
         ];
         for key in admin
             .iter()
@@ -325,6 +340,11 @@ impl GuildServer {
         }
         if !p.view_channel {
             return RolePermissions::none();
+        }
+        // Dono e administrador já saíram acima: castigo nunca vale para eles.
+        // Calculado pelo relógio, o acesso volta sozinho no fim do prazo.
+        if self.timeout_until(user, crate::auth::now_ms()).is_some() {
+            p.restrict_for_timeout();
         }
         p
     }

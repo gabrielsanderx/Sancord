@@ -6,9 +6,11 @@ Backend em **Rust** (Axum + Tokio + WebSockets + SQLite), aplicativo Windows
 Não há versão web pública: o backend fornece API, WebSocket e anexos.
 Voz, vídeo e compartilhamento de tela usam **WebRTC P2P (mesh)**; o servidor só repassa a sinalização.
 
-Avanços recentes: [Fase 5 — Social](FASE5.md) e [Fase 6 — Voz](FASE6.md).
-Esses documentos distinguem implementação, testes e pendências; os pacotes antigos
-na raiz não contêm automaticamente as mudanças dos fontes.
+Estado atual: os fontes incluem o trabalho das nove fases originais, com validações
+de mídia ainda pendentes. Consulte [Fase 8 — Avançados](FASE8.md),
+[Fase 9 — Polimento](FASE9.md) e a etapa atual de [homologação e candidata 0.2.0](HOMOLOGACAO.md).
+O idioma de entrega é pt-BR; inglês permanece preview. Os documentos distinguem código,
+testes e pendências; os pacotes antigos na raiz não contêm automaticamente as mudanças.
 
 Distribuição, GitHub Actions, assinatura e atualizações automáticas:
 [DISTRIBUTION.md](DISTRIBUTION.md). Continuidade entre IAs: [AI_HANDOFF.md](AI_HANDOFF.md).
@@ -49,12 +51,14 @@ Distribuição, GitHub Actions, assinatura e atualizações automáticas:
 - Mensagens ficam numa tabela própria com índice `(channel_id, created_at, id)`; o servidor
   mantém só as 100 mais recentes por canal em memória e envia 50 no login. Mensagens antigas
   são carregadas sob demanda (`LoadMessages`) ao rolar o chat para cima. **Nada é descartado.**
-- Esquema v4 (normalizado): `servers`, `categories`, `channels`, `server_members` (com data de
+- Fontes atuais usam **esquema v10** (incluindo as integrações HTTP). A normalização v4
+  contém `servers`, `categories`, `channels`, `server_members` (com data de
   entrada), `roles`, `member_roles`, `bans`, `invites`, `user_prefs`, além de `messages` e `sessions`.
   Ao abrir um banco v1, a tabela antiga de servidores (JSON) é convertida e mantida como `servers_v1`.
 - A migração v2 → v3 acrescenta `attachments` e `read_states`, preservando mensagens,
   servidores, contas e sessões existentes. Os arquivos ficam em `data/uploads/`.
-- `users` e amizades (`kv`) ainda guardam documento JSON (normalização prevista na fase Social).
+- `users` e amizades (`kv`) ainda guardam documento JSON; os recursos sociais atuais
+  e seus limites estão em [FASE5.md](FASE5.md).
 - **Migração automática**: na primeira execução com um banco vazio, `accounts.json`,
   `servers.json`, `chat_history.json` e `friends.json` são importados e renomeados para
   `*.migrated.bak` (nada é apagado). Tokens antigos viram sessões válidas por 30 dias, então

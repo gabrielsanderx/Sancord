@@ -87,6 +87,8 @@ pub struct ServerState {
     pub active_calls: HashMap<String, crate::voice::ActiveCall>,
     /// AutoMod: mensagens recentes por autor (instante, hash) para detectar repetição.
     pub automod_recent: HashMap<String, Vec<(i64, u64)>>,
+    /// Modo lento: (canal, username_lower) -> última mensagem aceita (ms). Só em memória.
+    pub slowmode_last: HashMap<(String, String), i64>,
     /// Eventos agendados: server_id -> eventos (ordenados por início)
     pub events: HashMap<String, Vec<crate::models::ServerEvent>>,
     pub integrations: HashMap<String, crate::integrations::Integration>,
@@ -136,6 +138,7 @@ fn default_hub(text_channels: Vec<Channel>, voice_channels: Vec<Channel>) -> Gui
         voice_moderation: HashMap::new(),
         automod: Default::default(),
         threads: Vec::new(),
+        member_timeouts: HashMap::new(),
     }
 }
 
@@ -236,6 +239,12 @@ impl ServerState {
                 srv.voice_moderation.insert(user, vm);
             }
         }
+        // Castigos vencidos também entram: valem pelo relógio e o laço de expiração os limpa.
+        for (sid, user, until) in db.load_member_timeouts()? {
+            if let Some(srv) = servers.iter_mut().find(|s| s.id == sid) {
+                srv.member_timeouts.insert(user, until);
+            }
+        }
         let friends_store = db.load_friends()?;
         let chat_history = db.load_recent_messages(MESSAGE_CACHE_PER_CHANNEL)?;
         let sessions_vec = db.load_sessions(now)?;
@@ -291,6 +300,7 @@ impl ServerState {
             voice_grants: HashMap::new(),
             active_calls: HashMap::new(),
             automod_recent: HashMap::new(),
+            slowmode_last: HashMap::new(),
             events: events_by_server,
             integrations,
             account_key_by_id: HashMap::new(),

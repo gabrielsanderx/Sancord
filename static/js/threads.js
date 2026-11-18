@@ -254,6 +254,9 @@ function openThreadMenu(e, t) {
     });
     items.push({ label: t.archived ? "Desarquivar" : "Arquivar", icon: "📦", onSelect: () => sendWs("UpdateThread", { thread_id: t.id, archived: !t.archived }) });
   }
+  if ((own || mod) && forumOfThread(t)?.forum_tags?.length) {
+    items.push({ label: "Editar tags", icon: "🏷️", onSelect: () => openPostTagsDialog(t) });
+  }
   if (mod) items.push({ label: t.locked ? "Destrancar" : "Trancar", icon: "🔒", onSelect: () => sendWs("UpdateThread", { thread_id: t.id, locked: !t.locked }) });
   if (own || mod) {
     items.push({ separator: true });
@@ -273,6 +276,104 @@ function openThreadMenu(e, t) {
 }
 
 // ---------------------------------------------------------------------------
+// Tags de fórum — o servidor valida tudo; aqui só montamos e mostramos.
+// Texto de edição: uma tag por linha, emoji opcional no começo e "(mod)" no
+// fim para tags que só a moderação aplica. Ex.: "🐛 Bug (mod)".
+// ---------------------------------------------------------------------------
+state.forumTagFilter = new Set();
+
+function forumTagsToLines(tags) {
+  return (tags || []).map((t) => `${t.emoji ? `${t.emoji} ` : ""}${t.name}${t.moderated ? " (mod)" : ""}`).join("\n");
+}
+
+function parseForumTagLines(text, existing = []) {
+  const out = [];
+  for (const raw of String(text || "").split("\n")) {
+    let line = raw.trim();
+    if (!line) continue;
+    const moderated = /\(mod\)\s*$/i.test(line);
+    line = line.replace(/\(mod\)\s*$/i, "").trim();
+    let emoji = null;
+    const first = line.split(/\s+/)[0];
+    // Primeiro pedaço sem letras nem números = emoji.
+    if (first && line.includes(" ") && !/[\p{L}\p{N}]/u.test(first)) {
+      emoji = first;
+      line = line.slice(first.length).trim();
+    }
+    if (!line) continue;
+    const same = existing.find((t) => t.name.toLowerCase() === line.toLowerCase());
+    out.push({ id: same?.id || "", name: line, emoji, moderated });
+  }
+  return out;
+}
+
+function sameForumTags(a, b) {
+  const norm = (list) => JSON.stringify((list || []).map((t) => [t.name, t.emoji || null, Boolean(t.moderated)]));
+  return norm(a) === norm(b);
+}
+
+function forumTagLabel(tag) {
+  return `${tag.emoji ? `${tag.emoji} ` : ""}${tag.name}`;
+}
+
+/** Opções de tags para escolher numa postagem (tags "só moderação" travadas para os demais). */
+function forumTagOptions(forum, isModerator) {
+  return (forum?.forum_tags || []).map((t) => ({
+    value: t.id,
+    label: forumTagLabel(t),
+    hint: t.moderated ? "só a moderação aplica" : "",
+    disabled: t.moderated && !isModerator,
+  }));
+}
+
+/** Postagens que têm qualquer uma das tags do filtro (sem filtro = todas). */
+function matchesTagFilter(thread, filter) {
+  if (!filter || filter.size === 0) return true;
+  return (thread.tags || []).some((id) => filter.has(id));
+}
+
+function forumOfThread(t) {
+  const parent = parentChannelOf(t);
+  return parent?.kind === "forum" ? parent : null;
+}
+
+async function openPostTagsDialog(t) {
+  const forum = forumOfThread(t);
+  if (!forum) return;
+  const mod = Boolean(threadPermissions(t).manage_messages);
+  const values = await SancordUI.formDialog({
+    title: `Tags — ${t.name}`,
+    fields: [{ name: "tags", label: "TAGS (ATÉ 5)", type: "checklist", value: t.tags || [], max: 5, options: forumTagOptions(forum, mod), emptyText: "Este fórum ainda não tem tags." }],
+    submitLabel: "Salvar tags",
+  });
+  if (values) sendWs("UpdateThread", { thread_id: t.id, tags: values.tags || [] });
+}
+
+function renderForumTagFilter() {
+  const bar = document.getElementById("forum-tag-filter");
+  if (!bar) return;
+  const forum = state.forumViewChannel ? getActiveServer()?.text_channels?.find((c) => c.id === state.forumViewChannel) : null;
+  const tags = forum?.forum_tags || [];
+  // Filtro só com tags que ainda existem.
+  for (const id of [...state.forumTagFilter]) if (!tags.some((t) => t.id === id)) state.forumTagFilter.delete(id);
+  bar.replaceChildren();
+  bar.classList.toggle("hidden", tags.length === 0);
+  for (const tag of tags) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = `forum-tag-chip${state.forumTagFilter.has(tag.id) ? " active" : ""}`;
+    chip.textContent = forumTagLabel(tag);
+    chip.setAttribute("aria-pressed", String(state.forumTagFilter.has(tag.id)));
+    chip.addEventListener("click", () => {
+      if (state.forumTagFilter.has(tag.id)) state.forumTagFilter.delete(tag.id);
+      else state.forumTagFilter.add(tag.id);
+      renderForumPosts();
+    });
+    bar.appendChild(chip);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Fórum
 // ---------------------------------------------------------------------------
 
@@ -287,6 +388,7 @@ function forumElements() {
 function openForumView(srv, ch) {
   if (!srv || !ch) return;
   if (getActiveServer()?.id !== srv.id || state.activeView === "home") switchToServerId(srv.id, null);
+  if (state.forumViewChannel !== ch.id) state.forumTagFilter.clear();
   state.forumViewChannel = ch.id;
   state.currentTextChannel = ch.id;
   switchToServerView(); // aplica cabeçalho e chama onServerViewShown (mantém o fórum)
@@ -312,11 +414,17 @@ function closeForumView() {
 function renderForumPosts() {
   const list = document.getElementById("forum-posts");
   if (!list || !state.forumViewChannel) return;
+  renderForumTagFilter();
   const q = (document.getElementById("forum-filter")?.value || "").trim().toLowerCase();
-  const posts = sortThreads(threadsOf(state.forumViewChannel)).filter((t) => !q || t.name.toLowerCase().includes(q));
+  const filtering = Boolean(q) || state.forumTagFilter.size > 0;
+  const forum = getActiveServer()?.text_channels?.find((c) => c.id === state.forumViewChannel);
+  const tagById = new Map((forum?.forum_tags || []).map((t) => [t.id, t]));
+  const posts = sortThreads(threadsOf(state.forumViewChannel))
+    .filter((t) => !q || t.name.toLowerCase().includes(q))
+    .filter((t) => matchesTagFilter(t, state.forumTagFilter));
   list.innerHTML = "";
   if (posts.length === 0) {
-    list.innerHTML = `<div class="pinned-empty">${q ? "Nenhuma postagem encontrada." : "Nenhuma postagem ainda. Comece o primeiro assunto!"}</div>`;
+    list.innerHTML = `<div class="pinned-empty">${filtering ? "Nenhuma postagem encontrada." : "Nenhuma postagem ainda. Comece o primeiro assunto!"}</div>`;
     return;
   }
   for (const t of posts) {
@@ -328,7 +436,20 @@ function renderForumPosts() {
     const meta = document.createElement("span");
     meta.className = "forum-post-meta";
     meta.textContent = `por ${t.owner} • ${t.message_count} ${t.message_count === 1 ? "mensagem" : "mensagens"} • ${timeAgo(t.last_message_at || t.created_at)}${t.archived ? " • arquivada" : ""}`;
-    card.append(title, meta);
+    card.append(title);
+    const applied = (t.tags || []).map((id) => tagById.get(id)).filter(Boolean);
+    if (applied.length) {
+      const row = document.createElement("span");
+      row.className = "forum-post-tags";
+      for (const tag of applied) {
+        const chip = document.createElement("span");
+        chip.className = "forum-tag-chip static";
+        chip.textContent = forumTagLabel(tag);
+        row.appendChild(chip);
+      }
+      card.appendChild(row);
+    }
+    card.appendChild(meta);
     card.addEventListener("click", () => openThread(t.id));
     card.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -341,17 +462,22 @@ function renderForumPosts() {
 async function openNewForumPostDialog() {
   const parentId = state.forumViewChannel;
   if (!parentId) return;
+  const srv = getActiveServer();
+  const forum = srv?.text_channels?.find((c) => c.id === parentId);
+  const mod = Boolean(getChannelPermissions(srv, forum).manage_messages);
+  const hasTags = Boolean(forum?.forum_tags?.length);
   const values = await SancordUI.formDialog({
     title: "Nova postagem",
     submitLabel: "Publicar",
     fields: [
       { name: "title", label: "TÍTULO", maxlength: 100, required: true, placeholder: "Sobre o que você quer falar?" },
+      hasTags && { name: "tags", label: "TAGS (ATÉ 5)", type: "checklist", value: [], max: 5, options: forumTagOptions(forum, mod) },
       { name: "content", label: "MENSAGEM", type: "textarea", rows: 5, maxlength: 2000, required: true },
-    ],
+    ].filter(Boolean),
   });
   if (!values) return;
   state.pendingForumPost = { parentId, content: values.content.trim() };
-  sendWs("CreateThread", { channel_id: parentId, name: values.title.trim() });
+  sendWs("CreateThread", { channel_id: parentId, name: values.title.trim(), tags: values.tags || [] });
 }
 
 document.getElementById("forum-new-post-btn")?.addEventListener("click", openNewForumPostDialog);

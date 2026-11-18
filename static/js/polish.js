@@ -29,11 +29,16 @@ function notifyLevelFor(channelId) {
   return "default";
 }
 
+function isFriendName(name) {
+  const lower = String(name || "").toLowerCase();
+  return (state.friends || []).some((f) => String(f.username || "").toLowerCase() === lower);
+}
+
 /**
  * O que fazer com uma mensagem recebida:
  *  sound  — tocar som; notify — notificação + piscar a janela; mention — é menção/DM.
  * "default" mantém o comportamento anterior: som em tudo (exceto servidor silenciado)
- * e notificação só para menções e DMs.
+ * e notificação só para menções e DMs. Modo Foco silencia conversas privadas de não amigos.
  */
 function notificationPolicy(message) {
   const silent = { sound: false, notify: false, mention: false };
@@ -41,6 +46,8 @@ function notificationPolicy(message) {
   const chId = message.channel_id;
   const isDm = isPrivateTextId(chId);
   if (isDm && typeof isMessageRequest === "function" && isMessageRequest(chId)) return silent;
+  // Modo Foco: conversa privada com quem não é amigo chega e conta como não lida, mas sem som nem aviso.
+  if (isDm && state.audioSettings?.familyFocus && !isFriendName(message.author_name)) return { ...silent, mention: true };
   const mention = isDm || messageMentionsMe(message);
   const level = notifyLevelFor(chId);
   if (level === "none") return { ...silent, mention };
@@ -473,3 +480,65 @@ document.addEventListener("sancord:language", () => {
     renderQuickSwitcher();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Proteção de links externos — confirmação antes de sair do Sancord por um
+// link de mensagem. Domínios confirmados com "confiar" ficam só neste aparelho.
+// ---------------------------------------------------------------------------
+const LINK_TRUST_KEY = "sancord_trusted_domains";
+
+function linkHost(href) {
+  try {
+    const u = new URL(href);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.hostname.toLowerCase().replace(/^www\./, "") : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function trustedLinkDomains() {
+  try {
+    const list = JSON.parse(localStorage.getItem(LINK_TRUST_KEY) || "[]");
+    return new Set(Array.isArray(list) ? list.map(String) : []);
+  } catch (_) {
+    return new Set();
+  }
+}
+
+/** Pede confirmação? Só para http(s) com a proteção ligada e domínio ainda não confiável. */
+function linkNeedsConfirmation(href, guardOn, trusted) {
+  const host = linkHost(href);
+  if (!guardOn || !host) return false;
+  return !trusted.has(host);
+}
+
+function trustLinkDomain(host) {
+  const set = trustedLinkDomains();
+  set.add(host);
+  try {
+    localStorage.setItem(LINK_TRUST_KEY, JSON.stringify([...set].slice(-200)));
+  } catch (_) {}
+}
+
+document.addEventListener(
+  "click",
+  async (e) => {
+    const a = e.target?.closest?.("a.chat-link");
+    if (!a || e.button !== 0) return;
+    const href = a.href;
+    if (!linkNeedsConfirmation(href, state.audioSettings?.linkGuard !== false, trustedLinkDomains())) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const host = linkHost(href);
+    const values = await SancordUI.formDialog({
+      title: "Sair do Sancord?",
+      description: `Este link leva para ${host} (${href.slice(0, 200)}). Confira se é o site que você espera antes de continuar.`,
+      fields: [{ name: "trust", type: "checklist", value: [], options: [{ value: "yes", label: `Confiar em ${host} a partir de agora` }] }],
+      submitLabel: "Abrir link",
+    });
+    if (!values) return;
+    if ((values.trust || []).includes("yes")) trustLinkDomain(host);
+    window.open(href, "_blank", "noopener,noreferrer");
+  },
+  true,
+);

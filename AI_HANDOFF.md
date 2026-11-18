@@ -358,3 +358,294 @@ Backups desta implementação: `qa-updater/baseline/` (ignorados pelo Git).
   desse job e continua restrito a tags. Manual em branch não cria release/update.
 - Acompanhar o novo workflow até a conclusão e verificar o novo artefato; não usar
   o sucesso de `44293761106` como prova destes fontes posteriores.
+- Commit `390aeeef4574afcddcd62ad284356fb080607a8a` enviado sem force/tags à mesma
+  branch de preparação. Nova execução manual:
+  https://github.com/gabrielsanderx/Sancord/actions/runs/44300424969.
+  Em acompanhamento; não afirmar aprovação até a conclusão dos quatro jobs de
+  validação. Main continua separada e publish deve ficar skipped.
+
+### Resultado do ensaio 390aeee — conferido pelo Claude em 18/11/2026
+
+- **Execução `44300424969`**, consultada pela API pública do GitHub, somente leitura e sem
+  credencial. Concluída no commit exato `390aeee`:
+  - os quatro jobs de validação com **success**: `tests / test`, `package`, `sign` e
+    `verify-package`;
+  - `publish` **skipped**.
+- **Artefatos da execução, que expiram em 25/11/2026:**
+  - `signed-windows-release`: 15.966.900 bytes, digest do ZIP
+    `sha256:a4c82d010f06882a3e8b5ffe015aa8d4a52fe9cc886da63e6dc07909d369161d`;
+  - `unsigned-windows-release`: 19.131.674 bytes.
+- **Remoto:**
+  - `main` em `5e43107`;
+  - `codex/prepare-0.2.0` em `390aeee`;
+  - **nenhuma tag e nenhuma release**.
+- **Cópia local:** HEAD em `codex/prepare-0.2.0` = `390aeee`. Suíte local:
+  - Rust: 98 núcleo (1 ignorado: o ensaio do artefato), 8 desktop e 1 manutenção;
+  - frontend: 91;
+  - **198 aprovados**.
+- **Artefato coletado e verificado localmente** depois que o usuário fez login no `gh`.
+  Usado o mesmo fluxo de `collect-final-020.mjs`, com token do `gh` só em memória.
+  - Digest do ZIP igual ao do GitHub.
+  - `sancord-release verify` aprovado.
+  - O ZIP contém só o `Sancord.exe`, com SHA-256 `7238e24c…ea9a`, igual ao executável
+    solto e ao manifesto.
+  - Ensaio ignorado do artefato real: 1 aprovado.
+  - Detalhes em `HOMOLOGACAO.md`. Arquivos em `qa-candidate-0.2.0/final-390aeee*`, ignorados
+    pelo Git.
+  - Nenhum executável iniciado.
+
+## Produção 0.2.0 e publicação — autorizadas pelo usuário em 18/11/2026
+
+- **Pedido:** o usuário pediu para fazer o que ficou pendente e respondeu explicitamente
+  "Publicar agora" e "Atualizar o servidor".
+- **Servidor de produção (porta 3000) trocado para o 0.2.0:**
+  - parado só o PID 14332, cujo caminho conferido era `D:\Sancord\SancordServer.exe`;
+  - backup completo, conferido por contagem e bytes, em
+    `D:\Sancord\data-backup-pre-0.2.0-20261118-114846/`. Contém `data/` com 11 arquivos e
+    o executável anterior `SancordServer-0.1.0.exe`. A pasta é ignorada pelo Git;
+  - novo `SancordServer.exe` = o do artefato assinado do CI, com SHA-256 `cd6542de…f5b1`;
+  - iniciado oculto, com a pasta de trabalho em `D:\Sancord` e sem variáveis extras, como
+    antes;
+  - o cloudflared (PID 13076) não foi tocado e continua com a mesma URL pública.
+- **Resultado:**
+  - `/api/health` respondeu `0.2.0`, protocolo 2, localmente e pelo túnel;
+  - o banco principal migrou de **v4 para v10** com `integrity_check` ok;
+  - contagens preservadas: 6 usuários, 2 servidores, 4 canais, 7 mensagens e 7 sessões;
+  - FTS com as 7 mensagens indexadas.
+- **Rollback, se necessário:**
+  - parar o `SancordServer.exe` da porta 3000;
+  - restaurar a `data/` e o `SancordServer-0.1.0.exe` do backup.
+  - O banco v10 não volta a abrir no servidor antigo; restaurar sempre a cópia v4.
+- **GitHub:**
+  - `main` avançada sem force de `5e43107` para `390aeee` (estava 2 à frente, 0 atrás);
+  - tag `v0.2.0` criada em `390aeee`;
+  - disparou a release `44328597152` e o CI da `main` `44328595902`.
+
+- Nada foi alterado em fontes, branches, tags ou releases nesta conferência.
+
+## Lacunas da especificação depois da 0.2.0 — Claude, 18/11/2026
+
+Revisão da especificação de 83 itens contra o código (somente leitura) achou estas
+lacunas reais:
+- timeout de membro, o fluxo F — **feito**, ver abaixo;
+- slowmode;
+- emojis personalizados do servidor;
+- preview de links;
+- tags e filtro por tag no fórum;
+- opção de contraste;
+- campo de e-mail na conta;
+- virtualização da lista de mensagens;
+- canais de palco e de mídia.
+
+Os itens que a especificação chama de "futuramente" continuam fora:
+- stickers;
+- recuperar senha;
+- perfil por servidor;
+- premium.
+
+O `ROADMAP.md` tem uma tabela antiga que ainda diz que não há TURN e que a Fase 8 está
+pendente. Os fontes já têm as duas coisas.
+
+### Timeout de membro (castigo) — implementado, **ainda não publicado** (vai na próxima versão)
+- **Permissão nova `moderate_members`:**
+  - padrão desligado, ligada para administrador;
+  - entra no modelo de cargo "moderador";
+  - checkbox "⏱️ Aplicar castigo" no editor de cargos.
+- **Regra central:** fica em `GuildServer::channel_permissions`, com
+  `RolePermissions::restrict_for_timeout`.
+  - Enquanto o castigo vale, o membro continua com ver e ler.
+  - Perde: enviar, anexar, reagir, fixar, mencionar todos, conectar, falar e transmitir.
+  - O acesso volta sozinho no horário, porque o cálculo usa o relógio.
+  - Dono e administradores nunca são afetados.
+- **`src/timeouts.rs`:**
+  - `apply` concentra toda a autorização:
+    - exige a permissão ou ser o dono;
+    - recusa o dono, administradores, a si mesmo e cargos iguais ou acima;
+    - duração máxima de 28 dias; motivo de até 300 caracteres;
+    - `duration_secs` = 0 remove o castigo.
+  - Depois de aplicar:
+    - grava na auditoria (`member_timeout` e `member_timeout_removed`, com duração e
+      motivo);
+    - envia `ServerUpdated` com as permissões recalculadas para cada pessoa;
+    - desconecta da voz quem estava nela.
+  - `clear_expired` roda no mesmo laço de 30 s dos status. Remove os vencidos do banco e
+    avisa os clientes.
+- **Banco:** schema **v11**, tabela `member_timeouts(server_id, user_lower, until_ms)`.
+  - Carregada no início.
+  - Renomear a conta leva o castigo junto (`RenameMemberTimeout`).
+- **Envio recusado:** mensagem própria, "Você está de castigo neste servidor por mais
+  X", que não depende de fuso.
+- **Interface:**
+  - helpers em `static/js/advanced.js`;
+  - botão Castigo / Remover castigo em Membros & Moderação, com a marca "de castigo até
+    HH:MM";
+  - menu de botão direito novo no painel de membros (Ver perfil e castigo);
+  - opção no menu da voz;
+  - campo de mensagem desabilitado com o horário de término;
+  - auditoria com as frases novas.
+- **Limitação:** depois que o prazo acaba, o campo de mensagem do próprio membro reabilita
+  em até 30 s (no próximo ciclo do laço). O servidor já aceita mensagens no horário exato.
+- **Testes:**
+  - `src/timeout_tests.rs`, 3 testes:
+    - o fluxo F completo: bloqueio, persistência após reinício, auditoria, expiração e
+      envio restaurado;
+    - autorização e remoção;
+    - textos de duração.
+  - `tests/frontend-timeouts.test.cjs`, 4 testes.
+  - Suíte inteira: 101 núcleo + 8 desktop + 1 manutenção + 95 frontend, todos aprovados.
+- **QA na instância 3100 com cliques reais:**
+  - a dona aplicou 5 minutos com motivo;
+  - o membro viu o campo de mensagem bloqueado e o servidor recusou um envio forçado pelo
+    WebSocket;
+  - a dona removeu pelo menu de botão direito;
+  - o membro voltou a enviar;
+  - a auditoria mostrou as duas ações.
+- **Ainda não feito:** produção continua na 0.2.0, sem o timeout. Publicar exige subir a
+  versão (0.2.1 ou 0.3.0), changelog, CI e tag, com autorização do usuário.
+
+### Release v0.2.0 publicada — 18/11/2026
+- **Workflow `44328597152`** (tag `v0.2.0` em `390aeee`):
+  - tests, package, sign, verify-package e **publish** com sucesso;
+  - CI da `main` (`44328595902`) também com sucesso.
+- **Release estável, marcada como "latest":**
+  https://github.com/gabrielsanderx/Sancord/releases/tag/v0.2.0
+  - Arquivos: `Sancord.exe`, `SancordServer.exe`, ZIP, `sancord-update.json` e `.sig`.
+- **Arquivos publicados baixados para `qa-candidate-0.2.0/published-v0.2.0/`** (ignorada
+  pelo Git):
+  - `sancord-release verify` aprovado;
+  - ensaio HTTPS com o executável real: 1 aprovado;
+  - cliente publicado com SHA-256 `91423907…c8eb`, servidor publicado `18cc7891…51e4`.
+- **Diferença de compilação:**
+  - a compilação da tag não é idêntica bit a bit à do ensaio manual (`7238e24c…`);
+  - o servidor em produção é o do ensaio manual (`cd6542de…`), do mesmo commit `390aeee`;
+  - as duas origens são o CI no mesmo código, e a assinatura Ed25519 é a garantia.
+- A partir de agora, clientes 0.1.0 com updater veem o aviso da 0.2.0. Nenhum executável
+  foi aberto pelo agente.
+
+### Modo lento por canal — implementado, **ainda não publicado** (vai na próxima versão)
+- **Dados:**
+  - `Channel.slowmode_secs`, de 0 a 21600 s (6 h), só em canais de texto, anúncios e
+    fórum;
+  - schema **v12** com a coluna `channels.slowmode_secs`. Ela também está no `CREATE
+    TABLE` da v2, porque a conversão v1→v2 grava canais (mesmo caso do `user_limit`).
+- **Configuração:** pelo `UpdateChannel`, que valida o valor antes de alterar o canal.
+  - Na auditoria aparece como `channel_update` com "modo lento: X".
+- **Envio:**
+  - **Onde:** a checagem fica no `SendChat`, depois da autorização;
+    `GuildServer::slowmode_for` faz a thread ou postagem seguir o canal-pai, com
+    contagem própria.
+  - **Quem não espera:** quem tem `manage_messages`, `manage_channels` ou é administrador.
+  - **Registro:** o último envio é gravado só depois de a mensagem ser aceita (uma recusa
+    do AutoMod não gasta o intervalo).
+  - O registro fica só em memória (`ServerState.slowmode_last`): um reinício libera todo
+    mundo.
+  - `slowmode::prune` roda no laço de 30 s.
+- **Interface:**
+  - seletor "MODO LENTO" ao editar o canal;
+  - aviso acima do campo de mensagem com contagem regressiva;
+  - o cliente barra o Enter durante a espera sem apagar o texto;
+  - quem é isento vê "(você não é afetado)";
+  - helpers ficam em `static/js/servers.js`.
+- **Testes:**
+  - `src/slowmode_tests.rs`, 3 testes: validação e permissão, limite, isenção, thread,
+    expiração do intervalo, auditoria, persistência e desligar;
+  - `tests/frontend-slowmode.test.cjs`, 4 testes.
+- **Suíte:** 104 núcleo + 8 desktop + 1 manutenção + 99 frontend, todos aprovados.
+- **Migração da cópia do banco de produção:** v10 → v12, 30 tabelas preservadas por hash,
+  integridade OK. A cópia fica em `qa-migration-495c5eaab70f47f58eb5b60e99ffd95b/`
+  (ignorada pelo Git, contém dados reais).
+- **QA na instância 3100 com cliques reais:**
+  - a dona ligou 10 s pelo diálogo;
+  - a segunda mensagem do membro foi barrada no cliente com o texto preservado;
+  - o envio forçado foi recusado pelo servidor;
+  - depois da espera, a mensagem foi enviada;
+  - a dona aparece como isenta;
+  - o modo lento foi desligado no fim.
+
+### Tags de fórum — implementado, **ainda não publicado** (vai na próxima versão)
+- **Modelo:**
+  - `Channel.forum_tags: Vec<ForumTag {id, name, emoji, moderated}>`, até 20 por fórum;
+  - `Thread.tags`, até 5 ids por postagem, guardados no JSON da thread (sem migração);
+  - schema **v13** com a coluna `channels.forum_tags` (JSON). A coluna também está no
+    `CREATE TABLE` da v2.
+- **Definição** (só quem gerencia canais), pelo `UpdateChannel { forum_tags }`:
+  - validada em `threads::sanitize_forum_tags`: nome limpo (até 20), sem repetidos, emoji
+    até 8;
+  - ids existentes são mantidos; outro id vem do servidor;
+  - remover uma tag do fórum tira ela das postagens (`prune_post_tags`);
+  - auditoria: "tags: A, B".
+- **Aplicação** (`CreateThread { tags }` e `UpdateThread { tags }`), por quem criou a
+  postagem ou pela moderação:
+  - `validate_post_tags` aceita só tags existentes no fórum, sem repetição, até 5, na
+    ordem do fórum;
+  - tags `moderated` só a moderação (quem tem `manage_messages`) põe ou tira;
+  - thread comum não aceita tags.
+- **Interface** (`static/js/threads.js`):
+  - campo "TAGS DAS POSTAGENS" no diálogo de editar o fórum: uma por linha, emoji opcional
+    no começo, "(mod)" no fim;
+  - escolha de tags ao criar a postagem, com as da moderação travadas para os demais;
+  - "Editar tags" no menu da postagem;
+  - etiquetas nos cartões;
+  - barra de filtro: mostra postagens com qualquer uma das tags escolhidas e se combina
+    com a busca;
+  - a barra se atualiza com o `ServerUpdated`.
+- **Testes:**
+  - `src/forum_tag_tests.rs`, 2 testes;
+  - `tests/frontend-forum-tags.test.cjs`, 5 testes;
+  - suíte: 106 núcleo + 8 desktop + 1 manutenção + 104 frontend, todos aprovados.
+- **Migração da cópia de produção:** v10 → v13, 30 tabelas preservadas por hash,
+  integridade OK. A cópia fica em `qa-migration-56cdec3d3ba64020b03f4e42ca72a36f/`; a cópia
+  anterior (v12), criada pelo Claude, foi apagada.
+- **QA na instância 3100 com cliques reais:**
+  - a dona criou o fórum "suporte" e digitou 3 tags, uma delas "(mod)";
+  - o membro publicou com "Bug" (com "Resolvido" travado para ele);
+  - a dona marcou "Resolvido" pelo menu;
+  - o filtro mostrou e escondeu a postagem conforme as tags.
+- **Ainda falta:** modo galeria do fórum, que a especificação marca como "futuramente".
+
+## Auditoria de paridade
+- Auditoria de paridade com o Discord atualizada em `DISCORD_GAP_AUDIT.md` (18/11/2026).
+
+### Cliente do atalho atualizado para 0.2.0 — 18/11/2026 (autorizado pelo usuário)
+- **Problema:** o atalho da área de trabalho abre `D:\Sancord\Sancord.exe`.
+  - Era um build de 17/11 sem atualizador, com a interface antiga embutida, então nunca se
+    atualizaria sozinho.
+- **Troca feita:**
+  - antigo guardado em `D:\Sancord\Sancord-before-0.2.0.exe` (SHA-256 `a5c5bfcc…`);
+  - no lugar, o `Sancord.exe` publicado na release v0.2.0 (`91423907…c8eb`), com assinatura
+    verificada pela ferramenta local;
+  - o atalho não mudou, e o arquivo continua ao lado do `SancordServer.exe`, o que mantém o
+    servidor sendo iniciado pelo app;
+  - nenhum executável foi aberto pelo agente.
+- **Rollback:** fechar o app e copiar `Sancord-before-0.2.0.exe` de volta para `Sancord.exe`.
+
+### Etapa A do roteiro de paridade — item 1 feito nos fontes, versão 0.2.1 preparada (não publicada)
+- **Opções que não faziam nada, agora ligadas:**
+  - "Exibir status Está digitando": desligada, o cliente não envia `Typing`;
+  - Modo Foco: conversa privada de quem não é amigo fica sem som e sem aviso, mas conta
+    como não lida (`notificationPolicy`, `isFriendName`);
+  - Proteção de Links: clique em link `http(s)` de mensagem pede confirmação, com a opção
+    "confiar no domínio"; a lista fica só neste aparelho (`sancord_trusted_domains`) e fica
+    em `polish.js`.
+- **Toggle antigo removido:** o "Somente amigos" (`friendsOnlyDm`), que nem existia mais no
+  HTML.
+- **Textos corrigidos:**
+  - "Senha e segurança": as mensagens **não** têm criptografia de ponta a ponta; só a mídia
+    das chamadas tem DTLS-SRTP;
+  - "Status da conta" usa dados reais (`renderAccountStanding`, `selfActiveTimeouts` em
+    `advanced.js`);
+  - "Central da Família" virou "Foco e segurança".
+- **Versão 0.2.1** (`scripts/prepare-release.ps1`, Cargo.toml e Cargo.lock):
+  - o CHANGELOG tem a seção 0.2.1 com castigo, modo lento, tags e esta etapa;
+  - o banco migra para a v13 (migração ensaiada numa cópia de produção).
+- **Testes:**
+  - `tests/frontend-privacy-focus.test.cjs`, 3 testes;
+  - suíte: 106 núcleo + 8 desktop + 1 manutenção + 107 frontend.
+- **QA na instância 3100 com cliques reais:**
+  - "digitando" aparece com a opção ligada e some com ela desligada;
+  - o clique no link abre "Sair do Sancord?";
+  - o "Status da conta" mostra o castigo ativo;
+  - o texto de segurança foi revisado na tela.
+- **Bloqueio para publicar:** não há `git.exe` nesta máquina para o commit. O `gh` está
+  autenticado. Falta autorização do usuário para o push na `main`, a tag `v0.2.1` e a troca
+  do servidor de produção.

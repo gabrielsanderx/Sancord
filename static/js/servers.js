@@ -67,6 +67,90 @@ function canPostIn(srv, ch) {
 }
 
 // ---------------------------------------------------------------------------
+// Modo lento — o servidor é quem decide; aqui só avisamos e contamos o tempo.
+// ---------------------------------------------------------------------------
+const SLOWMODE_CHOICES = [
+  [0, "Desligado"], [5, "5 segundos"], [10, "10 segundos"], [15, "15 segundos"], [30, "30 segundos"],
+  [60, "1 minuto"], [120, "2 minutos"], [300, "5 minutos"], [600, "10 minutos"], [900, "15 minutos"],
+  [1800, "30 minutos"], [3600, "1 hora"], [7200, "2 horas"], [21600, "6 horas"],
+];
+
+function slowmodeLabel(secs) {
+  return SLOWMODE_CHOICES.find(([s]) => s === secs)?.[1] || `${secs} segundos`;
+}
+
+/** Opções do seletor; mantém um valor fora da lista (definido por outro cliente). */
+function slowmodeOptions(current) {
+  const list = SLOWMODE_CHOICES.map(([value, label]) => ({ value: String(value), label }));
+  if (current && !SLOWMODE_CHOICES.some(([s]) => s === current)) list.push({ value: String(current), label: slowmodeLabel(current) });
+  return list;
+}
+
+/** Canal (ou thread, que segue o canal-pai), servidor e intervalo em segundos. */
+function slowmodeContext(channelId) {
+  const parentId = state.threadIndex?.get(channelId)?.parent_id || channelId;
+  for (const srv of state.servers || []) {
+    const ch = (srv.text_channels || []).find((c) => c.id === parentId);
+    if (ch) return { srv, ch, secs: ch.slowmode_secs || 0 };
+  }
+  return { srv: null, ch: null, secs: 0 };
+}
+
+function bypassesSlowmode(perms) {
+  return Boolean(perms?.manage_messages || perms?.manage_channels || perms?.administrator);
+}
+
+/** Milissegundos até poder enviar de novo (0 = já pode). */
+function slowmodeWaitMs(lastSentAt, secs, now = Date.now()) {
+  if (!secs || !lastSentAt) return 0;
+  return Math.max(0, lastSentAt + secs * 1000 - now);
+}
+
+function formatSlowmodeWait(ms) {
+  const total = Math.ceil(ms / 1000);
+  if (total < 60) return `${total} s`;
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h ? `${h} h ${String(m).padStart(2, "0")} min` : `${m} min ${String(s).padStart(2, "0")} s`;
+}
+
+/** Espera atual da própria pessoa neste canal (0 se não há modo lento ou ela é isenta). */
+function currentSlowmodeWait(channelId, now = Date.now()) {
+  const { srv, ch, secs } = slowmodeContext(channelId);
+  if (!secs || bypassesSlowmode(getChannelPermissions(srv, ch))) return 0;
+  return slowmodeWaitMs(state.slowmodeSentAt?.get(channelId), secs, now);
+}
+
+function noteOwnMessageForSlowmode(channelId) {
+  if (!slowmodeContext(channelId).secs) return;
+  (state.slowmodeSentAt ||= new Map()).set(channelId, Date.now());
+  refreshSlowmodeIndicator();
+}
+
+let slowmodeTimer = null;
+/** Aviso acima do campo de mensagem; só agenda nova atualização enquanto há espera. */
+function refreshSlowmodeIndicator() {
+  clearTimeout(slowmodeTimer);
+  const el = document.getElementById("slowmode-indicator");
+  if (!el) return;
+  const channelId = getActiveTextChannelId();
+  const { srv, ch, secs } = slowmodeContext(channelId);
+  if (!secs || (state.activeView === "home" && !state.activeDmId) || !ch) {
+    el.classList.add("hidden");
+    return;
+  }
+  const exempt = bypassesSlowmode(getChannelPermissions(srv, ch));
+  const wait = exempt ? 0 : currentSlowmodeWait(channelId);
+  el.classList.remove("hidden");
+  el.classList.toggle("is-waiting", wait > 0);
+  el.textContent = wait > 0
+    ? `🐢 Modo lento: aguarde ${formatSlowmodeWait(wait)}`
+    : `🐢 Modo lento: ${slowmodeLabel(secs)}${exempt ? " (você não é afetado)" : ""}`;
+  if (wait > 0) slowmodeTimer = setTimeout(refreshSlowmodeIndicator, Math.min(1000, wait));
+}
+
+// ---------------------------------------------------------------------------
 // Estrutura de categorias e canais
 // ---------------------------------------------------------------------------
 const byPosition = (a, b) => (a.position || 0) - (b.position || 0);
@@ -704,6 +788,23 @@ async function openEditChannelDialog(srv, ch) {
         ],
       },
       !isVoice && { name: "topic", label: "DESCRIÇÃO", type: "textarea", value: ch.topic || "", maxlength: 1024, placeholder: "Sobre o que é este canal?" },
+      !isVoice && {
+        name: "slowmode_secs",
+        label: "MODO LENTO",
+        type: "select",
+        value: String(ch.slowmode_secs || 0),
+        options: slowmodeOptions(ch.slowmode_secs || 0),
+        hint: "Tempo mínimo entre mensagens de cada pessoa (vale também nas threads). Quem gerencia mensagens ou canais não espera.",
+      },
+      ch.kind === "forum" && {
+        name: "forum_tags",
+        label: "TAGS DAS POSTAGENS (UMA POR LINHA, ATÉ 20)",
+        type: "textarea",
+        rows: 4,
+        value: forumTagsToLines(ch.forum_tags),
+        placeholder: "🐛 Bug\n💡 Ideia\n✅ Resolvido (mod)",
+        hint: "Emoji opcional no começo. Termine com (mod) para que só a moderação aplique a tag.",
+      },
       isVoice && {
         name: "user_limit",
         label: "LIMITE DE PESSOAS",
@@ -724,6 +825,12 @@ async function openEditChannelDialog(srv, ch) {
     topic: isVoice ? null : values.topic.trim(),
     kind: isVoice || ch.kind === "forum" ? null : values.kind,
     user_limit: isVoice ? Math.max(0, Math.min(99, parseInt(values.user_limit, 10) || 0)) : null,
+    slowmode_secs: isVoice ? null : Number(values.slowmode_secs) || 0,
+    forum_tags: (() => {
+      if (ch.kind !== "forum") return null;
+      const tags = parseForumTagLines(values.forum_tags, ch.forum_tags || []);
+      return sameForumTags(tags, ch.forum_tags) ? null : tags;
+    })(),
   });
   const newCat = values.category_id || null;
   if (newCat !== (ch.category_id || null)) moveChannel(srv, ch.id, { intoCategory: newCat });
@@ -1100,9 +1207,13 @@ function applyChannelHeader(srv, ch) {
   const attach = document.getElementById("attach-image-btn");
   if (attach) attach.disabled = !canPost || !permissions.attach_files;
   chatInput.disabled = !canPost;
+  refreshSlowmodeIndicator();
+  const timeoutUntil = ch ? memberTimeoutUntil(srv, state.selfUser?.username) : null;
   chatInput.placeholder = canPost
     ? `Conversar em #${name}`
-    : isAnn
+    : timeoutUntil
+      ? `Você está de castigo neste servidor até ${formatTimeoutEnd(timeoutUntil)}`
+      : isAnn
       ? `Somente moderadores publicam em #${name}`
       : ch ? `Você não tem permissão para enviar mensagens em #${name}` : "Nenhum canal acessível neste servidor";
 }

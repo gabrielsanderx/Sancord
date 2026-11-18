@@ -1,5 +1,19 @@
 # Histórico de versões
 
+## 0.2.1
+
+- Castigo (timeout) de membros: duração de 60 segundos a 28 dias, motivo na auditoria,
+  validação no servidor e fim automático. Nova permissão "Aplicar castigo".
+- Modo lento por canal (de 5 segundos a 6 horas), com contagem regressiva no campo de
+  mensagem. Moderadores ficam isentos.
+- Tags nos fóruns: até 20 por fórum (algumas só a moderação aplica), até 5 por postagem e
+  filtro por tag.
+- "Exibir status Está digitando", Modo Foco e Proteção de Links Externos agora funcionam.
+  O Status da conta mostra os castigos ativos.
+- Textos de segurança corrigidos: só as chamadas têm criptografia entre participantes, as
+  mensagens não.
+- Banco migra para a versão 13 ao iniciar o servidor.
+
 ## 0.2.0
 
 - Auditoria persistida, AutoMod configurável e busca no histórico com filtros e

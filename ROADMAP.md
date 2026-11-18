@@ -7,7 +7,8 @@ completo e denúncias) está em [FASE5.md](FASE5.md), ainda não publicada em pr
 A Fase 6 (voz) já foi iniciada e revisada; estado, correções e limites de validação
 estão em [FASE6.md](FASE6.md). A Fase 7 (câmera e tela) está em [FASE7.md](FASE7.md),
 com validação de webcam e redes pendente. A Fase 8 (auditoria, AutoMod, busca, enquetes, eventos, threads e fóruns) está em
-[FASE8.md](FASE8.md). A Fase 9 (polimento) está em andamento em [FASE9.md](FASE9.md).
+[FASE8.md](FASE8.md). A Fase 9 (polimento) foi concluída no escopo pt-BR com inglês
+preview; detalhes em [FASE9.md](FASE9.md).
 A tabela histórica abaixo não representa esses avanços.
 O fechamento da Fase 9 no escopo pt-BR está descrito em [FASE9.md](FASE9.md), com bots de
 envio/webhooks e schema v10. A etapa seguinte já foi iniciada:

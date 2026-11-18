@@ -428,6 +428,7 @@
           <input type="text" id="forum-filter" placeholder="Buscar postagens…" data-i18n-placeholder="forum.search" autocomplete="off" />
           <button type="button" id="forum-new-post-btn" class="btn-primary small-btn" data-i18n="forum.newPost">+ Nova postagem</button>
         </div>
+        <div id="forum-tag-filter" class="forum-tag-filter hidden" aria-label="Filtrar por tag"></div>
         <div id="forum-posts" class="forum-posts" aria-live="polite"></div>
       </section>
 
@@ -456,6 +457,9 @@
           <span class="image-preview-label">Imagem pronta para enviar</span>
           <button type="button" id="remove-image-btn" class="icon-btn danger" title="Remover imagem">✕</button>
         </div>
+
+        <!-- Modo lento do canal (contagem regressiva da própria pessoa) -->
+        <div id="slowmode-indicator" class="slowmode-indicator hidden" aria-live="polite"></div>
 
         <form id="chat-form">
           <input type="file" id="image-file-input" multiple class="hidden" />
@@ -551,7 +555,7 @@
           <button type="button" class="settings-subnav-item active" data-account-sub="info">Informações da conta</button>
           <button type="button" class="settings-subnav-item" data-account-sub="security">Senha e segurança</button>
           <button type="button" class="settings-subnav-item" data-account-sub="status">Status da conta</button>
-          <button type="button" class="settings-subnav-item" data-account-sub="family">Central da Família</button>
+          <button type="button" class="settings-subnav-item" data-account-sub="family">Foco e segurança</button>
         </div>
 
         <button type="button" class="settings-nav-item" data-settings-tab="privacy" data-nav-label="Dados e privacidade">
@@ -605,7 +609,7 @@
             <progress class="sancord-update-progress hidden" data-update-progress max="100" value="0" aria-label="Progresso do download"></progress>
             <pre class="sancord-update-notes" data-update-notes></pre>
           </div>
-          <!-- Aba 1: Minha Conta (Informações da conta, Senha e segurança, Status da conta, Central da Família) -->
+          <!-- Aba 1: Minha Conta (Informações da conta, Senha e segurança, Status da conta, Foco e segurança) -->
           <div id="settings-tab-account" class="settings-panel">
             <!-- Sub-aba 1: Informações da conta -->
             <div id="account-sub-info" class="account-sub-panel">
@@ -663,10 +667,17 @@
               <h2>Senha e segurança</h2>
               <div class="profile-editor-card">
                 <div class="security-badge-row">
-                  <span class="security-pill ok">🔒 WebRTC DTLS-SRTP Ativo</span>
-                  <span class="security-pill">🛡️ Hash Salt Persistente</span>
+                  <span class="security-pill ok">🔒 Senha guardada com Argon2id</span>
+                  <span class="security-pill">📞 Chamadas criptografadas entre participantes</span>
                 </div>
-                <p class="settings-hint-text" style="margin-bottom: 14px;">Proteja sua conta Sancord atualizando sua senha regularmente. Suas chamadas e mensagens continuam protegidas por criptografia DTLS-SRTP.</p>
+                <p class="settings-hint-text" style="margin-bottom: 14px;">
+                  Sua senha nunca é guardada em texto: o servidor só tem um hash Argon2id dela.
+                  Voz, vídeo e tela são criptografados entre os participantes (DTLS-SRTP), mesmo
+                  quando passam por um servidor de retransmissão.
+                  As mensagens viajam até o servidor deste Sancord (com HTTPS quando a conexão é pelo
+                  endereço público) e ficam guardadas lá, onde podem ser lidas — elas não têm
+                  criptografia de ponta a ponta.
+                </p>
                 <div>
                   <button type="button" id="open-change-pw-modal-btn" class="btn-primary small-btn">Mudar senha</button>
                 </div>
@@ -676,11 +687,11 @@
             <!-- Sub-aba 3: Status da conta -->
             <div id="account-sub-status" class="account-sub-panel hidden">
               <h2>Status da conta</h2>
-              <div class="account-standing-card">
-                <div class="standing-icon">✓</div>
+              <div class="account-standing-card" id="account-standing-card">
+                <div class="standing-icon" id="account-standing-icon">✓</div>
                 <div>
-                  <strong>Tudo certo com a sua conta</strong>
-                  <p>Sua conta está em situação regular no Sancord, sem restrições em servidores ou chamadas.</p>
+                  <strong id="account-standing-title">Nenhuma restrição ativa</strong>
+                  <p id="account-standing-text">Você não está de castigo em nenhum dos seus servidores.</p>
                 </div>
               </div>
               <div class="account-stats-grid">
@@ -699,22 +710,22 @@
               </div>
             </div>
 
-            <!-- Sub-aba 4: Central da Família & Bem-estar -->
+            <!-- Sub-aba 4: Foco e segurança -->
             <div id="account-sub-family" class="account-sub-panel hidden">
-              <h2>Central da Família &amp; Bem-estar</h2>
-              <p class="settings-hint-text" style="margin-bottom: 14px;">Controles inteligentes exclusivos do Sancord para proteger sua privacidade, filtrar mensagens indesejadas e gerenciar tempo de sessão.</p>
+              <h2>Foco e segurança</h2>
+              <p class="settings-hint-text" style="margin-bottom: 14px;">Controles deste aparelho para conversas privadas e links externos.</p>
               <div class="dsp-toggles-list">
                 <label class="dsp-toggle-row">
                   <div>
-                    <div class="dsp-title">Modo Foco (Silenciar DMs de não-amigos)</div>
-                    <div class="dsp-sub">Evita notificações sonoras de contas desconhecidas enquanto você joga ou trabalha.</div>
+                    <div class="dsp-title">Modo Foco (silenciar conversas de quem não é amigo)</div>
+                    <div class="dsp-sub">Mensagens privadas de quem não é seu amigo chegam normalmente e contam como não lidas, mas sem som nem notificação.</div>
                   </div>
                   <input type="checkbox" id="family-focus-mode" />
                 </label>
                 <label class="dsp-toggle-row">
                   <div>
                     <div class="dsp-title">Proteção de Links Externos</div>
-                    <div class="dsp-sub">Exibe aviso visual antes de abrir domínios externos desconhecidos no chat.</div>
+                    <div class="dsp-sub">Pede confirmação antes de abrir um link de mensagem para um site em que você ainda não confiou.</div>
                   </div>
                   <input type="checkbox" id="family-link-guard" checked />
                 </label>
@@ -2136,6 +2147,7 @@
                   <div class="dsp-toggles-list" style="margin-bottom: 14px;">
                     <label class="dsp-toggle-row"><div><div class="dsp-title">👢 Expulsar Membros</div><div class="dsp-sub">Remover membros de cargos inferiores do servidor.</div></div><input type="checkbox" data-role-perm="kick_members" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">🔨 Banir Membros</div><div class="dsp-sub">Banir membros permanentemente de voltar ao servidor.</div></div><input type="checkbox" data-role-perm="ban_members" /></label>
+                    <label class="dsp-toggle-row"><div><div class="dsp-title">⏱️ Aplicar castigo</div><div class="dsp-sub">Impede por um tempo que membros de cargos inferiores enviem mensagens, reajam e usem a voz.</div></div><input type="checkbox" data-role-perm="moderate_members" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">🧹 Gerenciar Mensagens</div><div class="dsp-sub">Excluir ou fixar mensagens de qualquer membro no servidor.</div></div><input type="checkbox" data-role-perm="manage_messages" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">📢 Mencionar @everyone e Cargos</div><div class="dsp-sub">Destacar todos os membros online em mensagens.</div></div><input type="checkbox" data-role-perm="mention_everyone" /></label>
                   </div>

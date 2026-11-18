@@ -148,6 +148,7 @@ function openVoiceUserMenu(e, uid) {
       }
       mod.push({ label: "Desconectar da voz", icon: "⏏️", danger: true, onSelect: () => act("disconnect") });
     }
+    mod.push(...timeoutMenuItems(srv, user.username, name));
     if (mod.length) items.push({ separator: true }, { header: "Moderação do servidor" }, ...mod);
   }
   SancordUI.contextMenu(e.clientX, e.clientY, items);

@@ -34,13 +34,16 @@ async fn main() {
     };
     let db = shared_state.read().await.db.clone();
 
-    // Status personalizado com prazo: limpa os vencidos a cada 30 s.
+    // Status personalizado e castigo com prazo: limpa os vencidos a cada 30 s.
+    // (O castigo já deixa de valer no horário exato; aqui só avisa os clientes.)
     let expiry_state = shared_state.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             tick.tick().await;
             sancord::social::expire_statuses(&expiry_state).await;
+            sancord::timeouts::expire(&expiry_state).await;
+            sancord::slowmode::prune_shared(&expiry_state).await;
         }
     });
 

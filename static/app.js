@@ -42,7 +42,6 @@ const DEFAULT_AUDIO_SETTINGS = {
   voiceGlow: true,
   uiVolume: 100,
   desktopNotif: false,
-  friendsOnlyDm: false,
   showTyping: true,
   autoEmbeds: true,
   familyFocus: false,
@@ -558,7 +557,6 @@ const notifDesktopToggle = document.getElementById("notif-desktop-alerts");
 const notifUiVolumeSlider = document.getElementById("notif-ui-volume-slider");
 const notifUiVolumeValue = document.getElementById("notif-ui-volume-value");
 const notifTestSoundBtn = document.getElementById("notif-test-sound-btn");
-const privacyFriendsOnlyToggle = document.getElementById("privacy-friends-only-dm");
 const privacyTypingToggle = document.getElementById("privacy-typing-indicator");
 const privacyAutoEmbedsToggle = document.getElementById("privacy-auto-embeds");
 const exportSettingsBtn = document.getElementById("export-settings-btn");
@@ -644,7 +642,7 @@ function getServerPermissionsFor(srv, username) {
       kick_members: true, ban_members: true, manage_messages: true, mention_everyone: true,
       send_messages: true, attach_files: true, connect_voice: true, speak_voice: true,
       stream_video: true, create_invites: true,
-      mute_members: true, deafen_members: true, move_members: true, view_audit_log: true,
+      mute_members: true, deafen_members: true, move_members: true, view_audit_log: true, moderate_members: true,
     };
   }
   const everyone = (srv.roles || []).find((r) => r.id === "everyone")?.permissions || {};
@@ -654,7 +652,7 @@ function getServerPermissionsFor(srv, username) {
     kick_members: false, ban_members: false, manage_messages: false, mention_everyone: false,
     send_messages: true, attach_files: true, connect_voice: true, speak_voice: true,
     stream_video: true, create_invites: true,
-    mute_members: false, deafen_members: false, move_members: false, view_audit_log: false,
+    mute_members: false, deafen_members: false, move_members: false, view_audit_log: false, moderate_members: false,
     ...everyone,
   };
   for (const role of getUserServerRoles(srv, lower)) {
@@ -665,7 +663,7 @@ function getServerPermissionsFor(srv, username) {
         kick_members: true, ban_members: true, manage_messages: true, mention_everyone: true,
         send_messages: true, attach_files: true, connect_voice: true, speak_voice: true,
         stream_video: true, create_invites: true,
-        mute_members: true, deafen_members: true, move_members: true, view_audit_log: true,
+        mute_members: true, deafen_members: true, move_members: true, view_audit_log: true, moderate_members: true,
       };
     }
     for (const k of Object.keys(perms)) {
@@ -679,7 +677,7 @@ function canUserEditServer(srv, username) {
   if (!srv || !username) return false;
   if (isServerOwner(srv, username)) return true;
   const p = getServerPermissionsFor(srv, username);
-  return Boolean(p.administrator || p.manage_server || p.manage_roles || p.manage_channels || p.kick_members || p.ban_members || p.view_audit_log);
+  return Boolean(p.administrator || p.manage_server || p.manage_roles || p.manage_channels || p.kick_members || p.ban_members || p.view_audit_log || p.moderate_members);
 }
 
 function renderGuildRail() {
@@ -1269,6 +1267,8 @@ async function handleServerMessage(msg) {
             applyChannelHeader(server, ch);
           }
         }
+        // Fórum aberto: tags (filtro e etiquetas) podem ter mudado.
+        if (state.forumViewChannel && typeof renderForumPosts === "function") renderForumPosts();
       }
       renderGuildRail();
       refreshServerSettingsModalIfOpen();
@@ -1380,6 +1380,7 @@ async function handleServerMessage(msg) {
         state.chatHistory[message.channel_id] = [];
       }
       if (state.chatHistory[message.channel_id].some((m) => m.id === message.id)) break;
+      if (message.author_id === state.selfUser?.id) noteOwnMessageForSlowmode(message.channel_id);
       clearUserTyping(message.channel_id, message.author_id);
       // Não lidas/menções/notificação; numa janela de histórico antiga não emenda a mensagem.
       let appendable = onNewMessageForUnread(message);
@@ -4432,6 +4433,8 @@ function renderMembersSidebar() {
     }
 
     const badge = topRole?.badge_emoji ? `<span title="${escapeHtml(topRole.name)}">${escapeHtml(topRole.badge_emoji)}</span> ` : "";
+    const timeoutUntil = memberTimeoutUntil(srv, u.username);
+    if (timeoutUntil) activity = `⏱️ De castigo até ${formatTimeoutEnd(timeoutUntil)}`;
     li.innerHTML = `
       <div class="user-avatar-wrap ${decoCls}">
         <div class="avatar" style="background: ${u.avatar_color}">
@@ -4445,7 +4448,18 @@ function renderMembersSidebar() {
         <div class="member-activity">${escapeHtml(activity)}</div>
       </div>
     `;
+    li.classList.toggle("is-timed-out", Boolean(timeoutUntil));
     li.addEventListener("click", () => openMemberProfilePopover(u.id));
+    li.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const items = [
+        { header: u.display_name || u.username },
+        { label: "Ver perfil", icon: "👤", onSelect: () => openMemberProfilePopover(u.id) },
+      ];
+      const mod = timeoutMenuItems(srv, u.username, u.display_name || u.username);
+      if (mod.length) items.push({ separator: true }, { header: "Moderação do servidor" }, ...mod);
+      SancordUI.contextMenu(e.clientX, e.clientY, items);
+    });
     membersList.appendChild(li);
   };
 
@@ -4791,6 +4805,8 @@ function renderTypingIndicator() {
 }
 
 chatInput?.addEventListener("input", () => {
+  // Privacidade: com "Exibir status Está digitando" desligado, ninguém é avisado.
+  if (state.audioSettings?.showTyping === false) return;
   const now = Date.now();
   if (now - state.lastTypingSentAt > 2000 && chatInput.value.trim().length > 0) {
     state.lastTypingSentAt = now;
@@ -5924,7 +5940,6 @@ function syncSettingsModalFields() {
   if (notifUiVolumeSlider) notifUiVolumeSlider.value = s.uiVolume ?? 100;
   if (notifUiVolumeValue) notifUiVolumeValue.textContent = `${s.uiVolume ?? 100}%`;
 
-  if (privacyFriendsOnlyToggle) privacyFriendsOnlyToggle.checked = Boolean(s.friendsOnlyDm);
   if (privacyTypingToggle) privacyTypingToggle.checked = s.showTyping !== false;
   if (privacyAutoEmbedsToggle) privacyAutoEmbedsToggle.checked = s.autoEmbeds !== false;
 
@@ -5987,6 +6002,7 @@ function syncSettingsModalFields() {
   if (stSrv) stSrv.textContent = String((state.servers || []).length || 1);
   if (stFr) stFr.textContent = String((state.friends || []).length);
   if (stStar) stStar.textContent = String(state.starredMsgIds?.size || 0);
+  if (typeof renderAccountStanding === "function") renderAccountStanding();
   if (upEl) {
     const mins = Math.max(1, Math.floor((Date.now() - (state.sessionStartedAt || Date.now())) / 60000));
     upEl.textContent = `${mins} min conectado nesta sessão`;
@@ -7528,10 +7544,6 @@ document.getElementById("family-link-guard")?.addEventListener("change", (e) => 
   saveAudioSettings();
 });
 
-privacyFriendsOnlyToggle?.addEventListener("change", (e) => {
-  state.audioSettings.friendsOnlyDm = Boolean(e.target.checked);
-  saveAudioSettings();
-});
 privacyTypingToggle?.addEventListener("change", (e) => {
   state.audioSettings.showTyping = Boolean(e.target.checked);
   saveAudioSettings();
@@ -8231,6 +8243,8 @@ function populateServerSettingsUI(srv) {
       const mRoles = getUserServerRoles(srv, mLow);
       const isTargetOwner = srv.owner_username === mLow;
       const canModThis = !isTargetOwner && mLow !== state.selfUser?.username?.toLowerCase();
+      const timeoutUntil = memberTimeoutUntil(srv, mLow);
+      const canTimeout = canTimeoutMember(srv, mLow);
 
       const row = document.createElement("div");
       row.className = "srv-manage-row";
@@ -8238,15 +8252,21 @@ function populateServerSettingsUI(srv) {
         <div>
           <strong style="font-size:14px;">${escapeHtml(displayName)}${isTargetOwner ? " 👑 (Criador)" : ""}</strong>
           ${srv.member_joined_at?.[mLow] ? `<span class="settings-hint-text"> • entrou em ${new Date(srv.member_joined_at[mLow]).toLocaleDateString("pt-BR")}</span>` : ""}
+          ${timeoutUntil ? `<span class="member-timeout-tag">⏱️ de castigo até ${escapeHtml(formatTimeoutEnd(timeoutUntil))}</span>` : ""}
           <div class="profile-roles-chips" style="margin-top:4px;">
             ${mRoles.map((r) => `<span class="role-chip-pill" style="border-color:${r.color};color:${r.color};">${escapeHtml(r.name)}</span>`).join("") || `<span class="settings-hint-text">Sem cargos extras</span>`}
           </div>
         </div>
         <div style="display:flex;gap:6px;">
+          ${canTimeout ? `<button type="button" class="btn-secondary small-btn" data-act="timeout">${timeoutUntil ? "Remover castigo" : "Castigo"}</button>` : ""}
           ${canModThis && (isOwner || perms.kick_members || perms.administrator) ? `<button type="button" class="btn-secondary small-btn" data-act="kick">Expulsar</button>` : ""}
           ${canModThis && (isOwner || perms.ban_members || perms.administrator) ? `<button type="button" class="btn-secondary small-btn danger-text" data-act="ban">Banir</button>` : ""}
         </div>
       `;
+      row.querySelector('[data-act="timeout"]')?.addEventListener("click", () => {
+        if (timeoutUntil) removeMemberTimeout(srv, mLow, displayName);
+        else openTimeoutDialog(srv, mLow, displayName);
+      });
       row.querySelector('[data-act="kick"]')?.addEventListener("click", () => {
         if (confirm(`Expulsar ${displayName} de ${srv.name}?`)) {
           sendWs("KickServerMember", { server_id: srv.id, target_username: mLow });
@@ -8409,6 +8429,7 @@ function applyRolePreset(kind) {
     manage_roles: admin,
     manage_channels: admin || mod,
     kick_members: admin || mod,
+    moderate_members: admin || mod,
     ban_members: admin,
     manage_messages: admin || mod,
     mention_everyone: admin || mod,

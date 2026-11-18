@@ -10,6 +10,8 @@ const AUDIT_LABELS = {
   integration_rotate: "renovou a credencial de",
   integration_revoke: "revogou a integração",
   member_kick: "expulsou",
+  member_timeout: "aplicou castigo em",
+  member_timeout_removed: "removeu o castigo de",
   member_ban: "baniu",
   member_unban: "desbaniu",
   member_roles: "alterou os cargos de",
@@ -350,3 +352,105 @@ document.addEventListener("mousedown", (e) => {
     hideSearchResults();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Castigo (timeout) de membros — o servidor autoriza e aplica; aqui só
+// mostramos o estado e montamos o pedido.
+// ---------------------------------------------------------------------------
+const TIMEOUT_CHOICES = [
+  [60, "60 segundos"], [300, "5 minutos"], [600, "10 minutos"],
+  [3600, "1 hora"], [86400, "1 dia"], [604800, "1 semana"],
+];
+
+/** Fim do castigo (ms) se ainda estiver valendo; senão null. */
+function memberTimeoutUntil(srv, lower, now = Date.now()) {
+  const until = srv?.member_timeouts?.[String(lower || "").toLowerCase()];
+  return typeof until === "number" && until > now ? until : null;
+}
+
+/** "14:30" no mesmo dia; "20/11, 14:30" em outro dia (fuso de quem lê). */
+function formatTimeoutEnd(until, now = Date.now()) {
+  const end = new Date(until);
+  const sameDay = end.toDateString() === new Date(now).toDateString();
+  return sameDay
+    ? end.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    : end.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+/** Espelho da regra do servidor, só para decidir se o botão aparece. */
+function canTimeoutMember(srv, target) {
+  const me = state.selfUser?.username?.toLowerCase();
+  const who = String(target || "").toLowerCase();
+  if (!srv || srv.id === "sancord" || !me || !who || who === me || isServerOwner(srv, who)) return false;
+  if (!(srv.members || []).includes(who)) return false;
+  if (getServerPermissionsFor(srv, who).administrator) return false;
+  if (isServerOwner(srv, me)) return true;
+  const mine = getServerPermissionsFor(srv, me);
+  if (!mine.moderate_members && !mine.administrator) return false;
+  const top = (name) => Math.max(0, ...getUserServerRoles(srv, name).map((r) => r.position || 0));
+  return top(who) < top(me);
+}
+
+async function openTimeoutDialog(srv, target, displayName) {
+  const values = await SancordUI.formDialog({
+    title: `Castigo — ${displayName}`,
+    description: "Durante o castigo a pessoa continua lendo os canais, mas não envia mensagens, não reage e não entra na voz deste servidor. Termina sozinho no fim do prazo.",
+    fields: [
+      { name: "duration", label: "DURAÇÃO", type: "select", value: "600", options: TIMEOUT_CHOICES.map(([secs, label]) => ({ value: String(secs), label })) },
+      { name: "reason", label: "MOTIVO (OPCIONAL, VAI PARA A AUDITORIA)", type: "textarea", rows: 2, maxlength: 300 },
+    ],
+    submitLabel: "Aplicar castigo",
+    danger: true,
+  });
+  if (!values) return;
+  sendWs("TimeoutMember", {
+    server_id: srv.id,
+    target_username: target,
+    duration_secs: Number(values.duration),
+    reason: (values.reason || "").trim() || null,
+  });
+}
+
+async function removeMemberTimeout(srv, target, displayName) {
+  const ok = await SancordUI.confirm({
+    title: "Remover castigo?",
+    message: `${displayName} volta a enviar mensagens e a usar a voz agora.`,
+    confirmLabel: "Remover castigo",
+  });
+  if (ok) sendWs("TimeoutMember", { server_id: srv.id, target_username: target, duration_secs: 0 });
+}
+
+/** Itens de menu de castigo para um membro (vazio se não houver permissão). */
+function timeoutMenuItems(srv, target, displayName) {
+  if (!canTimeoutMember(srv, target)) return [];
+  const until = memberTimeoutUntil(srv, target);
+  return until
+    ? [{ label: `Remover castigo (até ${formatTimeoutEnd(until)})`, icon: "⏱️", onSelect: () => removeMemberTimeout(srv, target, displayName) }]
+    : [{ label: "Aplicar castigo…", icon: "⏱️", danger: true, onSelect: () => openTimeoutDialog(srv, target, displayName) }];
+}
+
+/** Castigos ativos da própria pessoa: [{ server, until }], do que termina antes. */
+function selfActiveTimeouts(servers, me, now = Date.now()) {
+  return (servers || [])
+    .map((srv) => ({ server: srv, until: memberTimeoutUntil(srv, me, now) }))
+    .filter((x) => x.until)
+    .sort((a, b) => a.until - b.until);
+}
+
+/** "Status da conta" com dados reais (castigos ativos nos seus servidores). */
+function renderAccountStanding() {
+  const card = document.getElementById("account-standing-card");
+  if (!card) return;
+  const list = selfActiveTimeouts(state.servers, state.selfUser?.username);
+  const icon = document.getElementById("account-standing-icon");
+  const title = document.getElementById("account-standing-title");
+  const text = document.getElementById("account-standing-text");
+  card.classList.toggle("has-restriction", list.length > 0);
+  if (icon) icon.textContent = list.length ? "⏱️" : "✓";
+  if (title) title.textContent = list.length ? `De castigo em ${list.length} ${list.length === 1 ? "servidor" : "servidores"}` : "Nenhuma restrição ativa";
+  if (text) {
+    text.textContent = list.length
+      ? list.map((x) => `${x.server.name}: até ${formatTimeoutEnd(x.until)}`).join(" • ") + ". Você continua lendo, mas não envia mensagens, não reage e não entra na voz nesses servidores."
+      : "Você não está de castigo em nenhum dos seus servidores.";
+  }
+}

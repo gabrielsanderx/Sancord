@@ -23,6 +23,12 @@ mod phase8;
 mod phase6;
 #[path = "phase7_tests.rs"]
 mod phase7;
+#[path = "timeout_tests.rs"]
+mod timeouts;
+#[path = "slowmode_tests.rs"]
+mod slowmode;
+#[path = "forum_tag_tests.rs"]
+mod forum_tags;
 
 struct TestServer {
     addr: std::net::SocketAddr,

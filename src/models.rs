@@ -22,6 +22,13 @@ pub struct Channel {
     /// Limite de pessoas num canal de voz (0 = sem limite).
     #[serde(default)]
     pub user_limit: u32,
+    /// Modo lento (canais de texto): intervalo mínimo entre mensagens de cada pessoa.
+    /// 0 = desligado; quem gerencia mensagens ou canais não espera.
+    #[serde(default)]
+    pub slowmode_secs: u32,
+    /// Fórum: tags disponíveis para as postagens (definidas por quem gerencia canais).
+    #[serde(default)]
+    pub forum_tags: Vec<ForumTag>,
     /// Projeção calculada pelo backend para o destinatário, nunca aceita do cliente.
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub effective_permissions: Option<RolePermissions>,
@@ -39,6 +46,8 @@ impl Channel {
             permission_overwrites: Vec::new(),
             permissions_synced: true,
             user_limit: 0,
+            slowmode_secs: 0,
+            forum_tags: Vec::new(),
             effective_permissions: None,
         }
     }
@@ -48,6 +57,18 @@ impl Channel {
         self.position = position;
         self
     }
+}
+
+/// Tag de fórum. `moderated` = só a moderação aplica ou remove das postagens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForumTag {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub emoji: Option<String>,
+    #[serde(default)]
+    pub moderated: bool,
 }
 
 /// Tipos de canal. Texto e anúncios ficam em `text_channels` (têm mensagens);
@@ -120,6 +141,9 @@ pub struct Thread {
     /// Trancada: só a moderação escreve.
     #[serde(default)]
     pub locked: bool,
+    /// Postagem de fórum: ids das tags do canal aplicadas (até 5).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Categoria de canais dentro de um servidor.
@@ -368,6 +392,9 @@ pub struct RolePermissions {
     /// Fase 8: ver o registro de auditoria e configurar o AutoMod.
     #[serde(default)]
     pub view_audit_log: bool,
+    /// Aplicar e remover castigo (timeout) de membros abaixo na hierarquia.
+    #[serde(default)]
+    pub moderate_members: bool,
 }
 
 impl Default for RolePermissions {
@@ -392,6 +419,7 @@ impl Default for RolePermissions {
             deafen_members: false,
             move_members: false,
             view_audit_log: false,
+            moderate_members: false,
         }
     }
 }
@@ -418,6 +446,7 @@ impl RolePermissions {
             deafen_members: true,
             move_members: true,
             view_audit_log: true,
+            moderate_members: true,
         }
     }
 
@@ -447,6 +476,7 @@ impl RolePermissions {
         self.deafen_members |= other.deafen_members;
         self.move_members |= other.move_members;
         self.view_audit_log |= other.view_audit_log;
+        self.moderate_members |= other.moderate_members;
     }
 }
 
@@ -517,6 +547,10 @@ pub struct GuildServer {
     /// filtradas pelo acesso ao canal-pai).
     #[serde(default, skip_serializing)]
     pub threads: Vec<Thread>,
+    /// Castigos ativos: username_lower -> fim (ms). Persistido em `member_timeouts`;
+    /// vai para os clientes do servidor, que mostram o aviso e o tempo restante.
+    #[serde(default)]
+    pub member_timeouts: HashMap<String, i64>,
 }
 
 /// Fase 8 — regras automáticas aplicadas no servidor a mensagens de canais do servidor.
@@ -676,6 +710,17 @@ impl GuildServer {
     }
     pub fn is_owner(&self, username_lower: &str) -> bool {
         !self.owner_username.is_empty() && self.owner_username == username_lower
+    }
+
+    /// Modo lento que vale para um canal; thread/postagem segue o canal-pai.
+    pub fn slowmode_for(&self, channel_id: &str) -> u32 {
+        let id = self.thread(channel_id).map(|t| t.parent_id.as_str()).unwrap_or(channel_id);
+        self.find_channel(id).map(|c| c.slowmode_secs).unwrap_or(0)
+    }
+
+    /// Fim do castigo, se ainda estiver valendo em `now` (ms).
+    pub fn timeout_until(&self, username_lower: &str, now: i64) -> Option<i64> {
+        self.member_timeouts.get(username_lower).copied().filter(|until| *until > now)
     }
 
     pub fn is_banned(&self, username_lower: &str) -> bool {
@@ -1330,6 +1375,9 @@ pub enum ClientMessage {
         /// Mensagem do canal que origina a thread
         #[serde(default)]
         message_id: Option<String>,
+        /// Postagem de fórum: tags do canal a aplicar
+        #[serde(default)]
+        tags: Vec<String>,
     },
     UpdateThread {
         thread_id: String,
@@ -1339,6 +1387,8 @@ pub enum ClientMessage {
         archived: Option<bool>,
         #[serde(default)]
         locked: Option<bool>,
+        #[serde(default)]
+        tags: Option<Vec<String>>,
     },
     DeleteThread { thread_id: String },
 
@@ -1448,6 +1498,12 @@ pub enum ClientMessage {
         /// Só canais de voz: 0 = sem limite, máximo 99.
         #[serde(default)]
         user_limit: Option<u32>,
+        /// Só canais de texto: 0 desliga; máximo de 6 horas.
+        #[serde(default)]
+        slowmode_secs: Option<u32>,
+        /// Só fóruns: lista completa de tags (ids existentes são mantidos).
+        #[serde(default)]
+        forum_tags: Option<Vec<ForumTag>>,
     },
 
     UpdateChannelPermissions {
@@ -1634,6 +1690,15 @@ pub enum ClientMessage {
     BanServerMember {
         server_id: String,
         target_username: String,
+    },
+
+    /// Castigo (timeout): `duration_secs` = 0 remove; máximo de 28 dias.
+    TimeoutMember {
+        server_id: String,
+        target_username: String,
+        duration_secs: u64,
+        #[serde(default)]
+        reason: Option<String>,
     },
 
     /// Remover banimento de um usuário em um servidor

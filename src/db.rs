@@ -35,7 +35,7 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use tracing::{error, info, warn};
 
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 13;
 
 /// Metadados de um arquivo enviado (o conteúdo fica em `data/uploads/`).
 #[derive(Debug, Clone, PartialEq)]
@@ -158,6 +158,9 @@ pub enum WriteOp {
     /// Moderação de voz; muted=false e deafened=false apaga a linha.
     SetVoiceModeration { server_id: String, user_lower: String, muted: bool, deafened: bool },
     RenameVoiceModeration { from: String, to: String },
+    /// Castigo de membro; `until_ms` = None apaga a linha.
+    SetMemberTimeout { server_id: String, user_lower: String, until_ms: Option<i64> },
+    RenameMemberTimeout { from: String, to: String },
     UpsertMessage(Box<ChatMessage>),
     DeleteMessage { id: String },
     DeleteChannelMessages { channel_id: String },
@@ -441,6 +444,47 @@ fn migrate_schema(conn: &Connection) -> DbResult<()> {
             PRAGMA user_version = 10;
             COMMIT;")?;
     }
+    if version < 11 {
+        // v11: castigo (timeout) de membros, com fim em ms. Linhas vencidas são
+        // removidas pelo servidor; a permissão já deixa de valer pelo relógio.
+        conn.execute_batch("BEGIN;
+            CREATE TABLE IF NOT EXISTS member_timeouts (
+                server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                user_lower TEXT NOT NULL,
+                until_ms INTEGER NOT NULL,
+                PRIMARY KEY (server_id, user_lower)
+            );
+            PRAGMA user_version = 11;
+            COMMIT;")?;
+    }
+    if version < 12 {
+        // v12: modo lento por canal (segundos entre mensagens de cada pessoa).
+        let txn = conn.unchecked_transaction()?;
+        let present: i64 = txn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('channels') WHERE name = 'slowmode_secs'",
+            [],
+            |r| r.get(0),
+        )?;
+        if present == 0 {
+            txn.execute_batch("ALTER TABLE channels ADD COLUMN slowmode_secs INTEGER NOT NULL DEFAULT 0;")?;
+        }
+        txn.execute_batch("PRAGMA user_version = 12;")?;
+        txn.commit()?;
+    }
+    if version < 13 {
+        // v13: tags de fórum (JSON) no canal; as tags de cada postagem ficam no JSON da thread.
+        let txn = conn.unchecked_transaction()?;
+        let present: i64 = txn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('channels') WHERE name = 'forum_tags'",
+            [],
+            |r| r.get(0),
+        )?;
+        if present == 0 {
+            txn.execute_batch("ALTER TABLE channels ADD COLUMN forum_tags TEXT NOT NULL DEFAULT '[]';")?;
+        }
+        txn.execute_batch("PRAGMA user_version = 13;")?;
+        txn.commit()?;
+    }
     Ok(())
 }
 
@@ -531,7 +575,10 @@ fn migrate_v2(conn: &Connection) -> DbResult<()> {
             position INTEGER NOT NULL,
             permission_overwrites TEXT NOT NULL DEFAULT '[]',
             permissions_synced INTEGER NOT NULL DEFAULT 1,
-            user_limit INTEGER NOT NULL DEFAULT 0
+            user_limit INTEGER NOT NULL DEFAULT 0,
+            -- Também aqui (e não só na v12/v13): a conversão v1 -> v2 já grava os canais.
+            slowmode_secs INTEGER NOT NULL DEFAULT 0,
+            forum_tags TEXT NOT NULL DEFAULT '[]'
         );
         CREATE INDEX IF NOT EXISTS idx_channels_server ON channels(server_id);
         CREATE TABLE IF NOT EXISTS server_members (
@@ -647,12 +694,13 @@ fn replace_server(conn: &Connection, srv: &GuildServer) -> DbResult<()> {
     }
     {
         let mut stmt = conn.prepare(
-            "INSERT OR REPLACE INTO channels (id, server_id, category_id, kind, name, topic, position, permission_overwrites, permissions_synced, user_limit)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT OR REPLACE INTO channels (id, server_id, category_id, kind, name, topic, position, permission_overwrites, permissions_synced, user_limit, slowmode_secs, forum_tags)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )?;
         for c in srv.text_channels.iter().chain(srv.voice_channels.iter()) {
             stmt.execute(params![c.id, srv.id, c.category_id, c.kind.as_str(), c.name, c.topic, c.position,
-                serde_json::to_string(&c.permission_overwrites)?, c.permissions_synced, c.user_limit])?;
+                serde_json::to_string(&c.permission_overwrites)?, c.permissions_synced, c.user_limit, c.slowmode_secs,
+                serde_json::to_string(&c.forum_tags)?])?;
         }
     }
     {
@@ -814,6 +862,27 @@ fn apply(conn: &Connection, op: WriteOp) -> DbResult<()> {
         WriteOp::RenameVoiceModeration { from, to } => {
             conn.execute(
                 "UPDATE OR REPLACE voice_moderation SET user_lower = ?2 WHERE user_lower = ?1",
+                params![from, to],
+            )?;
+        }
+        WriteOp::SetMemberTimeout { server_id, user_lower, until_ms } => match until_ms {
+            Some(until) => {
+                conn.execute(
+                    "INSERT INTO member_timeouts (server_id, user_lower, until_ms) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(server_id, user_lower) DO UPDATE SET until_ms = excluded.until_ms",
+                    params![server_id, user_lower, until],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "DELETE FROM member_timeouts WHERE server_id = ?1 AND user_lower = ?2",
+                    params![server_id, user_lower],
+                )?;
+            }
+        },
+        WriteOp::RenameMemberTimeout { from, to } => {
+            conn.execute(
+                "UPDATE OR REPLACE member_timeouts SET user_lower = ?2 WHERE user_lower = ?1",
                 params![from, to],
             )?;
         }
@@ -1102,6 +1171,7 @@ impl Db {
                         voice_moderation: HashMap::new(),
                         automod: Default::default(),
                         threads: Vec::new(),
+                        member_timeouts: HashMap::new(),
                     })
                 })?;
                 rows.collect::<Result<Vec<_>, _>>()?
@@ -1123,7 +1193,7 @@ impl Db {
             }
 
             let mut stmt = c.prepare(
-                "SELECT server_id, id, category_id, kind, name, topic, position, permission_overwrites, permissions_synced, user_limit FROM channels ORDER BY position, rowid",
+                "SELECT server_id, id, category_id, kind, name, topic, position, permission_overwrites, permissions_synced, user_limit, slowmode_secs, forum_tags FROM channels ORDER BY position, rowid",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok((
@@ -1137,17 +1207,21 @@ impl Db {
                     r.get::<_, String>(7)?,
                     r.get::<_, bool>(8)?,
                     r.get::<_, u32>(9)?,
+                    r.get::<_, u32>(10)?,
+                    r.get::<_, String>(11)?,
                 ))
             })?;
             for row in rows {
-                let (sid, id, category_id, kind, name, topic, position, overwrites, permissions_synced, user_limit) = row?;
+                let (sid, id, category_id, kind, name, topic, position, overwrites, permissions_synced, user_limit, slowmode_secs, forum_tags) = row?;
                 let Some(i) = slot(&sid) else { continue };
                 let Some(kind) = ChannelKind::parse(&kind) else {
                     warn!("Canal {id} com tipo desconhecido '{kind}' ignorado");
                     continue;
                 };
                 let ch = Channel { id, name, kind: kind.clone(), category_id, position, topic,
-                    permission_overwrites: serde_json::from_str(&overwrites)?, permissions_synced, user_limit, effective_permissions: None };
+                    permission_overwrites: serde_json::from_str(&overwrites)?, permissions_synced, user_limit, slowmode_secs,
+                    // Tag ilegível não derruba o servidor: o fórum só fica sem tags.
+                    forum_tags: serde_json::from_str(&forum_tags).unwrap_or_default(), effective_permissions: None };
                 if kind.is_text_like() {
                     servers[i].text_channels.push(ch);
                 } else {
@@ -1501,6 +1575,15 @@ impl Db {
                 }
             }
             Ok(groups)
+        })
+    }
+
+    /// Castigos persistidos: (server_id, user_lower, fim em ms).
+    pub fn load_member_timeouts(&self) -> DbResult<Vec<(String, String, i64)>> {
+        self.with_reader(|c| {
+            let mut stmt = c.prepare("SELECT server_id, user_lower, until_ms FROM member_timeouts")?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
     }
 
@@ -2012,6 +2095,7 @@ mod tests {
             voice_moderation: HashMap::new(),
             automod: Default::default(),
             threads: Vec::new(),
+            member_timeouts: HashMap::new(),
         };
         srv.ensure_layout(1000);
         srv

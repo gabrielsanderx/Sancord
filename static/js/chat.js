@@ -1679,6 +1679,8 @@ function renderComposerTray() {
 /** Envio do composer (texto + anexos). */
 function submitComposer() {
   if (chatInput.disabled) { showErrorToast("Você não pode enviar mensagens neste canal."); return; }
+  const slowWait = currentSlowmodeWait(getActiveTextChannelId());
+  if (slowWait > 0) { showErrorToast(`Modo lento: aguarde ${formatSlowmodeWait(slowWait)} para enviar de novo.`); return; }
   const content = chatInput.value.trim();
   const files = state.composerFiles;
   if (files.some((f) => f.status === "uploading")) {

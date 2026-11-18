@@ -248,11 +248,13 @@ fn update_channel(
     topic: Option<String>,
     kind: Option<ChannelKind>,
     user_limit: Option<u32>,
+    slowmode_secs: Option<u32>,
+    forum_tags: Option<Vec<crate::models::ForumTag>>,
 ) {
     if require_manage_channels(st, user_id, server_id, "update_channel").is_none() {
         return;
     }
-    let result: Result<(), &str> = (|| {
+    let result: Result<Option<Vec<String>>, &str> = (|| {
         let srv = st.find_server_mut(server_id).ok_or("Servidor não encontrado.")?;
         let duplicate_name = |srv: &GuildServer, slug: &str| {
             srv.text_channels.iter().any(|c| c.id != channel_id && c.name == slug)
@@ -278,6 +280,23 @@ fn update_channel(
                 return Err("Só é possível alternar entre canal de texto e de anúncios.");
             }
         }
+        // Validado antes de alterar qualquer campo do canal.
+        if let Some(secs) = slowmode_secs {
+            if !ch_kind.is_text_like() {
+                return Err("O modo lento só vale para canais de texto.");
+            }
+            if secs > crate::slowmode::MAX_SECS {
+                return Err("O modo lento pode ser de no máximo 6 horas.");
+            }
+        }
+        let forum_tags = match forum_tags {
+            Some(_) if ch_kind != ChannelKind::Forum => return Err("Tags só existem em canais de fórum."),
+            Some(list) => {
+                let existing = &srv.find_channel(channel_id).ok_or("Canal não encontrado.")?.forum_tags;
+                Some(crate::threads::sanitize_forum_tags(list, existing)?)
+            }
+            None => None,
+        };
         let ch = srv.find_channel_mut(channel_id).ok_or("Canal não encontrado.")?;
         if let Some(n) = new_name {
             ch.name = n;
@@ -294,11 +313,30 @@ fn update_channel(
             }
             ch.user_limit = limit.min(crate::voice::MAX_USER_LIMIT);
         }
-        Ok(())
+        if let Some(secs) = slowmode_secs {
+            ch.slowmode_secs = secs;
+        }
+        let tag_names = forum_tags.as_ref().map(|tags| tags.iter().map(|t| t.name.clone()).collect::<Vec<_>>());
+        if let Some(tags) = forum_tags {
+            ch.forum_tags = tags;
+        }
+        Ok(tag_names)
     })();
     match result {
-        Ok(()) => {
-            crate::moderation::audit_by_uid(st, user_id, server_id, "channel_update", Some(channel_id), None);
+        Ok(tag_names) => {
+            let mut parts = Vec::new();
+            if let Some(s) = slowmode_secs {
+                parts.push(match s {
+                    0 => "modo lento desligado".to_string(),
+                    s => format!("modo lento: {}", crate::slowmode::describe_wait(i64::from(s) * 1000)),
+                });
+            }
+            if let Some(names) = &tag_names {
+                parts.push(if names.is_empty() { "tags: nenhuma".to_string() } else { format!("tags: {}", names.join(", ")) });
+                crate::threads::prune_post_tags(st, server_id, channel_id);
+            }
+            let details = (!parts.is_empty()).then(|| parts.join("; "));
+            crate::moderation::audit_by_uid(st, user_id, server_id, "channel_update", Some(channel_id), details);
             broadcast_server_update(st, server_id)
         }
         Err(msg) => st.feedback(user_id, false, "update_channel", msg),
@@ -1021,6 +1059,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             let has_files = valid_img || !attachments.is_empty();
             let is_dm = ServerState::is_private_text(&channel_id);
             let mut target_server_id: Option<String> = None;
+            // Canal com modo lento: registra o envio só depois de a mensagem ser aceita.
+            let mut slowmode_key: Option<(String, String)> = None;
             // DM 1:1: o outro participante e se a mensagem vira solicitação para ele.
             let mut dm_peer: Option<(String, bool)> = None;
             if is_dm {
@@ -1050,6 +1090,12 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 let perms = srv.channel_permissions(&me_lower, &channel_id);
                 if !perms.view_channel { fail(&st, "Você não tem acesso a este canal."); return; }
                 if !perms.send_messages {
+                    // Castigo tem aviso próprio, com o tempo restante (independe do fuso).
+                    let now = crate::auth::now_ms();
+                    if let Some(until) = srv.timeout_until(&me_lower, now) {
+                        fail(&st, &format!("Você está de castigo neste servidor por mais {}.", crate::timeouts::describe_remaining(until - now)));
+                        return;
+                    }
                     fail(&st, "Você não tem permissão para enviar mensagens neste servidor.");
                     return;
                 }
@@ -1067,6 +1113,17 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 if is_announcement && !(perms.manage_messages || perms.administrator) {
                     fail(&st, "Somente moderadores podem publicar em canais de anúncios.");
                     return;
+                }
+                // Modo lento: quem gerencia mensagens ou canais não espera.
+                let slow = srv.slowmode_for(&channel_id);
+                if slow > 0 && !(perms.manage_messages || perms.manage_channels || perms.administrator) {
+                    let key = (channel_id.clone(), me_lower.clone());
+                    let now = crate::auth::now_ms();
+                    if let Some(wait) = crate::slowmode::remaining(st.slowmode_last.get(&key).copied(), slow, now) {
+                        fail(&st, &format!("Modo lento: aguarde {} para enviar de novo neste canal.", crate::slowmode::describe_wait(wait)));
+                        return;
+                    }
+                    slowmode_key = Some(key);
                 }
                 target_server_id = Some(srv.id.clone());
             }
@@ -1149,6 +1206,9 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             // Persiste (fila do banco) e mantém só as recentes no cache.
             // Antes, o histórico era truncado em 200 e as antigas eram perdidas.
             st.insert_message(chat_msg.clone());
+            if let Some(key) = slowmode_key {
+                st.slowmode_last.insert(key, crate::auth::now_ms());
+            }
             if !is_dm {
                 // Thread: atividade, contador e desarquivar (no-op para canais comuns).
                 crate::threads::on_message(&mut st, &channel_id, chat_msg.created_at);
@@ -1485,6 +1545,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     permission_overwrites: overwrites,
                     permissions_synced,
                     user_limit: 0,
+                    slowmode_secs: 0,
+                    forum_tags: Vec::new(),
                     effective_permissions: None,
                 };
                 if kind.is_text_like() {
@@ -1577,7 +1639,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         } => {
             // Mantido por compatibilidade; equivale a UpdateChannel só com nome.
             let mut st = state.write().await;
-            update_channel(&mut st, user_id, &server_id, &channel_id, Some(name), None, None, None);
+            update_channel(&mut st, user_id, &server_id, &channel_id, Some(name), None, None, None, None, None);
         }
 
         ClientMessage::UpdateChannel {
@@ -1587,9 +1649,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             topic,
             kind,
             user_limit,
+            slowmode_secs,
+            forum_tags,
         } => {
             let mut st = state.write().await;
-            update_channel(&mut st, user_id, &server_id, &channel_id, name, topic, kind, user_limit);
+            update_channel(&mut st, user_id, &server_id, &channel_id, name, topic, kind, user_limit, slowmode_secs, forum_tags);
         }
 
         ClientMessage::UpdateChannelPermissions { server_id, channel_id, overwrites, sync_category } => {
@@ -2277,11 +2341,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         ClientMessage::ListThreads { server_id } => {
             crate::threads::list(state, user_id, server_id).await;
         }
-        ClientMessage::CreateThread { channel_id, name, message_id } => {
-            crate::threads::create(state, user_id, channel_id, name, message_id).await;
+        ClientMessage::CreateThread { channel_id, name, message_id, tags } => {
+            crate::threads::create(state, user_id, channel_id, name, message_id, tags).await;
         }
-        ClientMessage::UpdateThread { thread_id, name, archived, locked } => {
-            crate::threads::update(state, user_id, thread_id, name, archived, locked).await;
+        ClientMessage::UpdateThread { thread_id, name, archived, locked, tags } => {
+            crate::threads::update(state, user_id, thread_id, name, archived, locked, tags).await;
         }
         ClientMessage::DeleteThread { thread_id } => {
             crate::threads::delete(state, user_id, thread_id).await;
@@ -2480,6 +2544,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 voice_moderation: HashMap::new(),
                 automod: Default::default(),
                 threads: Vec::new(),
+                member_timeouts: HashMap::new(),
             };
 
             // Mensagem de boas-vindas no primeiro canal de texto comum (não no de anúncios).
@@ -3134,6 +3199,14 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
         }
 
+        ClientMessage::TimeoutMember { server_id, target_username, duration_secs, reason } => {
+            let mut st = state.write().await;
+            match crate::timeouts::apply(&mut st, user_id, &server_id, &target_username, duration_secs, reason.as_deref(), crate::auth::now_ms()) {
+                Ok(msg) => st.feedback(user_id, true, "timeout_member", msg),
+                Err(msg) => st.feedback(user_id, false, "timeout_member", msg),
+            }
+        }
+
         ClientMessage::BanServerMember {
             server_id,
             target_username,
@@ -3324,6 +3397,9 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     if let Some(moderation) = srv.voice_moderation.remove(&old_lower) {
                         srv.voice_moderation.insert(new_lower.clone(), moderation);
                     }
+                    if let Some(until) = srv.member_timeouts.remove(&old_lower) {
+                        srv.member_timeouts.insert(new_lower.clone(), until);
+                    }
                     for rules in srv.categories.iter_mut().map(|c| &mut c.permission_overwrites)
                         .chain(srv.text_channels.iter_mut().chain(&mut srv.voice_channels).map(|c| &mut c.permission_overwrites)) {
                         for rule in rules {
@@ -3340,6 +3416,9 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     }
                 }
                 st.db.write(crate::db::WriteOp::RenameVoiceModeration {
+                    from: old_lower.clone(), to: new_lower.clone(),
+                });
+                st.db.write(crate::db::WriteOp::RenameMemberTimeout {
                     from: old_lower.clone(), to: new_lower.clone(),
                 });
                 st.save_servers();

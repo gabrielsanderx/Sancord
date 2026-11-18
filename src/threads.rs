@@ -6,12 +6,87 @@
 //! digitando, fixadas, AutoMod e busca funcionam sem caminhos especiais.
 //! Num fórum (`ChannelKind::Forum`) cada postagem é uma thread.
 use crate::db::WriteOp;
-use crate::models::{ChannelKind, MessageMentions, ServerMessage, Thread};
+use crate::models::{Channel, ChannelKind, ForumTag, MessageMentions, ServerMessage, Thread};
 use crate::state::{ServerState, SharedState};
 use uuid::Uuid;
 
 pub const NAME_MAX: usize = 100;
 pub const MAX_THREADS_PER_SERVER: usize = 1000;
+pub const MAX_FORUM_TAGS: usize = 20;
+pub const MAX_POST_TAGS: usize = 5;
+const TAG_NAME_MAX: usize = 20;
+const TAG_EMOJI_MAX: usize = 8;
+
+/// Valida a lista completa de tags de um fórum. Ids já existentes são mantidos
+/// (as postagens continuam marcadas); qualquer outro id vem do servidor.
+pub fn sanitize_forum_tags(input: Vec<ForumTag>, existing: &[ForumTag]) -> Result<Vec<ForumTag>, &'static str> {
+    if input.len() > MAX_FORUM_TAGS {
+        return Err("Um fórum pode ter no máximo 20 tags.");
+    }
+    let mut out: Vec<ForumTag> = Vec::with_capacity(input.len());
+    for tag in input {
+        let name: String = tag.name.split_whitespace().collect::<Vec<_>>().join(" ").chars().filter(|c| !c.is_control()).take(TAG_NAME_MAX).collect();
+        if name.is_empty() {
+            return Err("Toda tag precisa de um nome.");
+        }
+        if out.iter().any(|t| t.name.to_lowercase() == name.to_lowercase()) {
+            return Err("Há tags com o mesmo nome.");
+        }
+        let emoji = tag.emoji.map(|e| e.trim().chars().filter(|c| !c.is_control()).take(TAG_EMOJI_MAX).collect::<String>()).filter(|e| !e.is_empty());
+        let id = if existing.iter().any(|t| t.id == tag.id) {
+            tag.id
+        } else {
+            format!("tag-{}", &Uuid::new_v4().simple().to_string()[..8])
+        };
+        out.push(ForumTag { id, name, emoji, moderated: tag.moderated });
+    }
+    Ok(out)
+}
+
+/// Tags de uma postagem: existentes no fórum, sem repetição, até 5, na ordem do
+/// fórum. Tags "só moderação" não podem ser postas nem tiradas por outras pessoas.
+pub fn validate_post_tags(ch: &Channel, requested: &[String], current: &[String], moderator: bool) -> Result<Vec<String>, &'static str> {
+    if ch.kind != ChannelKind::Forum {
+        return if requested.is_empty() { Ok(Vec::new()) } else { Err("Tags só existem em postagens de fórum.") };
+    }
+    if requested.iter().any(|id| !ch.forum_tags.iter().any(|t| &t.id == id)) {
+        return Err("Uma das tags não existe mais neste fórum.");
+    }
+    let chosen: Vec<String> = ch.forum_tags.iter().filter(|t| requested.contains(&t.id)).map(|t| t.id.clone()).collect();
+    if chosen.len() > MAX_POST_TAGS {
+        return Err("Uma postagem pode ter no máximo 5 tags.");
+    }
+    if !moderator {
+        let touched_moderated = ch
+            .forum_tags
+            .iter()
+            .filter(|t| t.moderated)
+            .any(|t| chosen.contains(&t.id) != current.contains(&t.id));
+        if touched_moderated {
+            return Err("Algumas tags só a moderação pode aplicar ou remover.");
+        }
+    }
+    Ok(chosen)
+}
+
+/// Depois de editar as tags do fórum: tira das postagens as que deixaram de existir.
+pub fn prune_post_tags(st: &mut ServerState, server_id: &str, forum_id: &str) {
+    let Some(srv) = st.find_server(server_id) else { return };
+    let valid: Vec<String> = srv.find_channel(forum_id).map(|c| c.forum_tags.iter().map(|t| t.id.clone()).collect()).unwrap_or_default();
+    let changed: Vec<Thread> = srv
+        .threads
+        .iter()
+        .filter(|t| t.parent_id == forum_id && t.tags.iter().any(|id| !valid.contains(id)))
+        .cloned()
+        .map(|mut t| {
+            t.tags.retain(|id| valid.contains(id));
+            t
+        })
+        .collect();
+    for t in changed {
+        store(st, t);
+    }
+}
 
 fn lower_of(st: &ServerState, uid: &str) -> Option<String> {
     st.users.get(uid).map(|u| u.username.to_lowercase())
@@ -59,7 +134,7 @@ pub async fn list(state: &SharedState, user_id: &str, server_id: String) {
     st.send_to(user_id, ServerMessage::ThreadList { server_id, threads });
 }
 
-pub async fn create(state: &SharedState, user_id: &str, channel_id: String, name: String, message_id: Option<String>) {
+pub async fn create(state: &SharedState, user_id: &str, channel_id: String, name: String, message_id: Option<String>, tags: Vec<String>) {
     let starter = match &message_id {
         Some(mid) => crate::ws::fetch_message_for_mutation(state, &channel_id, mid).await,
         None => None,
@@ -97,6 +172,7 @@ pub async fn create(state: &SharedState, user_id: &str, channel_id: String, name
         if srv.threads.len() >= MAX_THREADS_PER_SERVER {
             return Err("Este servidor atingiu o limite de threads.");
         }
+        let tags = validate_post_tags(ch, &tags, &[], perms.manage_messages)?;
         let now = crate::auth::now_ms();
         Ok(Thread {
             id: format!("thr-{}", Uuid::new_v4().simple()),
@@ -110,6 +186,7 @@ pub async fn create(state: &SharedState, user_id: &str, channel_id: String, name
             message_count: 0,
             archived: false,
             locked: false,
+            tags,
         })
     })();
     let thread = match result {
@@ -130,15 +207,20 @@ pub async fn create(state: &SharedState, user_id: &str, channel_id: String, name
     st.send_to(user_id, ServerMessage::ThreadCreated { thread });
 }
 
-pub async fn update(state: &SharedState, user_id: &str, thread_id: String, name: Option<String>, archived: Option<bool>, locked: Option<bool>) {
+pub async fn update(state: &SharedState, user_id: &str, thread_id: String, name: Option<String>, archived: Option<bool>, locked: Option<bool>, tags: Option<Vec<String>>) {
     let mut st = state.write().await;
     let Some(lower) = lower_of(&st, user_id) else { return };
     let Some(mut thread) = find_thread(&st, &thread_id).filter(|t| st.can_view_channel(&lower, &t.id)) else { return };
     let moderator = is_moderator(&st, &lower, &thread);
     let owner = thread.owner == lower;
+    let parent = st.find_server(&thread.server_id).and_then(|s| s.find_channel(&thread.parent_id)).cloned();
     let result: Result<(), &'static str> = (|| {
-        if (name.is_some() || archived.is_some()) && !(owner || moderator) {
+        if (name.is_some() || archived.is_some() || tags.is_some()) && !(owner || moderator) {
             return Err("Só quem criou a thread ou a moderação podem alterá-la.");
+        }
+        if let Some(requested) = &tags {
+            let parent = parent.as_ref().ok_or("Canal não encontrado.")?;
+            thread.tags = validate_post_tags(parent, requested, &thread.tags, moderator)?;
         }
         if locked.is_some() && !moderator {
             return Err("Só a moderação tranca ou destranca threads.");

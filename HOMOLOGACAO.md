@@ -227,3 +227,45 @@ e mantém a condição de tag. A execução manual continua sem publicação.
 
 O novo ensaio precisa ser acompanhado até terminar. O resultado do CI anterior
 comprova apenas `c1941fd`, não o commit desta consolidação.
+
+### Resultado: CI da consolidação aprovado (`390aeee`)
+
+- [Execução 44300424969](https://github.com/gabrielsanderx/Sancord/actions/runs/44300424969)
+  concluiu no commit exato `390aeee`:
+  - `tests`, `package`, `sign` e `verify-package` com sucesso;
+  - `publish` pulado (sem tag).
+  - O `verify-package` baixou o artefato assinado e executou o ensaio HTTPS do EXE real
+    com a chave pública embutida.
+- Artefato `signed-windows-release`: digest
+  `sha256:a4c82d010f06882a3e8b5ffe015aa8d4a52fe9cc886da63e6dc07909d369161d`.
+  Disponível até 25/11/2026.
+- Remoto conferido: nenhuma tag e nenhuma release; `main` continua em `5e43107`.
+- Os 198 testes da suíte padrão foram aprovados também localmente, no mesmo commit.
+- **Coleta e verificação local do novo artefato: aprovadas.**
+  - O usuário fez o login no `gh`. O token ficou só na memória do processo de coleta e não
+    foi exibido.
+  - Mesmas travas de `collect-final-020.mjs`: execução aprovada, commit exato, origem
+    `api.github.com`, redirecionamento HTTPS e limite de 128 MiB.
+  - ZIP baixado: 15.966.900 bytes, SHA-256 **igual** ao digest registrado pelo GitHub.
+  - `sancord-release verify`, compilado dos fontes locais `390aeee`: **"Assinatura e
+    integridade válidas."** Manifesto 0.2.0, `windows-x86_64`.
+  - `Sancord-0.2.0-windows-x64.zip` contém **somente** `Sancord.exe`, idêntico ao
+    executável solto e ao manifesto:
+    - 10.588.160 bytes;
+    - SHA-256 `7238e24c76736cc5f9fb9bbbb853c544a804ae9b4a6a8d9d1b142cf90657ea9a`.
+  - O `SancordServer.exe` do artefato tem SHA-256
+    `cd6542de1d7507cfbb703cfeef7d51963ce7408e9117e56664c94238ac6df5b1`. Ele não entra no
+    ZIP de atualização.
+  - O ensaio ignorado `https_downloads_real_ci_artifact_with_embedded_release_key` foi
+    executado com esta pasta: **1 aprovado**.
+  - Arquivos em `qa-candidate-0.2.0/final-390aeee/`, `final-390aeee.zip` e
+    `final-390aeee-run.json`, todos ignorados pelo Git.
+  - Nenhum executável baixado foi iniciado. Nenhuma branch, tag ou release foi alterada.
+  - Esta candidata **substitui** a de `c1941fd` (hash `04e85f56…`) como a versão 0.2.0 a
+    distribuir.
+- **Pendente:**
+  - **gates que dependem do usuário:**
+    - notificações nativas;
+    - câmera física, redes e TURN;
+    - ciclo público do updater, que exige duas releases;
+    - autorização para mover a `main` ou criar tag.
