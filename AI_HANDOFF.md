@@ -65,9 +65,9 @@ Backups desta implementação: `qa-updater/baseline/` (ignorados pelo Git).
 - Nenhuma tag/release foi criada durante a implementação. Conferir o estado remoto
   e a autorização do usuário antes de qualquer publicação posterior.
 - O usuário autorizou o primeiro push; a branch main foi enviada no commit `5162ac6`.
-  [CI Windows/MSVC completo aprovado](https://github.com/gabrielsanderx/Sancord/actions/runs/44208760294).
-  O workflow de distribuição também foi iniciado manualmente, sem publicação:
-  [ensaio de empacotamento](https://github.com/gabrielsanderx/Sancord/actions/runs/44208930903).
+  [CI Windows/MSVC completo aprovado, com CRT estático](https://github.com/gabrielsanderx/Sancord/actions/runs/44210124225).
+  O workflow final de distribuição foi iniciado manualmente, sem publicação:
+  [ensaio de empacotamento e assinatura](https://github.com/gabrielsanderx/Sancord/actions/runs/44210124727).
 - O cadastro do Secret foi confirmado por consulta de metadados, sem ler seu valor.
   O ensaio manual agora testa também a assinatura em job separado da publicação.
   Confirmar o sucesso da assinatura antes da primeira tag. Não publicar uma versão
