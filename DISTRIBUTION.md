@@ -102,7 +102,9 @@ Restrinja as permissões da pasta da chave antes de gerar o arquivo.
 Para a primeira publicação da versão atual, use `v0.1.0` depois de configurar o Secret
 e validar o pacote. Não crie essa tag antes de querer distribuir o estado atual das fases.
 Tags com `-beta`, `-rc` ou outros sufixos são rejeitadas pelo fluxo estável. Execução manual
-do workflow de release gera artefatos de build, sem publicar no canal estável.
+do workflow de release gera artefatos assinados (exige o Secret), sem publicar no canal
+estável. A assinatura possui somente permissão de leitura no repositório; a permissão
+de publicar pertence a outro job, executado somente para tags.
 
 ## Builds locais e testes do updater
 

@@ -68,8 +68,9 @@ Backups desta implementação: `qa-updater/baseline/` (ignorados pelo Git).
   [CI Windows/MSVC completo aprovado](https://github.com/gabrielsanderx/Sancord/actions/runs/44208760294).
   O workflow de distribuição também foi iniciado manualmente, sem publicação:
   [ensaio de empacotamento](https://github.com/gabrielsanderx/Sancord/actions/runs/44208930903).
-- O usuário informou que vai configurar o Secret. A última consulta ainda não o
-  encontrou; confirmar o cadastro antes da primeira tag. Não publicar uma versão
+- O cadastro do Secret foi confirmado por consulta de metadados, sem ler seu valor.
+  O ensaio manual agora testa também a assinatura em job separado da publicação.
+  Confirmar o sucesso da assinatura antes da primeira tag. Não publicar uma versão
   experimental das fases atuais apenas para demonstrar o updater.
 - Há uma chave pública única; rotação automática de chaves não foi implementada.
   Não afirmar que basta trocar a pública para os clientes antigos aceitarem outra chave.
