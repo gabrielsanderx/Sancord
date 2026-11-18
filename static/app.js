@@ -524,16 +524,7 @@ function getSelectedQualityProfile() {
   return { ...base, fps };
 }
 
-const SVG_ICONS = {
-  hash: `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M5.88657 21C5.57547 21 5.3399 20.7189 5.39427 20.4126L6.00001 17H2.59511C2.28449 17 2.04905 16.7198 2.10259 16.4138L2.27759 15.4138C2.31946 15.1746 2.52722 15 2.77011 15H6.35001L7.41001 9H4.00511C3.69449 9 3.45905 8.71977 3.51259 8.41381L3.68759 7.41381C3.72946 7.17456 3.93722 7 4.18011 7H7.76001L8.39677 3.41262C8.43914 3.17391 8.64664 3 8.88907 3H9.87344C10.1845 3 10.4201 3.28107 10.3657 3.58738L9.76001 7H15.76L16.3968 3.41262C16.4391 3.17391 16.6466 3 16.8891 3H17.8734C18.1845 3 18.4201 3.28107 18.3657 3.58738L17.76 7H21.1649C21.4755 7 21.711 7.28023 21.6574 7.58619L21.4824 8.58619C21.4406 8.82544 21.2328 9 20.9899 9H17.41L16.35 15H19.7549C20.0655 15 20.301 15.2802 20.2474 15.5862L20.0724 16.5862C20.0306 16.8254 19.8228 17 19.5799 17H16L15.3632 20.5874C15.3209 20.8261 15.1134 21 14.8709 21H13.8866C13.5755 21 13.3399 20.7189 13.3943 20.4126L14 17H8.00001L7.36325 20.5874C7.32088 20.8261 7.11337 21 6.87094 21H5.88657ZM9.41001 9L8.35001 15H14.35L15.41 9H9.41001Z"/></svg>`,
-  speaker: `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M11.383 3.07904C11.009 2.92504 10.579 3.01004 10.293 3.29604L6 8.00204H3C2.45 8.00204 2 8.45204 2 9.00204V15.002C2 15.552 2.45 16.002 3 16.002H6L10.293 20.71C10.579 20.996 11.009 21.082 11.383 20.927C11.757 20.772 12 20.407 12 20.002V4.00204C12 3.59904 11.757 3.23204 11.383 3.07904ZM14 5.00195V7.07195C16.892 7.55695 19 10.067 19 13.002C19 15.937 16.892 18.447 14 18.932V21.002C18.002 20.502 21 17.107 21 13.002C21 8.89695 18.002 5.50195 14 5.00195ZM14 9.24895V11.375C14.596 11.72 15 12.313 15 13.002C15 13.691 14.596 14.284 14 14.629V16.755C15.724 16.292 17 14.802 17 13.002C17 11.202 15.724 9.71195 14 9.24895Z"/></svg>`,
-  micOn: `<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>`,
-  micOff: `<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/></svg>`,
-  headOn: `<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1a9 9 0 0 0-9 9v7c0 1.66 1.34 3 3 3h3v-8H5v-2c0-3.87 3.13-7 7-7s7 3.13 7 7v2h-4v8h3c1.66 0 3-1.34 3-3v-7a9 9 0 0 0-9-9z"/></svg>`,
-  headOff: `<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1a9 9 0 0 0-9 9v7c0 1.66 1.34 3 3 3h3v-8H5v-2c0-3.87 3.13-7 7-7 1.39 0 2.68.41 3.77 1.11l1.46-1.46A8.95 8.95 0 0 0 12 1zm9 11.46V10c0-.91-.14-1.78-.39-2.61l-1.66 1.66c.03.31.05.63.05.95v2h-2.54l-2.99 2.99V20h3c1.66 0 3-1.34 3-3v-4.54zM2.1 2.1L.69 3.51l20.8 20.8 1.41-1.41L2.1 2.1z"/></svg>`,
-  micOffTiny: `<svg width="14" height="14" viewBox="0 0 24 24" fill="#f23f43"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/></svg>`,
-  headOffTiny: `<svg width="14" height="14" viewBox="0 0 24 24" fill="#f23f43"><path d="M12 1a9 9 0 0 0-9 9v7c0 1.66 1.34 3 3 3h3v-8H5v-2c0-3.87 3.13-7 7-7 1.39 0 2.68.41 3.77 1.11l1.46-1.46A8.95 8.95 0 0 0 12 1zm9 11.46V10c0-.91-.14-1.78-.39-2.61l-1.66 1.66c.03.31.05.63.05.95v2h-2.54l-2.99 2.99V20h3c1.66 0 3-1.34 3-3v-4.54zM2.1 2.1L.69 3.51l20.8 20.8 1.41-1.41L2.1 2.1z"/></svg>`,
-};
+const SVG_ICONS = Object.fromEntries(Object.entries({hash:'hash',speaker:'voice',micOn:'mic',micOff:'mic-off',headOn:'headphones',headOff:'headphones-off',micOffTiny:'mic-off',headOffTiny:'headphones-off'}).map(([key,name]) => [key,SancordIcons.html(name)]));
 
 const voiceStage = document.getElementById("voice-stage");
 const stageTitle = document.getElementById("stage-title");
@@ -3831,7 +3822,7 @@ function openAvatarCropModal(file) {
 
   const isGif = file.type === "image/gif" || file.name?.toLowerCase().endsWith(".gif");
   if (isGif && file.size > MAX_AVATAR_GIF_BYTES) {
-    alert("Este GIF é maior que 6 MB. Escolha um GIF menor para usar como foto de perfil.");
+    showUiToast("Este GIF é maior que 6 MB. Escolha um GIF menor para usar como foto de perfil.");
     return;
   }
 
@@ -4332,7 +4323,7 @@ function renderPinnedPopover() {
   if (!pinnedPopoverList) return;
   const list = (state.chatHistory[getActiveTextChannelId()] || []).filter((m) => m.pinned);
   if (list.length === 0) {
-    pinnedPopoverList.innerHTML = `<div class="pinned-empty">Nenhuma mensagem fixada neste canal ainda.</div>`;
+    pinnedPopoverList.innerHTML = SancordUI.emptyHTML({icon:"pin",title:"Nenhuma mensagem fixada",description:"Fixe uma mensagem pelo menu para encontrá-la aqui."});
     return;
   }
   pinnedPopoverList.innerHTML = "";
@@ -4395,15 +4386,28 @@ imageLightboxModal?.addEventListener("click", (e) => {
   }
 });
 
+// Usa somente o cadastro de membros já recebido do servidor. Ausência de conexão
+// não inventa perfil/atividade: mostra iniciais e consulta o perfil real ao clicar.
+function sidebarMemberRows(server, users) {
+  const known = new Set([...(server?.members || []), server?.owner_username].filter(Boolean).map(n => n.toLowerCase()));
+  const rows = new Map();
+  for (const user of users) {
+    const name = user.username.toLowerCase();
+    if ((!server || server.id === "sancord" || known.has(name)) && !rows.has(name)) rows.set(name, user);
+  }
+  if (server && server.id !== "sancord") {
+    for (const name of known) if (!rows.has(name)) rows.set(name, {id:null, username:name, status_kind:"offline", avatar_color:"var(--bg-active)", avatar_url:null});
+  }
+  return [...rows.values()];
+}
+
 function renderMembersSidebar() {
   membersList.innerHTML = "";
   const srv = getActiveServer();
-  const allUsers = Array.from(state.users.values()).filter((u) => {
-    if (!srv || srv.id === "sancord") return true;
-    const low = u.username.toLowerCase();
-    return (srv.owner_username === low) || (srv.members || []).includes(low);
-  });
-  onlineCountTitle.textContent = `MEMBROS ONLINE — ${allUsers.length}`;
+  const allUsers = sidebarMemberRows(srv, state.users.values());
+  const offline = allUsers.filter(u => u.status_kind === "offline" || u.status_kind === "invisible");
+  const connected = allUsers.filter(u => u.status_kind !== "offline" && u.status_kind !== "invisible");
+  onlineCountTitle.textContent = `MEMBROS ONLINE — ${connected.length}`;
 
   const renderSingleMember = (u, topRole) => {
     const li = document.createElement("li");
@@ -4418,7 +4422,8 @@ function renderMembersSidebar() {
         ? ""
         : `color: ${resolvedNameCol}; --name-color: ${resolvedNameCol};`;
 
-    let activity = u.custom_status || STATUS_LABELS[sk] || "Online";
+    const isOffline = sk === "offline" || sk === "invisible";
+    let activity = isOffline ? "Offline" : u.custom_status || STATUS_LABELS[sk] || "Online";
     if (u.voice_channel_id && !isPrivateVoiceId(u.voice_channel_id)) {
       const vc = state.voiceChannels.find((c) => c.id === u.voice_channel_id);
       if (u.screen_sharing && u.camera_on) {
@@ -4449,12 +4454,18 @@ function renderMembersSidebar() {
       </div>
     `;
     li.classList.toggle("is-timed-out", Boolean(timeoutUntil));
-    li.addEventListener("click", () => openMemberProfilePopover(u.id));
+    li.classList.toggle("offline", isOffline);
+    const openProfile = () => openMemberProfilePopover(u.id, {author_name:u.username, author_color:u.avatar_color, author_avatar:u.avatar_url});
+    li.tabIndex = 0;
+    li.setAttribute("role", "button");
+    li.setAttribute("aria-label", `${u.username}, ${activity}`);
+    li.addEventListener("click", openProfile);
+    li.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProfile(); } });
     li.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const items = [
         { header: u.display_name || u.username },
-        { label: "Ver perfil", icon: "👤", onSelect: () => openMemberProfilePopover(u.id) },
+        { label: "Ver perfil", icon: "👤", onSelect: openProfile },
       ];
       const mod = timeoutMenuItems(srv, u.username, u.display_name || u.username);
       if (mod.length) items.push({ separator: true }, { header: "Moderação do servidor" }, ...mod);
@@ -4466,7 +4477,7 @@ function renderMembersSidebar() {
   // Agrupar membros online por Cargo Destacado (Hoist), igual ao Discord
   const hoistedGroups = new Map();
   const unhoisted = [];
-  for (const u of allUsers) {
+  for (const u of connected) {
     const roles = getUserServerRoles(srv, u.username);
     const hoistedRole = roles.find((r) => r.hoist);
     const topRole = roles[0] || null;
@@ -4501,6 +4512,14 @@ function renderMembersSidebar() {
     }
     unhoisted.forEach(({ u, topRole }) => renderSingleMember(u, topRole));
   }
+  if (offline.length) {
+    const hdr = document.createElement("li");
+    hdr.className = "member-role-group-title";
+    hdr.textContent = `OFFLINE — ${offline.length}`;
+    membersList.appendChild(hdr);
+    offline.sort((a,b) => a.username.localeCompare(b.username, "pt-BR")).forEach(u => renderSingleMember(u, getUserServerRoles(srv, u.username)[0] || null));
+  }
+  if (!allUsers.length) membersList.innerHTML = SancordUI.emptyHTML({icon:"users",title:"Ninguém por aqui",description:"Os membros aparecerão nesta lista."});
 }
 
 function escapeHtml(str) {
@@ -5521,8 +5540,9 @@ profileCardDmBtn?.addEventListener("click", () => {
   sendWs("OpenDm", { target_username: currentPopoverUsername });
 });
 
-profileCardFriendBtn?.addEventListener("click", () => {
+profileCardFriendBtn?.addEventListener("click", async () => {
   if (!currentPopoverUsername) return;
+  const friendTarget = currentPopoverUsername;
   const rel = getRelationshipWith(currentPopoverUsername);
   if (rel === "none") {
     sendWs("SendFriendRequest", { target_username: currentPopoverUsername });
@@ -5535,8 +5555,8 @@ profileCardFriendBtn?.addEventListener("click", () => {
     sendWs("CancelFriendRequest", { target_username: currentPopoverUsername });
     profileCardFriendBtn.textContent = "👥";
   } else if (rel === "friend") {
-    if (confirm(`Remover ${currentPopoverUsername} da lista de amigos?`)) {
-      sendWs("RemoveFriend", { target_username: currentPopoverUsername });
+    if (await SancordUI.confirm({title:"Remover amizade?",message:`Remover ${friendTarget} da lista de amigos?`,confirmLabel:"Remover",danger:true})) {
+      sendWs("RemoveFriend", { target_username: friendTarget });
       profileCardFriendBtn.textContent = "👥";
     }
   }
@@ -6138,7 +6158,7 @@ bannerFileInput?.addEventListener("change", (e) => {
 
   const isGif = file.type === "image/gif" || file.name?.toLowerCase().endsWith(".gif");
   if (isGif && file.size > MAX_AVATAR_GIF_BYTES) {
-    alert("Este GIF de banner ultrapassa 6 MB. Escolha um GIF menor.");
+    showUiToast("Este GIF de banner ultrapassa 6 MB. Escolha um GIF menor.");
     return;
   }
 
@@ -6763,7 +6783,7 @@ function renderHomeStarredView() {
   if (starredCountEl) starredCountEl.textContent = `MENSAGENS FAVORITAS — ${matches.length}`;
 
   if (matches.length === 0) {
-    starredList.innerHTML = `<div class="friends-empty-state">Você ainda não favoritou nenhuma mensagem. Clique com o botão direito em uma mensagem do chat e escolha "Favoritar"!</div>`;
+    starredList.innerHTML = SancordUI.emptyHTML({icon:"star",title:"Nenhuma mensagem favorita",description:"Use o menu de uma mensagem para guardar uma favorita."});
     return;
   }
 
@@ -6931,8 +6951,8 @@ function renderDmPeerPanel(peerParam = null) {
   dmPeerPanel.querySelector("#dm-panel-accept-friend")?.addEventListener("click", () => {
     sendWs("RespondFriendRequest", { from_username: peer.username, accept: true });
   });
-  dmPeerPanel.querySelector("#dm-panel-remove-friend")?.addEventListener("click", () => {
-    if (confirm(`Remover ${peer.username} dos amigos?`)) {
+  dmPeerPanel.querySelector("#dm-panel-remove-friend")?.addEventListener("click", async () => {
+    if (await SancordUI.confirm({title:"Remover amizade?",message:`Remover ${peer.username} dos amigos?`,confirmLabel:"Remover",danger:true})) {
       sendWs("RemoveFriend", { target_username: peer.username });
     }
   });
@@ -7049,7 +7069,7 @@ function renderDmList() {
   const requestsEntry = buildMessageRequestsEntry();
   if (requestsEntry) dmListEl.appendChild(requestsEntry);
   if (list.length === 0 && groups.length === 0) {
-    dmListEl.insertAdjacentHTML("beforeend", `<li style="padding: 10px 8px; font-size: 12px; color: var(--text-muted);">Nenhuma conversa aberta ainda.</li>`);
+    dmListEl.insertAdjacentHTML("beforeend", `<li>${SancordUI.emptyHTML({icon:"chat",title:"Suas conversas",description:"Escolha um amigo para começar."})}</li>`);
     return;
   }
 
@@ -7161,12 +7181,7 @@ function renderActiveNowPanel() {
   }
 
   if (cards.length === 0) {
-    listEl.innerHTML = `
-      <div class="active-now-empty">
-        <strong>Por enquanto está tudo quieto...</strong>
-        <p>Quando seus amigos entrarem em uma chamada de voz ou definirem uma atividade no Sancord, ela aparecerá aqui!</p>
-      </div>
-    `;
+    listEl.innerHTML = SancordUI.emptyHTML({icon:"voice",title:"Por enquanto está tudo quieto",description:"As chamadas e atividades compartilhadas dos seus amigos aparecerão aqui."});
     return;
   }
 
@@ -7210,7 +7225,7 @@ function renderFriendsView() {
     if (friendsListCount) friendsListCount.textContent = `PENDENTES — ${total}`;
 
     if (total === 0) {
-      friendsItemsList.innerHTML = `<div class="friends-empty-state">Não há solicitações de amizade pendentes no momento.</div>`;
+      friendsItemsList.innerHTML = SancordUI.emptyHTML({icon:"users",title:"Nenhuma solicitação pendente",description:"Novos pedidos de amizade aparecem aqui."});
       return;
     }
 
@@ -7234,11 +7249,7 @@ function renderFriendsView() {
   }
 
   if (filtered.length === 0) {
-    friendsItemsList.innerHTML = `<div class="friends-empty-state">${
-      state.friendsTab === "online"
-        ? "Nenhum amigo online no momento."
-        : "Você ainda não adicionou amigos. Clique em 'Adicionar Amigo' para começar!"
-    }</div>`;
+    friendsItemsList.innerHTML = SancordUI.emptyHTML({icon:q ? "search" : "users",title:q ? "Nenhum amigo encontrado" : state.friendsTab === "online" ? "Seus amigos estão offline" : "Comece uma amizade",description:q ? "Tente outro nome." : state.friendsTab === "online" ? "Quando alguém se conectar, aparecerá aqui." : "Use Adicionar amigo para enviar uma solicitação."});
     return;
   }
 
@@ -7280,7 +7291,7 @@ function buildFriendRow(f) {
       { label: "Ver perfil", icon: "👤", onSelect: () => openMemberProfilePopover(f.live_id || null, { author_name: f.username, author_color: f.avatar_color, author_avatar: f.avatar_url }) },
       { label: "Criar grupo com…", icon: "👥", onSelect: () => openCreateGroupDialog([f.username.toLowerCase()]) },
       { separator: true },
-      { label: "Remover amizade", icon: "🗑️", danger: true, onSelect: () => { if (confirm(`Remover ${f.username} da sua lista de amigos?`)) sendWs("RemoveFriend", { target_username: f.username }); } },
+      { label: "Remover amizade", icon: "🗑️", danger: true, onSelect: async () => { if (await SancordUI.confirm({title:"Remover amizade?",message:`Remover ${f.username} da sua lista de amigos?`,confirmLabel:"Remover",danger:true})) sendWs("RemoveFriend", { target_username: f.username }); } },
       { label: "Bloquear", icon: "🚫", danger: true, onSelect: () => confirmBlockUser(f.username) },
     ]);
   });
@@ -7295,8 +7306,8 @@ function buildFriendRow(f) {
     sendWs("OpenDm", { target_username: f.username });
     joinVoiceChannel(`dmvoice:${pair}`, `Call privada: @${f.username}`);
   });
-  li.querySelector('[data-act="remove"]')?.addEventListener("click", () => {
-    if (confirm(`Remover ${f.username} da sua lista de amigos?`)) {
+  li.querySelector('[data-act="remove"]')?.addEventListener("click", async () => {
+    if (await SancordUI.confirm({title:"Remover amizade?",message:`Remover ${f.username} da sua lista de amigos?`,confirmLabel:"Remover",danger:true})) {
       sendWs("RemoveFriend", { target_username: f.username });
     }
   });
@@ -7564,8 +7575,8 @@ exportSettingsBtn?.addEventListener("click", () => {
   showUiToast("Backup JSON exportado!");
 });
 
-clearLocalNotesBtn?.addEventListener("click", () => {
-  if (!confirm("Remover todas as notas pessoais de perfis e mensagens favoritadas deste navegador?")) return;
+clearLocalNotesBtn?.addEventListener("click", async () => {
+  if (!await SancordUI.confirm({title:"Limpar notas e favoritas?",message:"Remover todas as notas pessoais e mensagens favoritas deste aparelho?",confirmLabel:"Limpar",danger:true})) return;
   localStorage.removeItem("sancord_user_notes");
   localStorage.removeItem("sancord_starred_msgs");
   state.starredMsgIds.clear();
@@ -7925,10 +7936,10 @@ document.getElementById("invite-modal-regen-btn")?.addEventListener("click", () 
   setTimeout(() => openInviteServerModal(), 250);
 });
 
-leaveServerBtn?.addEventListener("click", () => {
+leaveServerBtn?.addEventListener("click", async () => {
   const srv = getActiveServer();
   if (!srv || srv.id === "sancord") return;
-  if (confirm(`Deseja sair do servidor "${srv.name}"?`)) {
+  if (await SancordUI.confirm({title:"Sair do servidor?",message:`Deseja sair do servidor "${srv.name}"?`,confirmLabel:"Sair",danger:true})) {
     sendWs("LeaveServer", { server_id: srv.id });
   }
 });
@@ -8267,13 +8278,13 @@ function populateServerSettingsUI(srv) {
         if (timeoutUntil) removeMemberTimeout(srv, mLow, displayName);
         else openTimeoutDialog(srv, mLow, displayName);
       });
-      row.querySelector('[data-act="kick"]')?.addEventListener("click", () => {
-        if (confirm(`Expulsar ${displayName} de ${srv.name}?`)) {
+      row.querySelector('[data-act="kick"]')?.addEventListener("click", async () => {
+        if (await SancordUI.confirm({title:"Expulsar membro?",message:`Expulsar ${displayName} de ${srv.name}?`,confirmLabel:"Expulsar",danger:true})) {
           sendWs("KickServerMember", { server_id: srv.id, target_username: mLow });
         }
       });
-      row.querySelector('[data-act="ban"]')?.addEventListener("click", () => {
-        if (confirm(`Banir PERMANENTEMENTE ${displayName} de ${srv.name}?`)) {
+      row.querySelector('[data-act="ban"]')?.addEventListener("click", async () => {
+        if (await SancordUI.confirm({title:"Banir membro?",message:`Banir ${displayName} de ${srv.name}?`,confirmLabel:"Banir",danger:true})) {
           sendWs("BanServerMember", { server_id: srv.id, target_username: mLow });
         }
       });
@@ -8475,11 +8486,12 @@ function saveCurrentRoleEdits(posDelta = 0) {
 document.getElementById("role-edit-save-btn")?.addEventListener("click", () => saveCurrentRoleEdits(0));
 document.getElementById("role-edit-pos-up")?.addEventListener("click", () => saveCurrentRoleEdits(2));
 document.getElementById("role-edit-pos-down")?.addEventListener("click", () => saveCurrentRoleEdits(-1));
-document.getElementById("role-edit-delete-btn")?.addEventListener("click", () => {
+document.getElementById("role-edit-delete-btn")?.addEventListener("click", async () => {
   const srv = (state.servers || []).find((s) => s.id === editingServerId);
   if (!srv || selectedRoleId === "everyone") return;
-  if (confirm("Excluir este cargo permanentemente?")) {
-    sendWs("DeleteRole", { server_id: srv.id, role_id: selectedRoleId });
+  const roleToDelete = selectedRoleId;
+  if (await SancordUI.confirm({title:"Excluir cargo?",message:"Excluir este cargo permanentemente?",confirmLabel:"Excluir",danger:true})) {
+    sendWs("DeleteRole", { server_id: srv.id, role_id: roleToDelete });
     selectedRoleId = "everyone";
   }
 });

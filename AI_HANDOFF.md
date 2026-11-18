@@ -649,3 +649,106 @@ pendente. Os fontes já têm as duas coisas.
 - **Bloqueio para publicar:** não há `git.exe` nesta máquina para o commit. O `gh` está
   autenticado. Falta autorização do usuário para o push na `main`, a tag `v0.2.1` e a troca
   do servidor de produção.
+
+### Commit 0.2.1 pela API do GitHub (sem git local) — 18/11/2026
+- O usuário escolheu "Commit pela API". O commit **`8c9cbd933cd33c97f5e15d19147be57745b7d810`**
+  foi criado na branch nova `release/0.2.1`, com pai `390aeee`.
+  - 25 arquivos alterados e 10 novos, comparados com a árvore do `390aeee` com finais de
+    linha normalizados (LF), como o `.gitattributes` define.
+  - Todo hash de blob devolvido pelo GitHub bateu com o calculado localmente.
+  - Os outros ~90 arquivos versionados eram idênticos.
+- **Auditoria de segredos antes do envio** (padrões do `audit-git.ps1`, mais e-mail do
+  usuário, URL real do túnel e senha de QA): nada encontrado.
+- **Ensaio do release.yml** na branch, sem tag e sem publicação: execução `44339673960`.
+- **Ainda pendente:**
+  - a `main` continua em `390aeee`; nenhuma tag v0.2.1, nenhuma release;
+  - produção continua na 0.2.0.
+- **O `.git` local não sabe desse commit:** a pasta continua com o HEAD em `390aeee` e as
+  mesmas alterações. Quando houver git, rodar `git fetch` e alinhar a branch local antes de
+  novos commits.
+- **Ensaio `44339673960` concluído** no commit exato `8c9cbd9`:
+  - tests, package, sign e verify-package com sucesso; publish pulado;
+  - artefato assinado baixado (digest igual ao do GitHub) para `qa-candidate-0.2.1/final-8c9cbd9/`;
+  - `sancord-release verify` aprovado; manifesto 0.2.1 confere com o `Sancord.exe`;
+  - ensaio HTTPS do artefato real: 1 aprovado.
+- **Pronto para publicar.** Falta autorização para: mover a `main` até `8c9cbd9`, criar a tag
+  `v0.2.1` e atualizar a produção (migração v10→v13).
+
+### Continuação visual global — 18/11/2026 (fontes implementados; homologação nativa pendente)
+
+- **Este registro atualiza o estado anterior:** o CI de `8c9cbd9` cobre a candidata do
+  Claude, mas não as alterações visuais locais abaixo. Não publicar aquele commit
+  supondo que ele contenha esta interface.
+- Pedido atendido sobre o workspace existente: completar o prompt de refatoração
+  visual A–F, preservando o trabalho já implementado. Snapshot dos fontes anteriores
+  em `qa-visual-20261118/baseline/`, ignorado, sem banco/segredos.
+- Detalhes, cobertura do prompt, tokens, arquivos e roteiro de homologação em
+  **`VISUAL_REFACTOR.md`**.
+- Componentes: rail/sidebar/categorias/canais, user/voice panel, header/busca,
+  mensagens/composer, membros online/offline, perfis, menus, settings, diálogos,
+  tooltips, estados vazios, titlebar e conexão desktop.
+- `static/ui.css` consolida os tokens e a camada visual iniciada pelo Claude.
+  Correções incluem a grade com larguras realmente vinculadas aos tokens, preferência
+  de raio/densidade/movimento, remoção do nameplate permanente no painel, quatro temas
+  e precedência correta sobre o CSS legado no tema Escuro e nos inputs.
+- Novo `static/js/icons.js`: catálogo SVG próprio, compartilhado, com decoração de
+  subárvores inseridas; preserva classes, badges, labels e listeners. Emojis de
+  conteúdo/reações, assets e marca mantidos. HTML e rota embutida incluídos no EXE.
+- Boas-vindas no início do canal com nome real escapado; composer cresce até
+  `min(200px, 30vh)` e botão enviar fica compacto/neutro. Agrupamento, timestamps,
+  paging, drafts, reply, anexos e permissões existentes preservados.
+- Lista de membros inclui offline a partir do cadastro real, sem perfis fictícios;
+  deduplica sessões e permite perfil via teclado. Perfil offline consulta o servidor.
+- Confirmações `confirm/alert` restantes do app foram integradas ao UI kit existente;
+  operações assíncronas conservam o alvo escolhido. Tooltips mantêm nome acessível.
+- Backend/protocolo/banco não foram refatorados nesta continuação. Castigos, modo
+  lento, tags e preferências do Claude permanecem e passaram nas suítes existentes.
+- **Testes:** baseline 222; agora **231 aprovados** (106 núcleo, 8 desktop,
+  1 manutenção, 116 frontend), 1 teste de artefato ignorado por padrão. `cargo check`
+  de todos os targets e build desktop aprovados. Teste de assets também verifica CSS.
+- QA adicional isolado: parser CSS, pares principais de contraste/cascata de temas,
+  carregamento de todos os scripts em DOM, ícones/badges/reações/listeners, themes,
+  settings/diálogo e aba Voz sem solicitar captura. DOM não substitui WebView2 nem
+  comprova fluxo de rede/mídia. Dependências JS desse ensaio ficam só na pasta ignorada.
+- Pacote local em `qa-visual-20261118/package/`, ZIP somente cliente; sem assinatura,
+  sem publicação e sem troca dos executáveis instalados. Artefato assinado anterior
+  preservado; não representa o novo visual.
+- **Bloqueio observado:** a revisão automática rejeitou a abertura do cliente de QA
+  por `Start-Process` com `blocked by policy`, sem motivo detalhado. Não foi contornada.
+  Comparação visual nativa, DPI e segunda rodada por screenshots continuam pendentes;
+  não declarar o prompt totalmente homologado nem pedir ao usuário rotinas repetidas
+  de PowerShell enquanto verificações autônomas forem possíveis.
+- Próximo passo: homologar a janela candidata isolada quando disponível; alinhar o
+  histórico local ao commit remoto sem perder o working tree, validar novo commit no
+  CI e somente depois tratar publicação com autorização específica.
+
+### Fechamento da validação automatizada e preparação do histórico — 18/11/2026
+
+- A revisão solicitada encontrou uma falha de teclado nos diálogos: confirmação sem
+  campos não recebia foco, deixando o botão anterior ativo. Reproduzida por teste
+  inicialmente falhando. `formDialog` agora foca Cancelar na confirmação, respeita
+  campos visíveis/habilitados, contém Tab/Shift+Tab e restaura foco ao cancelar.
+  O callback de foco não atua se o diálogo já foi fechado.
+- Ícones de mover para cima/baixo agora apontam na direção correta.
+- Ensaios antes temporários promovidos à suíte permanente:
+  `tests/frontend-dom.test.cjs` (5), `tests/frontend-css.test.cjs` (2), com helper
+  `tests/helpers/dom.cjs`. DOM isolado, sem rede, mídia, conta ou banco reais.
+- `package.json`/`package-lock.json` fixam `jsdom` e `css-tree` como ferramentas de
+  desenvolvimento. `node_modules/` ignorado. CI e `homologate.ps1` executam
+  `npm ci --ignore-scripts` e `npm test`; o cliente continua sem runtime Node.
+- **Resultado atual: 238 testes aprovados** (106 núcleo + 8 desktop + 1 manutenção +
+  123 frontend); 1 teste de artefato ignorado por padrão. Check de todos os targets,
+  instalação reproduzível das dependências, sintaxe e auditoria sem segredos conhecidos
+  aprovados. Pacote de QA recompilado após a correção de foco.
+- `git fetch` recuperou o commit remoto do Claude (`8c9cbd9`) sem modificar o working
+  tree original. A branch **`codex/visual-0.2.1`**, em
+  `qa-visual-20261118/review-worktree/`, parte desse commit e recebe os fontes atuais.
+  Não confundir o diff da pasta original contra `390aeee` com o diff desta continuação
+  contra `8c9cbd9`: módulos do Claude que eram untracked localmente estão preservados.
+- A pasta original continua na branch anterior com seu trabalho em andamento intacto;
+  não foi usado reset, stash, clean ou descarte de arquivos. O worktree isolado permite
+  revisar/commitar esta continuação com o pai correto e sem reescrever o histórico.
+- O próximo passo externo exige envio dos novos fontes à branch pública e execução
+  manual de `release.yml`, sem tag ou atualização aos usuários. Ainda não executado.
+  A homologação visual nativa segue pendente pelo bloqueio anteriormente registrado;
+  não foi tentado outro mecanismo de lançamento para contorná-lo.

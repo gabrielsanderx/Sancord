@@ -199,13 +199,19 @@ No anfitrião, o aplicativo inicia o backend adjacente e o túnel (`cloudflared.
 ```powershell
 cargo test --lib              # servidor
 cargo test --bin SancordApp   # app desktop (origens confiáveis + ponte de captura)
-node --test tests/frontend-*.test.cjs
+npm ci --ignore-scripts --no-audit --no-fund
+npm test                     # helpers, DOM completo e CSS/temas
 ```
 Inclui testes de: hash de senha (Argon2 e legado), tokens, regras de usuário/senha, rate limit,
 validação de imagens/cores, banco (paginação, edição, renomeação, sessões, migração dos JSON),
 serialização do protocolo e testes ponta a ponta com servidor real e clientes WebSocket
 (cadastro/login/logout, recusa de token falso, criar servidor → convite → conversa → reação,
 histórico após reinício + paginação, reconexão recebendo mensagens perdidas).
+
+As dependências npm são ferramentas de desenvolvimento, fixadas em `package-lock.json`.
+O aplicativo distribuído continua usando somente os assets embutidos no EXE. A suíte
+de DOM valida também foco dos diálogos, ícones e abertura de Voz sem solicitar captura;
+ela não substitui a homologação visual no WebView2. Consulte [a refatoração visual](VISUAL_REFACTOR.md).
 
 ## Configuração (variáveis de ambiente)
 

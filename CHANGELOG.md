@@ -2,6 +2,14 @@
 
 ## 0.2.1
 
+- Refatoração visual desktop: tokens e paleta próprios, ícones SVG consistentes,
+  colunas e controles compactos, chat/composer, membros, perfis, menus e configurações.
+- Início de canal contextual, estados vazios compartilhados, membros offline reais,
+  tooltips acessíveis e confirmações integradas ao aplicativo.
+- Confirmações recebem foco e contêm a navegação por teclado; ensaios de DOM e
+  contraste dos temas passam a integrar o CI. Ícones de reordenação corrigidos.
+- Candidata local: testes automatizados aprovados; homologação visual nativa e CI do
+  commit com a refatoração ainda pendentes. Esta alteração não publica uma release.
 - Castigo (timeout) de membros: duração de 60 segundos a 28 dias, motivo na auditoria,
   validação no servidor e fim automático. Nova permissão "Aplicar castigo".
 - Modo lento por canal (de 5 segundos a 6 horas), com contagem regressiva no campo de

@@ -424,7 +424,7 @@ function renderForumPosts() {
     .filter((t) => matchesTagFilter(t, state.forumTagFilter));
   list.innerHTML = "";
   if (posts.length === 0) {
-    list.innerHTML = `<div class="pinned-empty">${filtering ? "Nenhuma postagem encontrada." : "Nenhuma postagem ainda. Comece o primeiro assunto!"}</div>`;
+    list.innerHTML = SancordUI.emptyHTML({icon:filtering ? "search" : "forum",title:filtering ? "Nenhuma postagem encontrada" : "Este fórum está começando",description:filtering ? "Tente outras tags ou termos de busca." : "Crie uma postagem para começar um assunto."});
     return;
   }
   for (const t of posts) {

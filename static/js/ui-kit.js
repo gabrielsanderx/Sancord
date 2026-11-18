@@ -91,7 +91,8 @@ const SancordUI = (() => {
       if (item.icon) {
         const ic = document.createElement("span");
         ic.className = "sancord-menu-icon";
-        ic.textContent = item.icon;
+        if (typeof SancordIcons !== "undefined") ic.appendChild(SancordIcons.node(item.icon));
+        else ic.textContent = item.icon;
         ic.setAttribute("aria-hidden", "true");
         left.appendChild(ic);
       }
@@ -370,11 +371,24 @@ const SancordUI = (() => {
         prevFocus?.focus?.({ preventScroll: true });
         resolve(result);
       }
+      function focusable() {
+        return [...form.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex]')]
+          .filter(el => el.tabIndex >= 0 && el.type !== "hidden" && !el.closest('.hidden, [hidden]') &&
+            window.getComputedStyle(el).display !== "none" && window.getComputedStyle(el).visibility !== "hidden");
+      }
       function onKey(e) {
         if (e.key === "Escape") {
           e.preventDefault();
           e.stopPropagation();
           close(null);
+        } else if (e.key === "Tab") {
+          const items = focusable();
+          const index = items.indexOf(document.activeElement);
+          if (index < 0 || (e.shiftKey ? index === 0 : index === items.length - 1)) {
+            e.preventDefault();
+            (e.shiftKey ? items.at(-1) : items[0])?.focus();
+          }
+          e.stopPropagation();
         }
       }
       document.addEventListener("keydown", onKey, true);
@@ -398,10 +412,11 @@ const SancordUI = (() => {
         close(v);
       });
 
-      const first = form.querySelector("input:not([type=radio]), textarea, select") || form.querySelector("input");
       setTimeout(() => {
+        if (!backdrop.isConnected) return;
+        const first = focusable().find(el => el.matches("input, textarea, select")) || cancel;
         first?.focus();
-        first?.select?.();
+        if (first.matches('textarea, input:not([type=checkbox]):not([type=radio]):not([type=color])')) first.select?.();
       }, 0);
     });
   }
@@ -412,16 +427,36 @@ const SancordUI = (() => {
 
   let tipEl = null;
   let tipTarget = null;
+  function tooltipText(control) {
+    if (control.title) {
+      if (!control.hasAttribute("aria-label") || control.getAttribute("aria-label") === control.dataset.uiTooltip) control.setAttribute("aria-label", control.title);
+      control.dataset.uiTooltip = control.title;
+      control.removeAttribute("title");
+    }
+    return control.dataset.uiTooltip;
+  }
   // Elementos re-renderizados não disparam "mouseleave"; então escondemos o
   // tooltip sempre que o ponteiro sai do alvo atual ou a página rola.
   document.addEventListener(
     "pointerover",
     (e) => {
       if (tipTarget && (!tipTarget.isConnected || !tipTarget.contains(e.target))) hideTooltip();
+      const control = e.target?.closest?.('button[title], button[data-ui-tooltip], [role="button"][title], [role="button"][data-ui-tooltip]');
+      if (control && !control.disabled) {
+        showTooltip(control, tooltipText(control), "top");
+      }
     },
     true
   );
   document.addEventListener("scroll", () => hideTooltip(), true);
+  document.addEventListener("focusin", e => {
+    const control = e.target?.closest?.('button[title], button[data-ui-tooltip], [role="button"][title], [role="button"][data-ui-tooltip]');
+    if (control && !control.disabled) {
+      showTooltip(control, tooltipText(control), "top");
+    }
+  });
+  document.addEventListener("focusout", hideTooltip);
+  document.addEventListener("pointerout", e => { if (tipTarget && !tipTarget.contains(e.relatedTarget)) hideTooltip(); });
 
   function showTooltip(target, text, side) {
     if (!text) return;
@@ -464,5 +499,10 @@ const SancordUI = (() => {
     el.addEventListener("mousedown", hideTooltip);
   }
 
-  return { contextMenu, closeContextMenu, formDialog, confirm, tooltip, hideTooltip };
+  function emptyHTML({ icon = "chat", title, description = "" }) {
+    const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const graphic = typeof SancordIcons !== "undefined" ? SancordIcons.html(icon) : "";
+    return `<div class="ui-empty" role="status">${graphic}<strong>${escape(title)}</strong>${description ? `<span>${escape(description)}</span>` : ""}</div>`;
+  }
+  return { contextMenu, closeContextMenu, formDialog, confirm, tooltip, hideTooltip, emptyHTML };
 })();

@@ -198,7 +198,7 @@ function onAuditLog({ server_id, entries, has_more }) {
   if (!list) return;
   list.innerHTML = "";
   if (auditState.entries.length === 0) {
-    list.innerHTML = `<div class="pinned-empty">Nenhuma ação registrada ainda.</div>`;
+    list.innerHTML = SancordUI.emptyHTML({icon:"shield",title:"Nenhuma ação registrada",description:"As ações de moderação deste servidor aparecerão aqui."});
   }
   for (const e of auditState.entries) {
     const row = document.createElement("div");
@@ -305,7 +305,7 @@ function onSearchResults({ request_id, hits, has_more }) {
   if (title) title.textContent = `🔎 ${n}${has_more ? "+" : ""} resultado${n === 1 ? "" : "s"}`;
   list.innerHTML = "";
   if (n === 0) {
-    list.innerHTML = `<div class="pinned-empty">Nada encontrado. Dica: de:nome, tem:link, fixadas, antes:2026-11-01.</div>`;
+    list.innerHTML = SancordUI.emptyHTML({icon:"search",title:"Nenhum resultado",description:"Experimente outros termos ou os filtros de autor, data e anexos."});
     return;
   }
   for (const hit of hits) {

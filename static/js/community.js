@@ -232,7 +232,7 @@ function renderEventsModal() {
   const events = upcomingEvents(state.serverEvents.get(srv.id));
   list.innerHTML = "";
   if (events.length === 0) {
-    list.innerHTML = `<div class="pinned-empty">Nenhum evento marcado. ${canManageEvents(srv) ? "Crie o primeiro!" : ""}</div>`;
+    list.innerHTML = SancordUI.emptyHTML({icon:"calendar",title:"Nenhum evento marcado",description:canManageEvents(srv) ? "Crie um evento para reunir a comunidade." : "Os próximos eventos deste servidor aparecerão aqui."});
     return;
   }
   const me = communityMe();

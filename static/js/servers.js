@@ -4,23 +4,14 @@
 // em tempo de execução; este arquivo só define funções e listeners.
 // ============================================================================
 
-const CHANNEL_KIND_ICONS = {
-  // Megafone: ícone próprio do canal de anúncios (texto e voz usam SVG_ICONS do app.js).
-  announcement: `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18 11v2h4v-2h-4zm-2 6.61c.96.71 2.21 1.65 3.2 2.39.4-.53.8-1.07 1.2-1.6-.99-.74-2.24-1.68-3.2-2.4-.4.54-.8 1.08-1.2 1.61zM20.4 5.6c-.4-.53-.8-1.07-1.2-1.6-.99.74-2.24 1.68-3.2 2.4.4.53.8 1.07 1.2 1.6.96-.72 2.21-1.65 3.2-2.4zM4 9c-1.1 0-2 .9-2 2v2c0 1.1.9 2 2 2h1v4h2v-4h1l5 3V6L8 9H4zm11.5 3c0-1.33-.58-2.53-1.5-3.35v6.69c.92-.81 1.5-2.01 1.5-3.34z"/></svg>`,
-};
+const CHANNEL_KIND_ICONS = Object.fromEntries(['announcement','forum','thread'].map(kind => [kind, SancordIcons.html(kind)]));
 
 function channelIconSvg(kind) {
-  if (kind === "announcement") return CHANNEL_KIND_ICONS.announcement;
-  if (kind === "forum") return CHANNEL_KIND_ICONS.forum;
-  if (kind === "thread") return CHANNEL_KIND_ICONS.thread;
-  if (kind === "voice") return SVG_ICONS.speaker;
-  return SVG_ICONS.hash;
+  return SancordIcons.html(({voice:'voice',announcement:'announcement',forum:'forum'})[kind] || 'hash');
 }
 
 const KIND_LABELS = { text: "Texto", voice: "Voz", announcement: "Anúncios", forum: "Fórum" };
 // Fórum (balões) e thread (ramificação) — Fase 8.
-CHANNEL_KIND_ICONS.forum = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 6h-2v9H6v2c0 .55.45 1 1 1h11l4 4V7c0-.55-.45-1-1-1zm-4 6V3c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1v14l4-4h10c.55 0 1-.45 1-1z"/></svg>`;
-CHANNEL_KIND_ICONS.thread = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 3a2 2 0 0 0-1 3.73V14a4 4 0 0 0 4 4h7.27A2 2 0 1 0 19 16.27V16h-2v.27a2 2 0 0 0-.27.73H10a2 2 0 0 1-2-2V6.73A2 2 0 0 0 7 3z"/></svg>`;
 
 // ---------------------------------------------------------------------------
 // Preferências sincronizadas (barra de servidores, pastas, silenciados)
@@ -319,7 +310,7 @@ function buildCategoryHeader(srv, cat, isCollapsed, canManage) {
 
   const toggle = document.createElement("span");
   toggle.className = "category-toggle";
-  toggle.innerHTML = `<svg class="category-caret" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>`;
+  toggle.innerHTML = SancordIcons.html("chevron").replace('class="ui-icon"', 'class="ui-icon category-caret"');
   const name = document.createElement("span");
   name.className = "category-name";
   name.textContent = cat.name;
@@ -330,7 +321,7 @@ function buildCategoryHeader(srv, cat, isCollapsed, canManage) {
     const add = document.createElement("button");
     add.type = "button";
     add.className = "add-channel-btn category-add-btn";
-    add.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>`;
+    add.innerHTML = SancordIcons.html("plus");
     SancordUI.tooltip(add, `Criar canal em ${cat.name}`, "top");
     add.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -446,7 +437,7 @@ function buildEditButton(srv, ch) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "channel-del-btn channel-edit-btn";
-  btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.59-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54A.5.5 0 0 0 13.92 2h-3.84a.5.5 0 0 0-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.59.22L2.73 8.47a.5.5 0 0 0 .12.61l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.5.5 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>`;
+  btn.innerHTML = SancordIcons.html("settings");
   SancordUI.tooltip(btn, "Editar canal", "top");
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1069,7 +1060,7 @@ function buildRailFolder(folder, serversById) {
   btn.className = "guild-icon guild-folder-icon";
   btn.setAttribute("aria-expanded", String(open));
   if (open) {
-    btn.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
+    btn.innerHTML = SancordIcons.html("folder");
   } else {
     const grid = document.createElement("span");
     grid.className = "guild-folder-grid";

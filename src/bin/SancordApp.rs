@@ -86,7 +86,7 @@ const TITLEBAR_INIT_SCRIPT: &str = r#"
         left: 0;
         right: 0;
         height: 30px;
-        background: #111214;
+        background: var(--bg-tertiary, #171b24);
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -108,13 +108,13 @@ const TITLEBAR_INIT_SCRIPT: &str = r#"
         font-size: 11px;
         font-weight: 800;
         letter-spacing: 0.8px;
-        color: #949ba4;
+        color: var(--text-muted, #a5afc3);
         display: flex;
         align-items: center;
         gap: 6px;
       }
       .sancord-tb-badge {
-        background: #5865f2;
+        background: var(--brand, #7862d4);
         color: #fff;
         font-size: 9px;
         padding: 1px 5px;
@@ -130,7 +130,7 @@ const TITLEBAR_INIT_SCRIPT: &str = r#"
         height: 100%;
         border: none;
         background: transparent;
-        color: #b5bac1;
+        color: var(--text-secondary, #bec7d8);
         font-size: 12px;
         display: flex;
         align-items: center;
@@ -143,7 +143,7 @@ const TITLEBAR_INIT_SCRIPT: &str = r#"
         color: #fff;
       }
       .sancord-tb-btn.close:hover {
-        background: #f23f43;
+        background: var(--red-hover, #d55c6c);
         color: #fff;
       }
       html, body {
@@ -167,14 +167,14 @@ const TITLEBAR_INIT_SCRIPT: &str = r#"
         height: 8px;
       }
       ::-webkit-scrollbar-track {
-        background: #2b2d31;
+        background: var(--bg-secondary, #222733);
       }
       ::-webkit-scrollbar-thumb {
-        background: #1a1b1e;
+        background: var(--bg-hover, #343d4b);
         border-radius: 4px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #111214;
+        background: var(--bg-tertiary, #171b24);
       }
     `;
     document.head.appendChild(style);
@@ -232,12 +232,13 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sancord</title>
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/ui.css" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: radial-gradient(circle at top, #2b2d42 0%, #1e1f22 65%);
-      color: #f2f3f5;
+      background: var(--bg-tertiary);
+      color: var(--text-header, #f0f2f8);
       height: 100vh;
       display: flex;
       align-items: center;
@@ -246,11 +247,11 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
       overflow: hidden;
     }
     .card {
-      background: rgba(49, 51, 56, 0.92);
-      backdrop-filter: blur(12px);
+      background: var(--bg-primary);
+      backdrop-filter: none;
       width: 420px;
       padding: 40px 32px;
-      border-radius: 18px;
+      border-radius: var(--radius-lg, 8px);
       box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
       text-align: center;
       border: 1px solid rgba(255, 255, 255, 0.08);
@@ -259,18 +260,18 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
       width: 56px;
       height: 56px;
       border: 4px solid rgba(88, 101, 242, 0.2);
-      border-top-color: #5865f2;
+      border-top-color: var(--brand);
       border-radius: 50%;
       margin: 0 auto 20px;
       animation: spin 0.85s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     h1 { font-size: 26px; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.3px; }
-    p { color: #b5bac1; font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
+    p { color: var(--text-secondary, #bec7d8); font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
     .manual-toggle {
       background: transparent;
       border: none;
-      color: #949ba4;
+      color: var(--text-muted, #a5afc3);
       font-size: 12px;
       cursor: pointer;
       text-decoration: underline;
@@ -283,7 +284,7 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
     .manual-box.open { display: flex; }
     input {
       flex: 1;
-      background: #1e1f22;
+      background: var(--bg-input, #383f50);
       border: 1px solid rgba(255, 255, 255, 0.14);
       border-radius: 6px;
       padding: 10px 12px;
@@ -291,9 +292,9 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
       font-size: 13px;
       outline: none;
     }
-    input:focus { border-color: #5865f2; }
+    input:focus { border-color: var(--brand); }
     button.btn {
-      background: #5865f2;
+      background: var(--brand, #7862d4);
       color: #fff;
       border: none;
       border-radius: 6px;

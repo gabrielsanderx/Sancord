@@ -2,10 +2,10 @@
 name = "sancord"
 version = "0.2.1"
 edition = "2021"
-# BinÃ¡rios declarados explicitamente: `src/bin/capture_bridge.rs` Ã© um mÃ³dulo do
-# SancordApp, nÃ£o um programa (a detecÃ§Ã£o automÃ¡tica o tratava como binÃ¡rio sem `main`).
+# Binários declarados explicitamente: `src/bin/capture_bridge.rs` é um módulo do
+# SancordApp, não um programa (a detecção automática o tratava como binário sem `main`).
 autobins = false
-description = "Sancord â€” plataforma de comunicaÃ§Ã£o em tempo real (Axum + WebSockets + SQLite + WebRTC)"
+description = "Sancord — plataforma de comunicação em tempo real (Axum + WebSockets + SQLite + WebRTC)"
 
 [lib]
 name = "sancord"
@@ -35,16 +35,16 @@ bundle = []
 embed-resource = "2.5"
 
 [dependencies]
-# PersistÃªncia: SQLite embutido (compila o SQLite junto, sem depender do sistema)
+# Persistência: SQLite embutido (compila o SQLite junto, sem depender do sistema)
 rusqlite = { version = "0.32", features = ["bundled"] }
-# Hash de senha moderno (Argon2id) + geraÃ§Ã£o de tokens com OsRng
+# Hash de senha moderno (Argon2id) + geração de tokens com OsRng
 argon2 = "0.5"
 sha2 = "0.10"
 hex = "0.4"
 semver = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 tracing-appender = "0.2"
-# Assinatura dos anÃºncios de descoberta (host assina, app desktop verifica)
+# Assinatura dos anúncios de descoberta (host assina, app desktop verifica)
 ed25519-dalek = "2"
 # ServiceExt para servir anexos com ServeFile (suporte a Range/ETag)
 tower = { version = "0.4", features = ["util"] }
@@ -80,6 +80,6 @@ windows = { version = "0.58", features = [
 ] }
 
 [dev-dependencies]
-# Certificados efÃªmeros e servidor HTTPS somente para os testes do updater.
+# Certificados efêmeros e servidor HTTPS somente para os testes do updater.
 rcgen = { version = "0.14", default-features = false, features = ["ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

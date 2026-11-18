@@ -235,7 +235,7 @@ function renderSocialFriendsTab(tab, q) {
     const list = (state.blockedList || []).filter(match);
     if (friendsListCount) friendsListCount.textContent = `BLOQUEADOS — ${list.length}`;
     if (list.length === 0) {
-      friendsItemsList.innerHTML = `<div class="friends-empty-state">Você não bloqueou ninguém.</div>`;
+      friendsItemsList.innerHTML = SancordUI.emptyHTML({icon:"shield",title:"Nenhuma pessoa bloqueada",description:"Pessoas que você bloquear aparecerão aqui."});
       return;
     }
     for (const u of list) {
@@ -251,7 +251,7 @@ function renderSocialFriendsTab(tab, q) {
   const list = (state.messageRequests || []).filter((c) => match(c.peer));
   if (friendsListCount) friendsListCount.textContent = `SOLICITAÇÕES DE MENSAGEM — ${list.length}`;
   if (list.length === 0) {
-    friendsItemsList.innerHTML = `<div class="friends-empty-state">Nenhuma solicitação de mensagem. Mensagens de quem não é seu amigo aparecem aqui antes de chegar às suas DMs.</div>`;
+    friendsItemsList.innerHTML = SancordUI.emptyHTML({icon:"chat",title:"Nenhuma solicitação de mensagem",description:"Mensagens de quem não é seu amigo aparecem aqui antes de chegar às suas DMs."});
     return;
   }
   for (const c of list) {

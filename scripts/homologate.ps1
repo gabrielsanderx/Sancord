@@ -6,7 +6,9 @@ cargo check --locked --all-targets --target-dir target-review-phase6
 if ($LASTEXITCODE -ne 0) { throw 'Falha na compilacao.' }
 cargo test --locked --all-targets --target-dir target-review-phase6
 if ($LASTEXITCODE -ne 0) { throw 'Falha nos testes Rust.' }
-node --test tests/frontend-*.test.cjs
+npm ci --ignore-scripts --no-audit --no-fund
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao preparar dependencias de teste da interface.' }
+npm test
 if ($LASTEXITCODE -ne 0) { throw 'Falha nos testes da interface.' }
 Get-ChildItem static -Recurse -Filter '*.js' | ForEach-Object {
     node --check $_.FullName

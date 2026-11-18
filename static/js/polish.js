@@ -188,7 +188,7 @@ function renderQuickSwitcher() {
   quick.index = Math.min(quick.index, Math.max(0, quick.shown.length - 1));
   list.innerHTML = "";
   if (quick.shown.length === 0) {
-    list.innerHTML = `<li class="quick-empty">${t("quick.empty")}</li>`;
+    list.innerHTML = `<li class="quick-empty">${SancordUI.emptyHTML({icon:"search",title:t("quick.empty"),description:"Tente outro nome de canal, servidor ou conversa."})}</li>`;
     return;
   }
   quick.shown.forEach((it, i) => {

@@ -15,10 +15,12 @@ pub fn response(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/" | "/index.html" => (include_bytes!("../../static/index.html"), "text/html; charset=utf-8"),
         "/connect.html" => (super::LOADER_HTML.as_bytes(), "text/html; charset=utf-8"),
         "/styles.css" => (include_bytes!("../../static/styles.css"), "text/css; charset=utf-8"),
+        "/ui.css" => (include_bytes!("../../static/ui.css"), "text/css; charset=utf-8"),
         "/app.js" => (include_bytes!("../../static/app.js"), "text/javascript; charset=utf-8"),
         "/js/transport.js" => (include_bytes!("../../static/js/transport.js"), "text/javascript; charset=utf-8"),
         "/js/i18n.js" => (include_bytes!("../../static/js/i18n.js"), "text/javascript; charset=utf-8"),
         "/js/ui-kit.js" => (include_bytes!("../../static/js/ui-kit.js"), "text/javascript; charset=utf-8"),
+        "/js/icons.js" => (include_bytes!("../../static/js/icons.js"), "text/javascript; charset=utf-8"),
         "/js/servers.js" => (include_bytes!("../../static/js/servers.js"), "text/javascript; charset=utf-8"),
         "/js/permissions.js" => (include_bytes!("../../static/js/permissions.js"), "text/javascript; charset=utf-8"),
         "/js/chat.js" => (include_bytes!("../../static/js/chat.js"), "text/javascript; charset=utf-8"),
@@ -57,6 +59,12 @@ mod tests {
             let src = line.split("src=\"").nth(1).unwrap().split('"').next().unwrap();
             let asset = response(Request::get(src).body(vec![]).unwrap());
             assert_eq!(asset.status(), StatusCode::OK, "Script sem recurso embutido: {src}");
+        }
+        for line in String::from_utf8_lossy(res.body()).lines().filter(|l| l.contains("rel=\"stylesheet\"")) {
+            let href = line.split("href=\"").nth(1).unwrap().split('"').next().unwrap();
+            let sheet = response(Request::get(href).body(vec![]).unwrap());
+            assert_eq!(sheet.status(), StatusCode::OK, "Estilo sem recurso embutido: {href}");
+            assert_eq!(sheet.headers()["Content-Type"], "text/css; charset=utf-8");
         }
         for path in ["/../Cargo.toml", "/api/login", "/data/sancord.db"] {
             assert_eq!(response(Request::get(path).body(vec![]).unwrap()).status(), StatusCode::NOT_FOUND);

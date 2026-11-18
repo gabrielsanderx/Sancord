@@ -1,0 +1,12 @@
+{
+  "name": "sancord-frontend-checks",
+  "private": true,
+  "description": "Ferramentas de desenvolvimento para validar a interface embutida do Sancord",
+  "scripts": {
+    "test": "node --test tests/frontend-*.test.cjs"
+  },
+  "devDependencies": {
+    "css-tree": "3.2.1",
+    "jsdom": "26.1.0"
+  }
+}

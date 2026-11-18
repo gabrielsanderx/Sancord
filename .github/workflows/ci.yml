@@ -31,7 +31,11 @@ jobs:
       - name: Testar Rust, incluindo updater
         run: cargo test --locked --all-targets
       - name: Testar interface
-        run: node --test tests/frontend-*.test.cjs
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Dependências de teste da interface indisponíveis.' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Validação da interface falhou.' }
       - name: Verificar sintaxe JavaScript
         shell: pwsh
         run: |

@@ -400,7 +400,7 @@ function buildAttachmentsNode(msg) {
       dl.href = SancordNet.url(att.url);
       dl.download = att.filename || "arquivo";
       dl.setAttribute("aria-label", `Baixar ${att.filename || "arquivo"}`);
-      dl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></svg>`;
+      dl.innerHTML = SancordIcons.html("download");
       card.append(icon, meta, dl);
       wrap.appendChild(card);
     }
@@ -442,7 +442,7 @@ function buildReactionsNode(msg) {
   add.disabled = !messagePermissions(msg).add_reactions;
   add.type = "button";
   add.className = "reaction-pill reaction-add";
-  add.textContent = "＋";
+  add.innerHTML = SancordIcons.html("plus");
   SancordUI.tooltip(add, "Adicionar reação", "top");
   add.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -588,10 +588,10 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
       <button type="button" class="msg-act-btn" data-quick-react="👍" aria-label="Reagir com 👍">👍</button>
       <button type="button" class="msg-act-btn" data-quick-react="❤️" aria-label="Reagir com ❤️">❤️</button>
       <button type="button" class="msg-act-btn" data-quick-react="😂" aria-label="Reagir com 😂">😂</button>
-      <button type="button" class="msg-act-btn" data-act="react" aria-label="Adicionar reação">😊<sup>+</sup></button>
-      <button type="button" class="msg-act-btn" data-act="reply" aria-label="Responder">↩️</button>
-      ${mine && msg.content ? `<button type="button" class="msg-act-btn" data-act="edit" aria-label="Editar">✏️</button>` : ""}
-      <button type="button" class="msg-act-btn" data-act="more" aria-label="Mais opções">⋯</button>
+      <button type="button" class="msg-act-btn" data-act="react" aria-label="Adicionar reação">${SancordIcons.html("smile")}</button>
+      <button type="button" class="msg-act-btn" data-act="reply" aria-label="Responder">${SancordIcons.html("reply")}</button>
+      ${mine && msg.content ? `<button type="button" class="msg-act-btn" data-act="edit" aria-label="Editar">${SancordIcons.html("edit")}</button>` : ""}
+      <button type="button" class="msg-act-btn" data-act="more" aria-label="Mais opções">${SancordIcons.html("more")}</button>
     </div>
     ${header}
     <div class="message-content-wrap">
@@ -776,10 +776,13 @@ function renderChatMessagesV2({ preserveScroll = false } = {}) {
   const hs = getHistoryState(chId);
   const frag = document.createDocumentFragment();
 
-  if (!q && list.length > 0 && !hs.hasMore) {
+  if (!q && !hs.loading && !hs.hasMore && !hs.hasNewer) {
     const start = document.createElement("div");
-    start.className = "history-start-marker";
-    start.textContent = "Início da conversa";
+    start.className = "history-start-marker channel-welcome";
+    const channel = (state.textChannels || []).find(c => c.id === chId) || state.threadIndex?.get(chId);
+    const isPrivate = /^(dm:|gdm:)/.test(chId || "");
+    const name = channel?.name || (isPrivate ? document.getElementById("current-text-channel-title")?.textContent : chId) || "conversa";
+    start.innerHTML = `<div class="channel-welcome-icon">${SancordIcons.html(isPrivate ? "chat" : "hash")}</div><h3>${escapeHtml(isPrivate ? name : `# ${name}`)}</h3><p>${escapeHtml(isPrivate ? "Este é o início desta conversa." : `Bem-vindo ao início do canal #${name}.`)}</p>`;
     frag.appendChild(start);
   }
   const unreadMsgId = state.unreadDividerByChannel.get(chId);
@@ -795,8 +798,7 @@ function renderChatMessagesV2({ preserveScroll = false } = {}) {
   }
   if (q && filtered.length === 0) {
     const empty = document.createElement("div");
-    empty.className = "pinned-empty";
-    empty.textContent = "Nenhuma mensagem carregada corresponde à busca.";
+    empty.innerHTML = SancordUI.emptyHTML({icon:"search", title:"Nenhuma mensagem encontrada", description:"Tente outros termos ou use a busca no histórico."});
     frag.appendChild(empty);
   }
   chatMessagesEl.innerHTML = "";
@@ -1320,7 +1322,7 @@ function onPinnedMessages(payload) {
 function autosizeTextarea(el) {
   if (!el) return;
   el.style.height = "auto";
-  el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
+  el.style.height = `${Math.min(el.scrollHeight, 200, Math.round(window.innerHeight * 0.3))}px`;
 }
 
 const autocompleteEl = document.getElementById("composer-autocomplete");
