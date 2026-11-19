@@ -23,7 +23,7 @@
 
 use crate::models::{
     Account, Category, Channel, ChannelKind, ChatMessage, FriendsStore, GuildServer, Invite,
-    RolePermissions, ServerRole, UserPrefs,
+    RolePermissions, ServerMemberProfile, ServerRole, UserPrefs,
 };
 use crate::validate::{is_hex_color, sanitize_stored_image, MAX_CHAT_IMAGE_BYTES, MAX_PROFILE_IMAGE_BYTES};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -35,7 +35,7 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use tracing::{error, info, warn};
 
-pub const SCHEMA_VERSION: i64 = 14;
+pub const SCHEMA_VERSION: i64 = 19;
 
 /// Metadados de um arquivo enviado (o conteúdo fica em `data/uploads/`).
 #[derive(Debug, Clone, PartialEq)]
@@ -502,8 +502,96 @@ fn migrate_schema(conn: &Connection) -> DbResult<()> {
         txn.execute_batch("PRAGMA user_version = 14;")?;
         txn.commit()?;
     }
+    if version < 15 {
+        // v15: apelido por servidor (Etapa C4) em `server_members`.
+        let txn = conn.unchecked_transaction()?;
+        let present: i64 = txn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('server_members') WHERE name = 'nickname'",
+            [],
+            |r| r.get(0),
+        )?;
+        if present == 0 {
+            txn.execute_batch("ALTER TABLE server_members ADD COLUMN nickname TEXT;")?;
+        }
+        txn.execute_batch("PRAGMA user_version = 15;")?;
+        txn.commit()?;
+    }
+    if version < 16 {
+        // v16: emojis próprios do servidor (Etapa C5). A imagem é um anexo comum.
+        conn.execute_batch(&format!("BEGIN; {SERVER_EMOJIS_TABLE} PRAGMA user_version = 16; COMMIT;"))?;
+    }
+    if version < 17 {
+        let txn = conn.unchecked_transaction()?;
+        let present: i64 = txn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('server_members') WHERE name = 'profile_json'",
+            [],
+            |r| r.get(0),
+        )?;
+        if present == 0 {
+            txn.execute_batch("ALTER TABLE server_members ADD COLUMN profile_json TEXT;")?;
+        }
+        txn.execute_batch("PRAGMA user_version = 17;")?;
+        txn.commit()?;
+    }
+    if version < 18 {
+        // v18: taxa de bits de áudio (kbps) configurável por canal de voz (Etapa D).
+        let txn = conn.unchecked_transaction()?;
+        let present: i64 = txn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('channels') WHERE name = 'bitrate_kbps'",
+            [],
+            |r| r.get(0),
+        )?;
+        if present == 0 {
+            txn.execute_batch("ALTER TABLE channels ADD COLUMN bitrate_kbps INTEGER NOT NULL DEFAULT 0;")?;
+        }
+        txn.execute_batch("PRAGMA user_version = 18;")?;
+        txn.commit()?;
+    }
+    if version < 19 {
+        // v19: sistema expandido de convites (canal vinculado, associação temporária,
+        // revogação com tombstone, pausa de convites, regras de entrada e slug futuro).
+        let txn = conn.unchecked_transaction()?;
+        let ensure_col = |table: &str, col: &str, def: &str| -> DbResult<()> {
+            let present: i64 = txn.query_row(
+                &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+                params![col],
+                |r| r.get(0),
+            )?;
+            if present == 0 {
+                txn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} {def};"))?;
+            }
+            Ok(())
+        };
+        ensure_col("invites", "channel_id", "TEXT")?;
+        ensure_col("invites", "temporary", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_col("invites", "revoked_at", "INTEGER")?;
+        ensure_col("invites", "revoked_by", "TEXT")?;
+        ensure_col("invites", "last_used_at", "INTEGER")?;
+        ensure_col("servers", "invites_paused", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_col("servers", "rules_text", "TEXT")?;
+        ensure_col("servers", "custom_invite_slug", "TEXT")?;
+        ensure_col("server_members", "temporary", "INTEGER NOT NULL DEFAULT 0")?;
+        txn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_invites_server ON invites(server_id);
+             CREATE INDEX IF NOT EXISTS idx_invites_creator ON invites(creator_lower);
+             CREATE INDEX IF NOT EXISTS idx_invites_expires ON invites(expires_at);
+             PRAGMA user_version = 19;",
+        )?;
+        txn.commit()?;
+    }
     Ok(())
 }
+
+/// Também criada na conversão v1 -> v2, que já grava servidores completos.
+const SERVER_EMOJIS_TABLE: &str = "CREATE TABLE IF NOT EXISTS server_emojis (
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        animated INTEGER NOT NULL DEFAULT 0,
+        creator_lower TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (server_id, id)
+    );";
 
 /// Filtros já validados de uma busca (o servidor decide `channels`).
 #[derive(Debug, Clone, Default)]
@@ -516,7 +604,10 @@ pub struct SearchFilter {
     pub before: Option<i64>,
     pub after: Option<i64>,
     pub pinned: bool,
+    /// Menções diretas, @everyone e cargos do usuário (`mention_roles`); exclui as próprias mensagens.
     pub mentions_user: Option<String>,
+    /// IDs dos cargos do usuário (sem "everyone") que contam como menção.
+    pub mention_roles: Vec<String>,
     pub limit: usize,
 }
 
@@ -571,6 +662,9 @@ fn migrate_v2(conn: &Connection) -> DbResult<()> {
             owner_id TEXT,
             default_invite TEXT NOT NULL,
             is_community INTEGER NOT NULL DEFAULT 0,
+            invites_paused INTEGER NOT NULL DEFAULT 0,
+            rules_text TEXT,
+            custom_invite_slug TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
@@ -595,7 +689,8 @@ fn migrate_v2(conn: &Connection) -> DbResult<()> {
             user_limit INTEGER NOT NULL DEFAULT 0,
             -- Também aqui (e não só na v12/v13): a conversão v1 -> v2 já grava os canais.
             slowmode_secs INTEGER NOT NULL DEFAULT 0,
-            forum_tags TEXT NOT NULL DEFAULT '[]'
+            forum_tags TEXT NOT NULL DEFAULT '[]',
+            bitrate_kbps INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_channels_server ON channels(server_id);
         CREATE TABLE IF NOT EXISTS server_members (
@@ -603,6 +698,10 @@ fn migrate_v2(conn: &Connection) -> DbResult<()> {
             user_lower TEXT NOT NULL,
             user_id TEXT,
             joined_at INTEGER NOT NULL,
+            -- Também aqui (e não só na v15): a conversão v1 -> v2 já grava os membros.
+            nickname TEXT,
+            profile_json TEXT,
+            temporary INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (server_id, user_lower)
         );
         CREATE INDEX IF NOT EXISTS idx_members_user ON server_members(user_lower);
@@ -639,15 +738,23 @@ fn migrate_v2(conn: &Connection) -> DbResult<()> {
             created_at INTEGER NOT NULL,
             expires_at INTEGER,
             max_uses INTEGER,
-            uses INTEGER NOT NULL DEFAULT 0
+            uses INTEGER NOT NULL DEFAULT 0,
+            channel_id TEXT,
+            temporary INTEGER NOT NULL DEFAULT 0,
+            revoked_at INTEGER,
+            revoked_by TEXT,
+            last_used_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_invites_server ON invites(server_id);
+        CREATE INDEX IF NOT EXISTS idx_invites_creator ON invites(creator_lower);
+        CREATE INDEX IF NOT EXISTS idx_invites_expires ON invites(expires_at);
         CREATE TABLE IF NOT EXISTS user_prefs (
             user_id TEXT PRIMARY KEY,
             data TEXT NOT NULL
         );
         "#,
     )?;
+    txn.execute_batch(SERVER_EMOJIS_TABLE)?;
     if has_v1 > 0 {
         let docs: Vec<String> = {
             let mut stmt = txn.prepare("SELECT data FROM servers_v1 ORDER BY rowid")?;
@@ -678,12 +785,14 @@ fn replace_server(conn: &Connection, srv: &GuildServer) -> DbResult<()> {
     let created = if srv.created_at > 0 { srv.created_at } else { now };
     conn.execute(
         "INSERT INTO servers (id, name, description, icon_url, icon_color, banner_url, owner_lower,
-             owner_id, default_invite, is_community, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT id FROM users WHERE username_lower = ?7), ?8, ?9, ?10, ?11)
+             owner_id, default_invite, is_community, invites_paused, rules_text, custom_invite_slug, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT id FROM users WHERE username_lower = ?7), ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description,
              icon_url = excluded.icon_url, icon_color = excluded.icon_color, banner_url = excluded.banner_url,
              owner_lower = excluded.owner_lower, owner_id = excluded.owner_id,
              default_invite = excluded.default_invite, is_community = excluded.is_community,
+             invites_paused = excluded.invites_paused, rules_text = excluded.rules_text,
+             custom_invite_slug = excluded.custom_invite_slug,
              updated_at = excluded.updated_at",
         params![
             srv.id,
@@ -695,11 +804,14 @@ fn replace_server(conn: &Connection, srv: &GuildServer) -> DbResult<()> {
             srv.owner_username,
             srv.invite_code,
             srv.is_community as i64,
+            srv.invites_paused as i64,
+            srv.rules_text,
+            srv.custom_invite_slug,
             created,
             now
         ],
     )?;
-    for table in ["categories", "channels", "server_members", "roles", "member_roles", "bans"] {
+    for table in ["categories", "channels", "server_members", "roles", "member_roles", "bans", "server_emojis"] {
         conn.execute(&format!("DELETE FROM {table} WHERE server_id = ?1"), params![srv.id])?;
     }
     {
@@ -712,23 +824,25 @@ fn replace_server(conn: &Connection, srv: &GuildServer) -> DbResult<()> {
     }
     {
         let mut stmt = conn.prepare(
-            "INSERT OR REPLACE INTO channels (id, server_id, category_id, kind, name, topic, position, permission_overwrites, permissions_synced, user_limit, slowmode_secs, forum_tags)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT OR REPLACE INTO channels (id, server_id, category_id, kind, name, topic, position, permission_overwrites, permissions_synced, user_limit, slowmode_secs, forum_tags, bitrate_kbps)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )?;
         for c in srv.text_channels.iter().chain(srv.voice_channels.iter()) {
             stmt.execute(params![c.id, srv.id, c.category_id, c.kind.as_str(), c.name, c.topic, c.position,
                 serde_json::to_string(&c.permission_overwrites)?, c.permissions_synced, c.user_limit, c.slowmode_secs,
-                serde_json::to_string(&c.forum_tags)?])?;
+                serde_json::to_string(&c.forum_tags)?, c.bitrate_kbps])?;
         }
     }
     {
         let mut stmt = conn.prepare(
-            "INSERT OR IGNORE INTO server_members (server_id, user_lower, user_id, joined_at)
-             VALUES (?1, ?2, (SELECT id FROM users WHERE username_lower = ?2), ?3)",
+            "INSERT OR IGNORE INTO server_members (server_id, user_lower, user_id, joined_at, nickname, profile_json, temporary)
+             VALUES (?1, ?2, (SELECT id FROM users WHERE username_lower = ?2), ?3, ?4, ?5, ?6)",
         )?;
         for m in &srv.members {
             let joined = srv.member_joined_at.get(m).copied().unwrap_or(created);
-            stmt.execute(params![srv.id, m, joined])?;
+            let profile = srv.member_profiles.get(m).map(serde_json::to_string).transpose()?;
+            let temp = srv.temporary_members.iter().any(|t| t == m) as i64;
+            stmt.execute(params![srv.id, m, joined, srv.member_nicks.get(m), profile, temp])?;
         }
     }
     {
@@ -748,6 +862,15 @@ fn replace_server(conn: &Connection, srv: &GuildServer) -> DbResult<()> {
                 r.badge_emoji,
                 serde_json::to_string(&r.permissions)?
             ])?;
+        }
+    }
+    {
+        let mut stmt = conn.prepare(
+            "INSERT OR REPLACE INTO server_emojis (server_id, id, name, animated, creator_lower, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for e in &srv.emojis {
+            stmt.execute(params![srv.id, e.id, e.name, e.animated as i64, e.creator, e.created_at])?;
         }
     }
     {
@@ -775,10 +898,13 @@ fn replace_server(conn: &Connection, srv: &GuildServer) -> DbResult<()> {
 
 fn upsert_invite(conn: &Connection, inv: &Invite) -> DbResult<()> {
     conn.execute(
-        "INSERT INTO invites (code, server_id, creator_lower, created_at, expires_at, max_uses, uses)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO invites (code, server_id, creator_lower, created_at, expires_at, max_uses, uses, channel_id, temporary, revoked_at, revoked_by, last_used_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(code) DO UPDATE SET uses = excluded.uses, expires_at = excluded.expires_at,
-             max_uses = excluded.max_uses, creator_lower = excluded.creator_lower",
+             max_uses = excluded.max_uses, creator_lower = excluded.creator_lower,
+             channel_id = excluded.channel_id, temporary = excluded.temporary,
+             revoked_at = excluded.revoked_at, revoked_by = excluded.revoked_by,
+             last_used_at = excluded.last_used_at",
         params![
             inv.code,
             inv.server_id,
@@ -786,7 +912,12 @@ fn upsert_invite(conn: &Connection, inv: &Invite) -> DbResult<()> {
             inv.created_at,
             inv.expires_at,
             inv.max_uses,
-            inv.uses
+            inv.uses,
+            inv.channel_id,
+            inv.temporary as i64,
+            inv.revoked_at,
+            inv.revoked_by,
+            inv.last_used_at
         ],
     )?;
     Ok(())
@@ -1183,7 +1314,7 @@ impl Db {
             let mut servers: Vec<GuildServer> = {
                 let mut stmt = c.prepare(
                     "SELECT id, name, description, icon_url, icon_color, banner_url, owner_lower,
-                            default_invite, is_community, created_at
+                            default_invite, is_community, invites_paused, rules_text, custom_invite_slug, created_at
                      FROM servers ORDER BY rowid",
                 )?;
                 let rows = stmt.query_map([], |r| {
@@ -1197,7 +1328,10 @@ impl Db {
                         owner_username: r.get(6)?,
                         invite_code: r.get(7)?,
                         is_community: r.get::<_, i64>(8)? != 0,
-                        created_at: r.get(9)?,
+                        invites_paused: r.get::<_, i64>(9)? != 0,
+                        rules_text: r.get(10)?,
+                        custom_invite_slug: r.get(11)?,
+                        created_at: r.get(12)?,
                         text_channels: Vec::new(),
                         voice_channels: Vec::new(),
                         roles: Vec::new(),
@@ -1211,6 +1345,10 @@ impl Db {
                         automod: Default::default(),
                         threads: Vec::new(),
                         member_timeouts: HashMap::new(),
+                        member_nicks: HashMap::new(),
+                        member_profiles: HashMap::new(),
+                        emojis: Vec::new(),
+                        temporary_members: Vec::new(),
                     })
                 })?;
                 rows.collect::<Result<Vec<_>, _>>()?
@@ -1232,7 +1370,7 @@ impl Db {
             }
 
             let mut stmt = c.prepare(
-                "SELECT server_id, id, category_id, kind, name, topic, position, permission_overwrites, permissions_synced, user_limit, slowmode_secs, forum_tags FROM channels ORDER BY position, rowid",
+                "SELECT server_id, id, category_id, kind, name, topic, position, permission_overwrites, permissions_synced, user_limit, slowmode_secs, forum_tags, bitrate_kbps FROM channels ORDER BY position, rowid",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok((
@@ -1248,17 +1386,18 @@ impl Db {
                     r.get::<_, u32>(9)?,
                     r.get::<_, u32>(10)?,
                     r.get::<_, String>(11)?,
+                    r.get::<_, u32>(12)?,
                 ))
             })?;
             for row in rows {
-                let (sid, id, category_id, kind, name, topic, position, overwrites, permissions_synced, user_limit, slowmode_secs, forum_tags) = row?;
+                let (sid, id, category_id, kind, name, topic, position, overwrites, permissions_synced, user_limit, slowmode_secs, forum_tags, bitrate_kbps) = row?;
                 let Some(i) = slot(&sid) else { continue };
                 let Some(kind) = ChannelKind::parse(&kind) else {
                     warn!("Canal {id} com tipo desconhecido '{kind}' ignorado");
                     continue;
                 };
                 let ch = Channel { id, name, kind: kind.clone(), category_id, position, topic,
-                    permission_overwrites: serde_json::from_str(&overwrites)?, permissions_synced, user_limit, slowmode_secs,
+                    permission_overwrites: serde_json::from_str(&overwrites)?, permissions_synced, user_limit, bitrate_kbps, slowmode_secs,
                     // Tag ilegível não derruba o servidor: o fórum só fica sem tags.
                     forum_tags: serde_json::from_str(&forum_tags).unwrap_or_default(), effective_permissions: None };
                 if kind.is_text_like() {
@@ -1269,16 +1408,50 @@ impl Db {
             }
 
             let mut stmt = c.prepare(
-                "SELECT server_id, user_lower, joined_at FROM server_members ORDER BY joined_at, rowid",
+                "SELECT server_id, user_lower, joined_at, nickname, profile_json, temporary FROM server_members ORDER BY joined_at, rowid",
             )?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, i64>(5)? != 0))
             })?;
             for row in rows {
-                let (sid, user, joined) = row?;
+                let (sid, user, joined, nick, profile, temp) = row?;
                 if let Some(i) = slot(&sid) {
+                    if let Some(n) = nick.filter(|n| !n.is_empty()) {
+                        servers[i].member_nicks.insert(user.clone(), n);
+                    }
+                    if let Some(raw) = profile {
+                        match serde_json::from_str::<ServerMemberProfile>(&raw) {
+                            Ok(profile) => { servers[i].member_profiles.insert(user.clone(), profile); }
+                            Err(err) => warn!(server_id = %sid, "Perfil de servidor inválido no banco: {err}"),
+                        }
+                    }
+                    if temp {
+                        servers[i].temporary_members.push(user.clone());
+                    }
                     servers[i].member_joined_at.insert(user.clone(), joined);
                     servers[i].members.push(user);
+                }
+            }
+
+            let mut stmt = c.prepare(
+                "SELECT server_id, id, name, animated, creator_lower, created_at FROM server_emojis ORDER BY created_at, rowid",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    crate::models::ServerEmoji {
+                        id: r.get(1)?,
+                        name: r.get(2)?,
+                        animated: r.get::<_, i64>(3)? != 0,
+                        creator: r.get(4)?,
+                        created_at: r.get(5)?,
+                    },
+                ))
+            })?;
+            for row in rows {
+                let (sid, emoji) = row?;
+                if let Some(i) = slot(&sid) {
+                    servers[i].emojis.push(emoji);
                 }
             }
 
@@ -1350,7 +1523,7 @@ impl Db {
     pub fn load_invites(&self) -> DbResult<Vec<Invite>> {
         self.with_reader(|c| {
             let mut stmt = c.prepare(
-                "SELECT code, server_id, creator_lower, created_at, expires_at, max_uses, uses FROM invites",
+                "SELECT code, server_id, creator_lower, created_at, expires_at, max_uses, uses, channel_id, temporary, revoked_at, revoked_by, last_used_at FROM invites",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok(Invite {
@@ -1361,6 +1534,11 @@ impl Db {
                     expires_at: r.get(4)?,
                     max_uses: r.get(5)?,
                     uses: r.get(6)?,
+                    channel_id: r.get(7)?,
+                    temporary: r.get::<_, i64>(8)? != 0,
+                    revoked_at: r.get(9)?,
+                    revoked_by: r.get(10)?,
+                    last_used_at: r.get(11)?,
                 })
             })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -1758,8 +1936,11 @@ impl Db {
                         OR (?7 = 'image' AND (json_extract(m.data, '$.image_url') IS NOT NULL
                             OR EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.attachments')) a
                                        WHERE json_extract(a.value, '$.kind') = 'image'))))
-                   AND (?8 IS NULL OR EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.mentions.users')) u WHERE u.value = ?8)
-                        OR json_extract(m.data, '$.mentions.everyone') = 1)
+                   AND (?8 IS NULL OR (lower(m.author_name) <> ?8 AND (
+                        EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.mentions.users')) u WHERE u.value = ?8)
+                        OR json_extract(m.data, '$.mentions.everyone') = 1
+                        OR EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.mentions.roles')) r
+                                   WHERE r.value IN (SELECT value FROM json_each(?10))))))
                  ORDER BY m.created_at DESC, m.id DESC LIMIT ?9",
                 join = if fts.is_some() { "JOIN messages_fts ON messages_fts.rowid = m.rowid" } else { "" },
                 fts_cond = if fts.is_some() { "AND messages_fts MATCH ?2" } else { "AND ?2 IS NULL" },
@@ -1775,7 +1956,8 @@ impl Db {
                     f.pinned as i64,
                     f.has,
                     f.mentions_user,
-                    (f.limit + 1) as i64
+                    (f.limit + 1) as i64,
+                    serde_json::to_string(&f.mention_roles)?
                 ],
                 |r| r.get::<_, String>(0),
             )?;
@@ -1816,6 +1998,16 @@ impl Db {
             Ok(c.query_row(
                 "SELECT COUNT(*) FROM messages WHERE channel_id = ?1",
                 params![channel_id],
+                |r| r.get(0),
+            )?)
+        })
+    }
+
+    pub fn count_messages_by_author(&self, author_lower: &str) -> DbResult<i64> {
+        self.with_reader(|c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM messages WHERE lower(author_name) = ?1",
+                params![author_lower],
                 |r| r.get(0),
             )?)
         })
@@ -1996,6 +2188,8 @@ mod tests {
             mentions: Default::default(),
             poll: None,
             author_kind: crate::models::AuthorKind::User,
+            embeds: Vec::new(),
+            forward: None,
         }
     }
 
@@ -2145,6 +2339,13 @@ mod tests {
             automod: Default::default(),
             threads: Vec::new(),
             member_timeouts: HashMap::new(),
+            member_nicks: HashMap::new(),
+            member_profiles: HashMap::new(),
+            emojis: Vec::new(),
+            invites_paused: false,
+            rules_text: None,
+            custom_invite_slug: None,
+            temporary_members: Vec::new(),
         };
         srv.ensure_layout(1000);
         srv
@@ -2193,6 +2394,11 @@ mod tests {
             expires_at: Some(99),
             max_uses: Some(5),
             uses: 0,
+            channel_id: Some("s1-geral".into()),
+            temporary: false,
+            revoked_at: None,
+            revoked_by: None,
+            last_used_at: None,
         };
         db.write(WriteOp::UpsertInvite(inv.clone()));
         inv.uses = 3;

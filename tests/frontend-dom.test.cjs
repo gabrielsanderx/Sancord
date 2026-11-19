@@ -94,3 +94,31 @@ test('janela estreita recolhe membros para painel flutuante e perfis preservam c
   assert.equal(d.getElementById('profile-card-name').textContent, 'VozQA_B');
   assert.equal(d.getElementById('profile-card-name').style.color, '');
 });
+
+test('perfil offline recebe mídia e moldura do servidor e só mostra amigos em comum confirmados', async t => {
+  const h = await openInterface(t), d = h.document;
+  h.run(`
+    state.activeView = "server";
+    state.activeServerId = "teste";
+    state.servers = [{ id: "teste", member_nicks: { bia: "Apelido no servidor" } }];
+    state.friends = [{ username: "Ana", online: true }];
+    state.ws = { readyState: WebSocket.OPEN, send() {} };
+    openMemberProfilePopover(null, { author_name: "Bia" });
+  `);
+  const mutual = d.getElementById('profile-mutual-friends-list');
+  assert.equal(mutual.textContent, 'Carregando…');
+  h.run(`onUserProfile({ user: {
+    username: "Bia", display_name: "Nome global", pronouns: "ela", online: false,
+    status_kind: "invisible", bio: "**Descrição**", avatar_color: "#123456",
+    avatar_url: "/api/attachments/id/avatar.webp", banner_url: "/api/attachments/id/banner.webp",
+    profile_frame: "core-pulse", badges: ["early_user"]
+  }, server_id: "teste", mutual_friends: [], mutual_servers: [] });`);
+  assert.equal(d.getElementById('profile-card-name').textContent, 'Apelido no servidor');
+  assert.equal(d.getElementById('profile-card-handle').textContent, '@bia • ela');
+  assert.equal(d.querySelector('#profile-card-bio strong').textContent, 'Descrição');
+  assert.match(d.querySelector('#profile-card-avatar img').src, /avatar\.webp$/);
+  assert.match(d.querySelector('#profile-card-banner img').src, /banner\.webp$/);
+  assert.ok(d.querySelector('#profile-popover-card.pf-core-pulse > .pf-layer'));
+  assert.ok(d.querySelector('#profile-card-badges [data-badge="early_user"]'));
+  assert.equal(mutual.textContent, 'Nenhum amigo em comum.');
+});

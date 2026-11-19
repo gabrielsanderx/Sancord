@@ -59,7 +59,7 @@ Documento vivo. Atualize as linhas quando um item mudar de estado e anote a data
    - **Aparência e atualização:** quatro temas, atualização assinada.
 2. **Parciais.**
    - **Voz, vídeo e tela:** funcionam, mas em malha P2P sem servidor de mídia e sem validação entre redes.
-   - **Notificações:** sem duração de silêncio nem silêncio por categoria.
+   - **Notificações:** ~~sem duração de silêncio nem silêncio por categoria~~ (feito na Etapa C3, fontes). Falta: DM silenciada ainda mostra o contador.
    - **Encaminhar:** copia texto, sem snapshot e sem anexos.
    - **Eventos:** sem início e fim automáticos.
    - **Busca:** funciona; falta conferir a experiência em listas grandes.
@@ -124,12 +124,12 @@ Documento vivo. Atualize as linhas quando um item mudar de estado e anote a data
 |---|---|---|
 | Funcionalidade core (conta, servidores, canais, tempo real, persistência) | **68%** | Tempo real, persistência e permissões sólidas. Conta sem e-mail, recuperação, sessões e exclusão. |
 | Chat | **72%** | Ciclo da mensagem completo e bem testado. Faltam embeds de link, GIF, emojis próprios, controle de menção no reply, histórico de edição, encaminhamento real e timestamps dinâmicos. |
-| Servidores | **70%** | Estrutura, convites, pastas e arrastar ok. Faltam transferir propriedade, perfil por servidor, emojis e integrações de comunidade (onboarding, regras). |
+| Servidores | **70%** | Estrutura, convites, pastas, arrastar e perfil por servidor nos fontes. Faltam transferir propriedade e integrações de comunidade (onboarding, regras). |
 | Social | **72%** | Amigos, DMs, solicitações e grupos completos. Notas e "ignorar" só locais, sem atividade rica, sem apelido de amigo. |
 | Voz | **40%** | Funciona em malha P2P com filtros próprios e PTT. Sem SFU (escala), sem TURN provisionado, sem validação entre redes, sem texto na voz, sem soundboard. Testes físicos limitados. |
 | Vídeo e tela | **40%** | Câmera, tela, janela e áudio de sistema existem. Webcam física não validada, sem pop-out, um modelo só de grade e foco, escala limitada pela malha. |
 | Moderação | **65%** | Kick, ban, castigo, modo lento, AutoMod e auditoria. Faltam motivo e limpeza de mensagens no ban, exclusão em massa, revisão de denúncias, AutoMod que aplica castigo, nível de verificação e proteção contra raid. |
-| Configurações | **50%** | Muitas páginas reais, mas 4 opções mortas, sem Acessibilidade, editor de atalhos, Avançado/modo desenvolvedor e Sobre. Status da conta fixo. |
+| Configurações | **86%** | Central desktop completa com 22 páginas reais em 4 grupos (`CONTA`, `PRIVACIDADE E SOCIAL`, `CONFIGURAÇÕES DO APP`, `SANCORD`), busca profunda com rolagem/destaque, Acessibilidade (movimento, GIFs, cosméticos, saturação, alto contraste, cores de cargo, TTS, foco), Chat & Mensagens, gerenciador de atalhos com detecção de conflito, Configurações do Windows via IPC nativo, Avançado/Modo Desenvolvedor, Diagnóstico sanitizado e Sobre com licenças reais. Pendentes: TOTP/Passkey, OAuth de plataformas externas além do GitHub e detecção nativa de jogos. |
 | Visual | **70%** | Estrutura, temas e densidade muito próximos. Detalhes de proporção, cores fixas restantes e estilo de algumas páginas. |
 | UX / microinterações | **60%** | Barra ao passar o mouse, agrupamento, menus e tooltips bons. Faltam feedbacks finos (indicador de servidor animado, prévias de reply, transições de painel, voltar/avançar). |
 | **Paridade geral** | **~57%** | Média ponderada (core e chat pesam 2×, voz e vídeo 1,5×, o resto 1×), arredondada para baixo por causa do que não pôde ser testado fisicamente. |
@@ -193,8 +193,8 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 |---|---|---|---|---|---|---|---|
 | Criar DM e enviar | Sim | Sim (testado) | ✅ | — | — | — | — |
 | Editar, excluir, responder, reagir, anexar, fixar | Sim | Sim | ✅ | — | — | — | — |
-| Emoji | Unicode e do servidor | Só Unicode | 🟡 | Emojis próprios (§34) | P2 | M | §34 |
-| GIF | Seletor integrado | Só enviar arquivo GIF | 🟡 | Seletor (§15) | P2 | M | Provedor |
+| Emoji | Unicode e do servidor | Unicode e do servidor (Etapa C5, fontes) | ✅ | Publicar | — | — | §34 |
+| GIF | Seletor integrado | Seletor local (Etapa C7): favoritos na conta e GIFs das conversas; sem busca na internet | 🟡 | Busca externa (decisão: sem provedor por enquanto) | P3 | M | Provedor e chave |
 | Stickers | Sim | Não | ❌ | Ver §35 | P3 | M | — |
 | Busca na DM | Sim | Sim (busca com escopo de privado) | ✅ | — | — | — | — |
 | Chamada de voz, vídeo e tela | Sim | Sim (malha P2P); validação física parcial | 🟡 | Validação entre redes e TURN | P1 | M | TURN |
@@ -222,9 +222,9 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Pastas de servidores | Sim | Sim (nome, cor, contador) | ✅ | — | — | — | — |
 | Arrastar para reorganizar | Sim | Sim | ✅ | — | — | — | — |
 | Indicadores de não lido e menção | Sim | Sim | ✅ | — | — | — | — |
-| Silenciar e marcar como lido | Sim, com duração | Sim, sem duração | 🟡 | Duração (15 min, 1 h, 8 h, 24 h, até reativar) | P2 | B | — |
+| Silenciar e marcar como lido | Sim, com duração | Sim, com duração (Etapa C3, fontes) | ✅ | Publicar | — | — | — |
 | Menu de contexto do servidor | Amplo | Marcar lido, convidar, silenciar, notificações, configurações, sair | ✅ | — | — | — | — |
-| Perfil por servidor (apelido, avatar) | Sim | Não | ❌ | Apelido por servidor primeiro | P2 | M | — |
+| Perfil por servidor (apelido, avatar) | Sim | Apelido, avatar, banner e bio com herança global (Perfil P5, fontes) | ✅ | Cosméticos e status configuráveis por servidor | P3 | M | — |
 | Tag do servidor e Boost | Sim | — | 🚫 | — | — | — | — |
 
 ### 12. Convites
@@ -253,7 +253,7 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Texto | Sim | Sim | ✅ | Sim | — | — | — |
 | Voz | Sim, com chat de texto próprio | Voz sim; **sem texto dentro do canal de voz** | 🟡 | Sim | P1 | M | — |
 | Anúncios | Sim, com "seguir" para outro servidor | Sim, sem seguir | 🟡 | O "seguir" não | P3 | M | — |
-| Fórum | Sim (tags, ordenar, galeria, diretrizes) | Sim, com tags e filtro; sem ordenar, sem galeria, sem diretrizes | 🟡 | Ordenar (atividade ou criação) e diretrizes | P2 | B | — |
+| Fórum | Sim (tags, ordenar, galeria, diretrizes) | Sim, com tags, filtro e ordenar (Etapa C6); sem galeria, sem diretrizes | 🟡 | Diretrizes e galeria | P3 | B | — |
 | Mídia | Beta, ligado a assinaturas | Não | 🚫 | Pode ser um "fórum em galeria" no futuro | P3 | M | Galeria |
 | Palco (Stage) | Comunidades grandes | Não | 🚫 | Não para a escala atual | P3 | A | SFU |
 | Texto no canal de voz | Sim | Não | ❌ | Sim | P1 | M | — |
@@ -267,9 +267,9 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Histórico de edição | Não público (só "editado") | Igual | ✅ | — | — | — | — |
 | Exclusão (própria e moderação), com confirmação | Sim | Sim | ✅ | Exclusão em massa (§27) | — | — | — |
 | Reply com link para a original | Sim | Sim | ✅ | — | — | — | — |
-| Reply com ou sem menção (@ON/OFF) | Sim | **Sempre menciona** | ❌ | Opção na barra de resposta | P2 | B | — |
-| Encaminhar | Snapshot imutável, até 5 destinos, com anexos, marcado como encaminhado | Copia o texto com "↪ Encaminhado de…", 1 destino, sem anexos | 🟡 | Snapshot real com anexos e vários destinos | P2 | M | — |
-| Reações múltiplas, contagem e quem reagiu | Sim | Sim | ✅ | Emojis próprios | — | — | §34 |
+| Reply com ou sem menção (@ON/OFF) | Sim | Botão "@" na barra de resposta (Etapa C2, fontes) | ✅ | Publicar | — | — | — |
+| Encaminhar | Snapshot imutável, até 5 destinos, com anexos, marcado como encaminhado | Cópia congelada com anexos e prévias, até 5 destinos, comentário opcional (Etapa C2, fontes) | ✅ | Publicar | — | — | — |
+| Reações múltiplas, contagem e quem reagiu | Sim | Sim, inclusive com emojis do servidor (Etapa C5, fontes) | ✅ | — | — | — | §34 |
 | Super reações | Pago | — | 🚫 | — | — | — | — |
 | Fixar e painel de fixadas | Sim | Sim | ✅ | — | — | — | — |
 | Copiar texto, link e ID | ID só no modo desenvolvedor | Sim; ID sempre visível | 🟡 | Esconder ID atrás de "Modo desenvolvedor" | P3 | B | — |
@@ -277,10 +277,10 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Menu de contexto da mensagem | Amplo | 4 reações rápidas e 11 ações (testado) | ✅ | "Criar thread" e "Falar mensagem" (P3) | — | — | — |
 | Markdown, spoiler, código, citação, listas, links | Sim, com títulos e subtexto | Sim (exceto títulos `#` e subtexto `-#`) | 🟡 | Títulos e subtexto | P3 | B | — |
 | Menções @user, @cargo, @todos, @online e #canal | Sim | Sim, com autocompletar e destaque | ✅ | Clicar em @cargo lista os membros (2026) | P3 | B | — |
-| Preview de links (embeds) | Título, descrição e imagem, seguro | **Não existe** (só imagens anexadas) | ❌ | Unfurl no servidor, com tamanho limitado e cache | **P1** | M | Proxy de imagens |
+| Preview de links (embeds) | Título, descrição e imagem, seguro | Gerado no servidor com proteção SSRF e proxy de imagem (Etapa C1, fontes) | ✅ | Publicar | — | — | — |
 | Emoji Unicode, seletor, busca e recentes | Sim | Sim | ✅ | — | — | — | — |
-| Emoji próprio do servidor | Sim | Não | ❌ | §34 | P2 | M | — |
-| GIF (seletor) | Sim (Tenor) | Não, só upload | ❌ | Escolher provedor e privacidade | P2 | M | Chave de API |
+| Emoji próprio do servidor | Sim | Sim (Etapa C5, fontes) | ✅ | Publicar | — | — | — |
+| GIF (seletor) | Sim (Tenor) | Sim, local (Etapa C7, fontes): ☆ para favoritar GIFs do chat, abas Favoritos/Nas conversas, envio com um clique; nenhum dado sai para terceiros | 🟡 | Busca na internet ficou de fora por decisão (privacidade e chave de API) | P3 | M | Chave de API |
 | Stickers | Sim | Não | ❌ | §35 | P3 | M | — |
 | Uploads (+, arrastar, Ctrl+V, progresso) | Sim | Sim | ✅ | — | — | — | — |
 | Imagem com visualizador, vídeo e áudio com player, arquivo com tamanho | Sim | Sim | ✅ | — | — | — | — |
@@ -311,8 +311,8 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Criar a partir de mensagem ou do canal | Sim | Sim | ✅ | — | — | — | — |
 | Arquivar, desarquivar, trancar, renomear, excluir | Sim | Sim | ✅ | — | — | — | — |
 | Contador de respostas | Sim | Sim | ✅ | — | — | — | — |
-| Participantes, "seguir" e membros da thread | Sim | Não há lista de participantes | 🟡 | Membros e seguir/deixar | P2 | M | — |
-| Arquivamento automático por inatividade | Sim (1 h a 1 semana) | Não | ❌ | — | P3 | B | — |
+| Participantes, "seguir" e membros da thread | Sim | Sim (Etapa C6, fontes): quem cria ou escreve segue; Seguir/Deixar de seguir; lista lateral mostra quem segue | ✅ | Notificar seguidores por padrão | P3 | — | — |
+| Arquivamento automático por inatividade | Sim (1 h a 1 semana) | Sim (Etapa C6, fontes): 1 h, 24 h (padrão), 3 dias ou 1 semana | ✅ | Publicar | — | — | — |
 | Notificações por thread | Sim | Sim (nível por thread) | ✅ | — | — | — | — |
 | Permissões | Criar threads públicas e privadas, enviar em threads | Herda do canal-pai (enviar mensagens) | 🟡 | Permissões próprias e threads privadas | P2 | M | — |
 
@@ -323,7 +323,7 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Postagens com título, conteúdo e respostas | Sim | Sim | ✅ | — | — | — | — |
 | Tags (moderadas), até 5 por post | Sim | Sim (fontes, não publicado) | ✅ | Publicar | — | — | — |
 | Busca e filtro por tag | Sim | Sim | ✅ | — | — | — | — |
-| Ordenar (atividade ou criação) | Sim | Só por atividade | 🟡 | Seletor | P2 | B | — |
+| Ordenar (atividade ou criação) | Sim | Sim (Etapa C6, fontes), lembrado por fórum neste aparelho | ✅ | Ordem padrão definida pela moderação | P3 | — | — |
 | Fechar e reabrir (trancar) | Sim | Sim | ✅ | — | — | — | — |
 | Galeria e diretrizes do fórum | Sim | Não | ❌ | — | P3 | M | — |
 
@@ -411,7 +411,7 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Gerenciar mensagens, canais, cargos e servidor; convites; kick, ban; auditoria | Sim | Sim | ✅ | — |
 | Castigo (`moderate_members`) | Sim | Sim (fontes) | ✅ | Publicar |
 | Conectar, falar, transmitir, mutar, ensurdecer e mover membros | Sim | Sim | ✅ | — |
-| Criar threads (pública e privada), enviar em threads, criar enquetes, emojis externos, soundboard, apelidos, eventos, webhooks | Granulares | Não existem separadas | 🟡 | P2: criar threads, gerenciar eventos, gerenciar apelidos |
+| Criar threads (pública e privada), enviar em threads, criar enquetes, emojis externos, soundboard, apelidos, eventos, webhooks | Granulares | Apelidos (`change_nickname`, `manage_nicknames`, C4) e expressões (`manage_expressions`, C5) separados; o resto não | 🟡 | P2: criar threads, gerenciar eventos |
 | Thread trancada | Só moderação escreve | Sim | ✅ | — |
 
 ### 27. Moderação
@@ -442,12 +442,16 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 
 | Recurso | Discord | Sancord | St | Falta |
 |---|---|---|---|---|
-| Avatar (com GIF), banner, nome, username, bio, pronomes | Sim (GIF é pago) | Sim, com recorte | ✅ | — |
+| Avatar (com GIF), banner, nome, username, bio, pronomes | Sim (GIF é pago) | Sim (Perfil P1, fontes): avatar e banner como arquivo validado com cache imutável, recorte de banner em faixa, bio de 300 com markdown seguro | ✅ | — |
 | Status e status personalizado | Sim | Sim, com prazo | ✅ | — |
 | Cargos, data de entrada, servidores e amigos em comum | Sim | Sim | ✅ | — |
-| Tema de perfil, decorações, efeitos, estilo de nome | Pagos | **De graça** no Sancord | ✅ | Escolha consciente (diferencial) |
-| Perfil por servidor | Sim | Não | ❌ | P2 |
-| Selos (badges) | Sim | Só selo de cargo e sistema | 🟡 | P3 |
+| Tema e decorações de perfil | Sim | Tema sólido/gradiente com quatro direções e destaque (P1). Decorações de avatar e molduras de cartão independentes, com validação de posse (P2) | ✅ | Verificação em janela nativa das animações e da reação à fala |
+| Efeitos de perfil | Sim | Fase P3 nos fontes. Efeitos clássicos e sete novos com entrada única, replay e pausa da moldura. Equipamento validado pelo servidor | ✅ | Conferência visual das animações na janela nativa |
+| Nameplates e estilos de nome | Sim | Fase P4 nos fontes. Opções clássicas, nove placas e oito estilos novos, gradiente de nome configurável, prévia e opção local de nomes simples | ✅ | Conferência visual de temas e movimento na janela nativa |
+| Perfil por servidor | Sim | Apelido, avatar, banner e bio por servidor com herança por campo (Perfil P5) | ✅ | Cosméticos e status configuráveis por servidor |
+| Selos (badges) | Sim | Sim (Perfil P2, fontes): badges de confiança e cosméticas concedidas só pelo servidor (arquivo do operador + automáticas), com ícones próprios | ✅ | Painel de administração para conceder |
+| Coleções e presets | Sim | Minha Coleção, favoritos, presets e combinações aleatórias com prévia e validação de posse (Perfil P7) | ✅ | Conferência visual na janela desktop |
+| Mural, conexões e privacidade do perfil | — | Mural P6 persistido com widgets, links e audiência própria | 🟡 | Conexões verificadas e privacidade dos demais campos |
 
 ### 30. Status e presença
 
@@ -468,9 +472,9 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Contador no título e na barra de tarefas | Sim | Sim (código e teste de formato) | 🟡 | Validar | P1 |
 | Sons | Sim | Sim (volume e teste) | ✅ | — | — |
 | Silenciar servidor, canal e thread | Sim | Sim | ✅ | — | — |
-| Silenciar categoria | Sim | Não | ❌ | — | P2 |
-| Duração do silêncio | Sim | Não | ❌ | — | P2 |
-| Caixa de entrada (Inbox de menções) | Sim | Não | ❌ | — | P2 |
+| Silenciar categoria | Sim | Sim (Etapa C3, fontes): vale para os canais e threads dela | ✅ | Publicar | — |
+| Duração do silêncio | Sim | 15 min, 1 h, 3 h, 8 h, 24 h ou até reativar, em servidor, categoria, canal, thread, DM e grupo; volta sozinho no prazo (C3, fontes) | ✅ | Publicar; o contador de DM silenciada ainda aparece | P3 |
+| Caixa de entrada (Inbox de menções) | Sim | Só menções (diretas, @everyone e cargos seus), recorte "todos"/"este servidor", não lidas marcadas, clique leva à mensagem (C3, fontes) | 🟡 | Sem abas "Não lidas"/"Para você" do Discord | P3 |
 
 ### 32. Configurações do usuário (páginas reais vistas na tela)
 
@@ -498,7 +502,7 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 |---|---|---|---|
 | Visão geral, cargos, membros e moderação, canais, convites | Sim | Sim | ✅ |
 | Banimentos | Aba com motivo | Lista com desbanir, sem motivo | 🟡 |
-| Emojis e stickers | Sim | Não | ❌ (P2/P3) |
+| Emojis e stickers | Sim | Emojis sim (Etapa C5); stickers não | 🟡 (stickers P3) |
 | AutoMod, auditoria e integrações | Sim | Sim | ✅ |
 | Eventos | Sim | Sim (modal de eventos) | ✅ |
 | Segurança (verificação, 2FA de moderação) | Sim | Não | ❌ (P3) |
@@ -512,7 +516,7 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 |---|---|---|---|---|---|---|
 | Unicode, seletor, busca, recentes | Sim | Sim | ✅ | Favoritos | P3 | B |
 | Autocompletar `:emoji:` | Sim | Sim | ✅ | — | — | — |
-| Emojis próprios (envio, gerenciamento, uso em reações e mensagens) | Sim | **Não existe** | ❌ | Upload, armazenamento, permissão, sintaxe e cache | P2 | M |
+| Emojis próprios (envio, gerenciamento, uso em reações e mensagens) | Sim | Sim (Etapa C5, fontes): aba Emojis nas configurações, até 50 por servidor, PNG/JPG/GIF/WebP até 256 KB, permissão `manage_expressions`, código `<:nome:id>`, seletor, autocompletar, reações e uso em outros servidores para quem é membro | ✅ | Publicar | — | — |
 
 ### 35. Stickers
 ❌ ausente. **P3**, depois dos emojis próprios, reaproveitando o mesmo armazenamento. Pouco valor para a escala atual.
@@ -575,13 +579,13 @@ Discord: sons curtos tocados para todos na voz, com permissão própria. Sancord
 
 | Onde | Sancord tem | Falta em relação ao Discord |
 |---|---|---|
-| Servidor | Marcar lido, convidar, silenciar, notificações, configurações, sair | Duração do silêncio, criar canal ou categoria, copiar ID |
-| Canal | Marcar lido, copiar link, notificações, editar, excluir, permissões | Duração do silêncio, convidar |
-| Categoria | Editar, excluir, recolher | Silenciar categoria, marcar como lida |
+| Servidor | Marcar lido, convidar, silenciar com duração (C3), notificações, configurações, criar canal/categoria, copiar ID, sair | — |
+| Canal | Marcar lido, copiar link, silenciar com duração (C3), notificações, editar, excluir, permissões | Convidar |
+| Categoria | Editar, excluir, recolher, marcar como lida e silenciar com duração (C3) | — |
 | Mensagem | Completo (§15) | "Criar thread" no menu da mensagem (existe por outro caminho) |
-| Usuário (lista de membros) | Ver perfil e castigo (novo) | Mensagem, chamar, amigo, cargos, kick, ban, volume |
+| Usuário (lista de membros) | Perfil, mensagem, ligar, mencionar, amizade, apelido, cargos, copiar nome/ID, bloquear, castigo, expulsar, banir, transferir posse (Etapa C4) | Volume (existe só no menu da voz) |
 | Usuário na voz | Perfil, volume, silenciar para mim, moderação de voz, castigo | — |
-| DM e grupo | Parcial (fechar, notificações) | Marcar como lida, silenciar com duração |
+| DM e grupo | DM: abrir, marcar como lida, silenciar com duração, notificações (C3). Grupo: abrir, adicionar, editar, silenciar com duração, sair | Fechar DM da lista |
 
 ### 43. Arrastar e soltar
 
@@ -642,7 +646,7 @@ Comparação com o Discord atual, a partir da documentação e das notas da refo
 | Perfil rápido animado | Sim | ✅ |
 | Prévia da mensagem respondida ao passar o mouse | Sim | ❌ |
 | Mensagem recém-enviada aparece suavemente | Sim | ✅ |
-| Avatar animado só ao passar o mouse | Sim | ❌ (GIF sempre anima) |
+| Avatar animado só ao passar o mouse | Sim | ✅ (Perfil P1, fontes): "Animações de perfil" Sempre / Só ao passar o mouse / Nunca, e "Reduzir animações" (app ou Windows) desliga |
 | Cópia confirmada ("Copiado!") | Sim | ✅ (toast) |
 | Transição ao trocar de canal mantendo a rolagem | Sim | Parcial |
 
@@ -701,15 +705,15 @@ Ordenado por impacto na qualidade do produto:
 9. **Texto dentro do canal de voz.**
 10. **Validar notificações nativas e contador** no `.exe`.
 11. **SFU** para chamadas com mais de 5–6 pessoas.
-12. **Emojis próprios do servidor.**
+12. ~~**Emojis próprios do servidor.**~~ Feito na Etapa C5 (fontes).
 13. **Reply com ou sem menção e encaminhamento real** (snapshot, anexos, vários destinos).
-14. **Silenciar com duração e silenciar categoria.**
+14. ~~**Silenciar com duração e silenciar categoria.**~~ Feito na Etapa C3 (fontes), com caixa de menções.
 15. **Editor de atalhos e página de Acessibilidade** (contraste, saturação).
 16. **Sincronizar pela conta:** notas, "ignorar" e favoritas.
 17. **Fila de revisão de denúncias** para moderadores.
-18. **Menu de usuário completo** na lista de membros (mensagem, chamar, cargos, kick, ban).
+18. ~~**Menu de usuário completo** na lista de membros~~ Feito na Etapa C4 (fontes), com apelido por servidor.
 19. **Virtualização da lista de mensagens.**
-20. **Seletor de GIF**, escolhendo o provedor com atenção à privacidade.
+20. ~~**Seletor de GIF**~~ Feito na Etapa C7 (fontes), só local; busca externa adiada por decisão do usuário.
 
 ## 9. Quick wins (§53)
 
@@ -722,10 +726,10 @@ Pouco trabalho, muito efeito, risco baixo:
 - **Textos de segurança corretos.** "Status da conta" mostrando castigos ou bans reais.
 - **Versão sempre visível** em Atualizações e na tela de login.
 - **Shift+Esc** para marcar o servidor como lido.
-- **Ordenar o fórum** (atividade ou criação).
+- ~~**Ordenar o fórum**~~ (feito na Etapa C6, fontes).
 - **Botão "@" na barra de resposta** para mencionar ou não.
-- **Duração ao silenciar** servidor ou canal (preferência no cliente já sincronizada; só o prazo).
-- **Menu de usuário na lista de membros:** acrescentar mensagem, chamar, adicionar amigo, kick e ban (as ações já existem).
+- ~~**Duração ao silenciar** servidor ou canal~~ (feito na Etapa C3, fontes).
+- ~~**Menu de usuário na lista de membros**~~ (feito na Etapa C4, fontes).
 - **Motivo opcional no ban e no kick,** gravado na auditoria.
 - **Esconder "Copiar ID" atrás de um "Modo desenvolvedor".**
 - **Avatar GIF animando só ao passar o mouse.**
@@ -854,4 +858,16 @@ Pouco trabalho, muito efeito, risco baixo:
 - 18/11/2026 — primeira auditoria completa (Claude).
 - 18/11/2026 — Etapa A, item 1, feito nos fontes (versão 0.2.1, não publicada): opções mortas ligadas ou removidas, textos de segurança corrigidos, Status da conta real e Central da Família renomeada para Foco e segurança.
 - 18/11/2026 — Etapa A, item 2, concluído e publicado (**v0.2.1**, commit `8123c3cb`, run `44379590944`): refatoração visual desktop (`ui.css` + `icons.js`), ajustes de contraste e responsividade, release assinada publicada no GitHub e produção atualizada para 0.2.1 (banco migrado de v10 para v13).
-- 18/11/2026 — Etapa A (itens 3 e 5) e Etapa B completa (itens 1 a 5) implementadas e validadas (**v0.2.2**, schema `v14`): autostart do host no Windows (`scripts/install-autostart.ps1` + `scripts/start-host.ps1`), sincronização de notas/favoritas/ignorados na conta (`UserPrefs`), e-mail opcional e recuperação de senha por código único (`POST /api/recover-password`), gerenciamento de sessões e dispositivos ativos (`ListSessions`/`RevokeSession`), transferência de posse de servidor (`TransferServerOwnership`), expulsão/banimento com motivo persistido (`bans.reason`), limpeza de histórico no banimento, exclusão de mensagens em lote (`BulkDeleteMessages`) e exclusão da própria conta (`DeleteAccount`).
+- 18/11/2026 — Etapa A (itens 3 autostart e 5) e Etapa B completa (itens 1 a 5) implementadas, publicadas e colocadas em produção (**v0.2.2**, commit `fd10d6ee`, tag `v0.2.2`, run `44393805417`, schema `v14`): autostart do host no Windows (`scripts/install-autostart.ps1` + `scripts/start-host.ps1`), sincronização de notas/favoritas/ignorados na conta (`UserPrefs`), e-mail opcional e recuperação de senha por código único offline (`POST /api/recover-password`, sem SMTP externo), gerenciamento de sessões e dispositivos ativos (`ListSessions`/`RevokeSession`), transferência de posse de servidor (`TransferServerOwnership`), expulsão/banimento com motivo persistido (`bans.reason`), limpeza de histórico no banimento, exclusão de mensagens em lote (`BulkDeleteMessages`) e exclusão da própria conta (`DeleteAccount`). Pendentes de infraestrutura externa/validação manual na Etapa A: túnel nomeado fixo (requer domínio Cloudflare) e conferência nativa no `.exe` para notificações/updater (A.4). Próxima fase do roteiro: **Etapa C — UX de chat e social** (e/ou **Etapa D.1 — TURN provisionado**).
+
+- 18/11/2026 — Etapa C1 (prévia de links) nos fontes; corrigido bug de mensagens sobrepostas da 0.2.2 (Claude).
+- 18/11/2026 — Etapa C2 (resposta com/sem menção e encaminhamento real) nos fontes (Claude).
+- 18/11/2026 — Etapa C3 (silenciar por tempo em todos os níveis, silenciar categoria, caixa de menções) nos fontes (Claude).
+- 18/11/2026 — Etapa C4 (menu completo do usuário e apelido por servidor; esquema v15) nos fontes (Claude).
+- 18/11/2026 — Etapa C5 (emojis próprios do servidor; esquema v16) nos fontes (Claude).
+- 19/11/2026 — Etapa C6 (ordenar fórum, membros e seguir thread, arquivamento automático) nos fontes (Claude).
+- 19/11/2026 — Etapa C7 (seletor de GIF local com favoritos; sem serviço externo, por decisão) nos fontes (Claude). Etapa C concluída nos fontes.
+- 19/11/2026 — Perfil P1 (mídia por anexo, catálogo de cosméticos validado, tema completo, bio markdown, política de animação, prévia em contextos) nos fontes (Claude).
+- 19/11/2026 — Perfil P2 (11 decorações novas, 29 molduras incluindo reativas, por conquista e de temporada, badges do servidor, seletor de cosméticos) nos fontes (Claude).
+- 19/11/2026 — Perfil P3 (efeitos de entrada, replay, interrupção em segundo plano e coordenação com a moldura) nos fontes.
+- 19/11/2026 — Expansão completa da Central de Configurações (22 páginas em 4 grupos, busca profunda, IPC Windows Desktop) e reforma completa do sistema de convites de servidores nos fontes (esquema **v19**, modal de 2 páginas `static/js/invites.js`, prévia rica com regras, DM InviteCard ao vivo, tombstone de revogação, link personalizado `SetCustomInviteSlug`, pausa/retomada `SetInvitesPaused`, associação temporária com limpeza na desconexão, permissão `manage_invites` e sobrescrita por canal, rate limits, **368 testes automatizados** e conferência visual/funcional concluída no executável real `SancordApp.exe` WebView2 em `1366×768` e `1920×1080`).

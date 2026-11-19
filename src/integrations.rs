@@ -325,6 +325,8 @@ pub async fn publish(
         } else {
             AuthorKind::Webhook
         },
+        embeds: Vec::new(),
+        forward: None,
     };
     st.insert_message(message.clone());
     st.broadcast_to_server(
@@ -333,6 +335,7 @@ pub async fn publish(
             message: message.clone(),
         },
     );
+    crate::link_preview::spawn_for_message(state.clone(), &message);
     (
         StatusCode::CREATED,
         Json(json!({"ok":true,"message":message})),

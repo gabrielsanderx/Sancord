@@ -50,13 +50,16 @@ function notificationPolicy(message) {
   if (isDm && state.audioSettings?.familyFocus && !isFriendName(message.author_name)) return { ...silent, mention: true };
   const mention = isDm || messageMentionsMe(message);
   const level = notifyLevelFor(chId);
+  const direct = (message.mentions?.users || []).includes((state.selfUser?.username || "").toLowerCase());
   if (level === "none") return { ...silent, mention };
+  // Silêncio (por tempo ou até reativar): só menção direta passa. O do próprio canal/thread/conversa
+  // vence qualquer nível; o herdado (categoria/servidor) cede a um nível explícito, como antes.
+  const mutedResult = { sound: direct, notify: direct, mention };
+  if (isMutedId(chId)) return mutedResult;
   if (level === "mentions") return { sound: mention, notify: mention, mention };
   if (level === "all") return { sound: true, notify: true, mention };
-  const srv = isDm ? null : serverForChannel(chId);
-  const muted = srv && isServerMuted(srv.id);
-  const direct = (message.mentions?.users || []).includes((state.selfUser?.username || "").toLowerCase());
-  return { sound: !muted || direct, notify: mention && (!muted || direct), mention };
+  if (isChannelMuted(chId)) return mutedResult;
+  return { sound: true, notify: mention, mention };
 }
 
 function setNotifyLevel(id, level) {
@@ -82,6 +85,246 @@ function notifyMenuItems(id) {
     })),
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Silenciar por tempo (Etapa C3): servidor, categoria, canal, thread e conversa.
+// prefs.mutes: id -> fim em ms (0 = até reativar). O servidor descarta vencidos.
+// ---------------------------------------------------------------------------
+const MUTE_CHOICES = [
+  [15, "Por 15 minutos"],
+  [60, "Por 1 hora"],
+  [180, "Por 3 horas"],
+  [480, "Por 8 horas"],
+  [1440, "Por 24 horas"],
+  [0, "Até eu reativar"],
+];
+
+/** Fim do silêncio de um id: 0 (sem prazo), ms no futuro, ou null se não está silenciado. */
+function muteUntil(id, now = Date.now()) {
+  if (!id) return null;
+  const v = state.prefs?.mutes?.[id];
+  if (v === 0) return 0;
+  if (typeof v === "number" && v > now) return v;
+  return null;
+}
+
+function isMutedId(id, now) {
+  return muteUntil(id, now) !== null;
+}
+
+/** Canal de texto/fórum do servidor (ou o pai de uma thread). */
+function mutedChannelChain(channelId) {
+  const chain = [channelId];
+  const thread = state.threadIndex?.get(channelId);
+  if (thread?.parent_id) chain.push(thread.parent_id);
+  if (!isPrivateTextId(channelId)) {
+    const srv = typeof serverForChannel === "function" ? serverForChannel(channelId) : null;
+    const parentId = thread?.parent_id || channelId;
+    const ch = srv?.text_channels?.find((c) => c.id === parentId) || srv?.voice_channels?.find((c) => c.id === parentId);
+    if (ch?.category_id) chain.push(ch.category_id);
+  }
+  return chain;
+}
+
+/** Silenciado pelo próprio id, pela thread-pai, pela categoria ou pelo servidor. */
+function isChannelMuted(channelId, now) {
+  if (!channelId) return false;
+  if (mutedChannelChain(channelId).some((id) => isMutedId(id, now))) return true;
+  if (isPrivateTextId(channelId)) return false;
+  const srv = typeof serverForChannel === "function" ? serverForChannel(channelId) : null;
+  return Boolean(srv && isServerMuted(srv.id));
+}
+
+function muteUntilLabel(until) {
+  if (until === 0) return "até reativar";
+  const d = new Date(until);
+  const hm = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return `até ${hm}`;
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  if (d.toDateString() === tomorrow.toDateString()) return `até amanhã, ${hm}`;
+  return `até ${d.toLocaleDateString("pt-BR")} ${hm}`;
+}
+
+let muteExpiryTimer = null;
+/** Redesenha quando o silêncio mais próximo vence (o som volta sozinho). */
+function scheduleMuteExpiry() {
+  clearTimeout(muteExpiryTimer);
+  const now = Date.now();
+  const next = Object.values(state.prefs?.mutes || {}).filter((v) => v > now).sort((a, b) => a - b)[0];
+  if (!next) return;
+  muteExpiryTimer = setTimeout(() => {
+    refreshMuteViews();
+    scheduleMuteExpiry();
+  }, Math.min(next - now + 500, 2 ** 31 - 1));
+}
+
+function refreshMuteViews() {
+  if (typeof renderChannelTree === "function") renderChannelTree();
+  if (typeof renderGuildRailV2 === "function") renderGuildRailV2();
+  if (typeof renderDmList === "function") renderDmList();
+}
+
+/** minutes: número (0 = sem prazo) para silenciar; null para reativar. */
+function setMute(id, minutes, name) {
+  const mutes = { ...(state.prefs?.mutes || {}) };
+  const partial = {};
+  if (minutes === null) {
+    delete mutes[id];
+    // Silêncio antigo de servidor (lista muted_servers) também sai.
+    const legacy = state.prefs?.muted_servers || [];
+    if (legacy.includes(id)) partial.muted_servers = legacy.filter((x) => x !== id);
+  } else {
+    mutes[id] = minutes === 0 ? 0 : Date.now() + minutes * 60000;
+  }
+  partial.mutes = mutes;
+  state.prefs = { ...(state.prefs || {}), ...partial };
+  sendWs("UpdateUserPrefs", partial);
+  const what = name || "Conversa";
+  showUiToast(minutes === null ? `${what}: som reativado.` : `${what}: silenciado ${muteUntilLabel(mutes[id])}.`);
+  scheduleMuteExpiry();
+  refreshMuteViews();
+}
+
+/**
+ * Item "Silenciar …" (abre as durações no mesmo lugar) ou "Reativar …".
+ * kind: "servidor" | "categoria" | "canal" | "thread" | "conversa".
+ */
+function muteMenuItems(id, kind, name, pos) {
+  const legacyServer = kind === "servidor" && (state.prefs?.muted_servers || []).includes(id);
+  const until = muteUntil(id);
+  if (until !== null || legacyServer) {
+    return [{
+      label: `Reativar ${kind}`,
+      icon: "🔔",
+      hint: until === null ? "" : muteUntilLabel(until),
+      onSelect: () => setMute(id, null, name),
+    }];
+  }
+  return [{
+    label: `Silenciar ${kind}`,
+    icon: "🔕",
+    hint: "▸",
+    onSelect: () => {
+      SancordUI.contextMenu(pos?.x || 0, pos?.y || 0, [
+        { header: `Silenciar ${kind}` },
+        ...MUTE_CHOICES.map(([minutes, label]) => ({ label, onSelect: () => setMute(id, minutes, name) })),
+      ], pos?.anchor ? { anchor: pos.anchor } : undefined);
+    },
+  }];
+}
+
+// ---------------------------------------------------------------------------
+// Caixa de menções (Etapa C3): reaproveita a busca no histórico (SearchMessages
+// com mentions_me), que já respeita permissões e inclui @everyone e cargos.
+// ---------------------------------------------------------------------------
+const inboxState = { seq: 0, lastRequest: null };
+
+function inboxPanel() {
+  return document.getElementById("mentions-inbox-panel");
+}
+
+const INBOX_BUTTONS = ["mentions-inbox-btn", "friends-inbox-btn"];
+
+/** Abre embaixo do botão usado (cabeçalho do chat ou da tela de Amigos). */
+function openMentionsInbox(anchor = document.getElementById("mentions-inbox-btn")) {
+  const panel = inboxPanel();
+  if (!panel) return;
+  if (!panel.classList.contains("hidden")) {
+    closeMentionsInbox();
+    return;
+  }
+  // Fica no <body>, com posição fixa, para funcionar em qualquer tela.
+  if (panel.parentElement !== document.body) document.body.appendChild(panel);
+  const r = anchor?.getBoundingClientRect?.();
+  if (r && r.width) {
+    panel.style.top = `${Math.round(r.bottom + 6)}px`;
+    panel.style.right = `${Math.max(8, Math.round(window.innerWidth - r.right))}px`;
+  }
+  const list = document.getElementById("mentions-inbox-list");
+  if (list) list.innerHTML = `<div class="pinned-empty">Carregando…</div>`;
+  panel.classList.remove("hidden");
+  anchor?.setAttribute?.("aria-expanded", "true");
+  inboxState.lastRequest = `inbox${++inboxState.seq}`;
+  const scope = document.getElementById("mentions-inbox-scope")?.value || "all";
+  const payload = { request_id: inboxState.lastRequest, query: "", mentions_me: true };
+  if (scope === "server" && state.activeView !== "home" && getActiveServer()) payload.server_id = getActiveServer().id;
+  sendWs("SearchMessages", payload);
+}
+
+function closeMentionsInbox() {
+  inboxPanel()?.classList.add("hidden");
+  for (const id of INBOX_BUTTONS) document.getElementById(id)?.setAttribute("aria-expanded", "false");
+}
+
+/** Resposta da busca da caixa; devolve false se não era dela. */
+function onInboxResults({ request_id, hits, has_more }) {
+  if (!request_id || !String(request_id).startsWith("inbox")) return false;
+  if (request_id !== inboxState.lastRequest) return true;
+  const list = document.getElementById("mentions-inbox-list");
+  if (!list) return true;
+  list.innerHTML = "";
+  if (!hits?.length) {
+    list.innerHTML = SancordUI.emptyHTML({ icon: "bell", title: "Nenhuma menção", description: "Quando alguém mencionar você, @everyone ou um cargo seu, aparece aqui." });
+    return true;
+  }
+  for (const hit of hits) {
+    const m = hit.message;
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "search-hit inbox-hit";
+    const unread = (m.created_at || 0) > (typeof getReadState === "function" ? getReadState(m.channel_id).last_read_at : 0);
+    if (unread) row.classList.add("is-unread");
+    const where = document.createElement("div");
+    where.className = "search-hit-where";
+    where.textContent = `${hit.server_name ? `${hit.server_name} • ` : ""}${hit.channel_name.startsWith("@") ? hit.channel_name : hit.server_id ? `#${hit.channel_name}` : hit.channel_name}`;
+    const head = document.createElement("div");
+    head.className = "search-hit-head";
+    const author = document.createElement("strong");
+    author.textContent = m.author_name;
+    const when = document.createElement("span");
+    when.textContent = formatDateTime(m.created_at);
+    head.append(author, when);
+    const body = document.createElement("div");
+    body.className = "search-hit-body";
+    const text = decodeCustomEmojis(m.content) || (m.attachments?.length ? `📎 ${m.attachments.map((a) => a.filename).join(", ")}` : m.forward ? "↪ Mensagem encaminhada" : "");
+    body.textContent = text.length > 220 ? `${text.slice(0, 220)}…` : text;
+    row.append(where, head, body);
+    row.addEventListener("click", () => {
+      closeMentionsInbox();
+      jumpToMessage(m.channel_id, m.id);
+    });
+    list.appendChild(row);
+  }
+  if (has_more) {
+    const more = document.createElement("div");
+    more.className = "pinned-empty";
+    more.textContent = "Mostrando as 25 menções mais recentes.";
+    list.appendChild(more);
+  }
+  return true;
+}
+
+let inboxAnchor = null;
+for (const id of INBOX_BUTTONS) {
+  document.getElementById(id)?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    inboxAnchor = e.currentTarget;
+    openMentionsInbox(inboxAnchor);
+  });
+}
+document.getElementById("mentions-inbox-scope")?.addEventListener("change", () => {
+  closeMentionsInbox();
+  openMentionsInbox(inboxAnchor || undefined);
+});
+document.getElementById("mentions-inbox-close")?.addEventListener("click", closeMentionsInbox);
+document.addEventListener("mousedown", (e) => {
+  const panel = inboxPanel();
+  if (panel && !panel.classList.contains("hidden") && !panel.contains(e.target) && !INBOX_BUTTONS.some((id) => e.target.closest?.(`#${id}`))) closeMentionsInbox();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !inboxPanel()?.classList.contains("hidden")) closeMentionsInbox();
+});
 
 /** Pisca a janela na barra de tarefas (o .exe ignora se a janela estiver em foco). */
 function requestWindowAttention() {

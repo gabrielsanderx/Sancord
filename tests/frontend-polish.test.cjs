@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../static/js/polish.js'), 'utf8');
 function load(state, extra = {}) {
   const context = vm.createContext({
-    state, String, Number, Math,
+    state, String, Number, Math, Date,
     isPrivateTextId: (id) => /^g?dm:/.test(id),
     isMessageRequest: () => false,
     isOwnMessage: (m) => m.author_name === 'Eu',
@@ -17,7 +17,7 @@ function load(state, extra = {}) {
     isServerMuted: (id) => (state.muted || []).includes(id),
     ...extra,
   });
-  for (const name of ['notifyLevelFor', 'notificationPolicy', 'normalizeText', 'matchScore', 'rankQuickItems']) {
+  for (const name of ['notifyLevelFor', 'muteUntil', 'isMutedId', 'mutedChannelChain', 'isChannelMuted', 'notificationPolicy', 'normalizeText', 'matchScore', 'rankQuickItems']) {
     const start = source.indexOf(`function ${name}(`);
     assert.notEqual(start, -1, `Função ausente: ${name}`);
     vm.runInContext(source.slice(start, source.indexOf('\n}', start) + 2), context);

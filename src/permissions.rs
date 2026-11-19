@@ -12,6 +12,7 @@ pub const CHANNEL_PERMISSIONS: &[&str] = &[
     "manage_messages",
     "pin_messages",
     "mention_everyone",
+    "create_invites",
     "connect_voice",
     "speak_voice",
     "stream_video",
@@ -50,6 +51,7 @@ impl RolePermissions {
             speak_voice: false,
             stream_video: false,
             create_invites: false,
+            manage_invites: false,
             view_channel: false,
             read_history: false,
             add_reactions: false,
@@ -59,6 +61,9 @@ impl RolePermissions {
             move_members: false,
             view_audit_log: false,
             moderate_members: false,
+            change_nickname: false,
+            manage_nicknames: false,
+            manage_expressions: false,
         }
     }
 
@@ -72,6 +77,7 @@ impl RolePermissions {
         self.connect_voice = false;
         self.speak_voice = false;
         self.stream_video = false;
+        self.change_nickname = false;
     }
 
     pub fn value(&self, name: &str) -> bool {
@@ -90,6 +96,7 @@ impl RolePermissions {
             "speak_voice" => self.speak_voice,
             "stream_video" => self.stream_video,
             "create_invites" => self.create_invites,
+            "manage_invites" => self.manage_invites,
             "view_channel" => self.view_channel,
             "read_history" => self.read_history,
             "add_reactions" => self.add_reactions,
@@ -99,6 +106,9 @@ impl RolePermissions {
             "move_members" => self.move_members,
             "view_audit_log" => self.view_audit_log,
             "moderate_members" => self.moderate_members,
+            "change_nickname" => self.change_nickname,
+            "manage_nicknames" => self.manage_nicknames,
+            "manage_expressions" => self.manage_expressions,
             _ => false,
         }
     }
@@ -113,6 +123,7 @@ impl RolePermissions {
             "manage_messages" => self.manage_messages = value,
             "pin_messages" => self.pin_messages = value,
             "mention_everyone" => self.mention_everyone = value,
+            "create_invites" => self.create_invites = value,
             "connect_voice" => self.connect_voice = value,
             "speak_voice" => self.speak_voice = value,
             "stream_video" => self.stream_video = value,
@@ -206,11 +217,15 @@ impl GuildServer {
             "kick_members",
             "ban_members",
             "create_invites",
+            "manage_invites",
             "mute_members",
             "deafen_members",
             "move_members",
             "view_audit_log",
             "moderate_members",
+            "change_nickname",
+            "manage_nicknames",
+            "manage_expressions",
         ];
         for key in admin
             .iter()

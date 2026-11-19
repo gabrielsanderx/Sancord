@@ -265,6 +265,8 @@ pub fn report_violation(st: &mut ServerState, server_id: &str, author_lower: &st
         mentions: MessageMentions::default(),
         poll: None,
         author_kind: crate::models::AuthorKind::System,
+        embeds: Vec::new(),
+        forward: None,
     };
     st.insert_message(msg.clone());
     st.broadcast_to_server(server_id, ServerMessage::NewChatMessage { message: msg });
@@ -365,6 +367,18 @@ pub async fn search(
             after,
             pinned,
             mentions_user: mentions_me.then(|| lower.clone()),
+            mention_roles: if mentions_me {
+                st.servers
+                    .iter()
+                    .filter_map(|s| s.member_roles.get(&lower))
+                    .flatten()
+                    .filter(|r| r.as_str() != "everyone")
+                    .take(200)
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            },
             limit: SEARCH_PAGE,
         };
         let no_filters = filter.terms.is_empty()

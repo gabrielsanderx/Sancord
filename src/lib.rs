@@ -15,6 +15,7 @@ pub mod db;
 pub mod discovery;
 pub mod http;
 pub mod integrations;
+pub mod link_preview;
 pub mod models;
 pub mod moderation;
 pub mod permissions;
@@ -22,6 +23,13 @@ pub mod slowmode;
 pub mod social;
 pub mod state;
 pub mod threads;
+pub mod cosmetics;
+mod cosmetic_collection;
+pub mod emojis;
+pub mod profile;
+mod profile_board;
+mod profile_sharing;
+pub mod nicknames;
 pub mod timeouts;
 pub mod uploads;
 pub mod updates;
@@ -43,11 +51,15 @@ use tower_http::cors::CorsLayer;
 async fn response_headers(req: Request<axum::body::Body>, next: Next) -> Response {
     let mut res = next.run(req).await;
     let headers = res.headers_mut();
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("no-store, no-cache, must-revalidate"),
-    );
-    headers.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+    // Respostas que já definem a própria política (anexos e imagens de perfil, imutáveis
+    // por ID) mantêm o cache; todo o resto da API continua sem cache.
+    if !headers.contains_key(header::CACHE_CONTROL) {
+        headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+        );
+        headers.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+    }
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -66,6 +78,7 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/health", get(http::health_handler))
         .route("/api/public-url", get(http::public_url_handler))
         .route("/api/invite/:code", get(http::invite_preview_handler))
+        .route("/api/invites/:code", get(http::invite_preview_handler))
         .route("/api/channels/:channel/integrations", get(integrations::list).post(integrations::create))
         .route("/api/integrations/:id/rotate", post(integrations::rotate))
         .route("/api/integrations/:id/revoke", post(integrations::revoke))
@@ -76,6 +89,7 @@ pub fn build_router(state: SharedState) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),
         )
         .route("/api/attachments/:id/:name", get(uploads::download_handler))
+        .route("/api/link-preview/:channel/:message/:index", get(link_preview::image_handler))
         .route("/ws", get(ws::ws_handler))
         .layer(middleware::from_fn(response_headers))
         .layer(CorsLayer::new()

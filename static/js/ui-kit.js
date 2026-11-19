@@ -17,6 +17,9 @@ const MEDIA_URL_MIN_LENGTH = 2048;
 let mediaUrlCacheBytes = 0;
 
 function cachedMediaUrl(url) {
+  // Perfil P1: avatar/banner novos são caminhos do servidor ("/api/attachments/…"),
+  // imutáveis por ID — o navegador guarda em cache e a troca muda o endereço.
+  if (typeof url === "string" && url.startsWith("/api/") && typeof SancordNet !== "undefined") return SancordNet.imageUrl(url);
   if (typeof url !== "string" || url.length < MEDIA_URL_MIN_LENGTH || !url.startsWith("data:")) return url;
   const hit = MEDIA_URL_CACHE.get(url);
   if (hit) return hit;
@@ -293,6 +296,7 @@ const SancordUI = (() => {
           if (f.value !== undefined && f.value !== null) input.value = f.value;
           if (f.placeholder) input.placeholder = f.placeholder;
           if (f.maxlength) input.maxLength = f.maxlength;
+          if (f.type === "file" && f.accept) input.accept = f.accept;
           input.addEventListener("change", updateVisibility);
         }
         inputs[f.name] = input;
@@ -351,6 +355,8 @@ const SancordUI = (() => {
             out[f.name] = el.querySelector("input:checked")?.value ?? f.value;
           } else if (f.type === "checklist") {
             out[f.name] = Array.from(el.querySelectorAll("input:checked")).map((b) => b.value);
+          } else if (f.type === "file") {
+            out[f.name] = el.files[0] || null;
           } else {
             out[f.name] = el.value;
           }

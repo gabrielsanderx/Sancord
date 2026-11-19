@@ -162,6 +162,9 @@ pub struct ConnRate {
     pub messages: SlidingWindow,
     pub reactions: SlidingWindow,
     pub typing_last: i64,
+    pub invite_create: SlidingWindow,
+    pub invite_join: SlidingWindow,
+    pub invite_dm: SlidingWindow,
 }
 
 impl ConnRate {
@@ -178,6 +181,15 @@ impl ConnRate {
         }
         self.typing_last = now;
         true
+    }
+    pub fn allow_invite_create(&mut self, now: i64) -> bool {
+        self.invite_create.allow(now, 12, 60_000)
+    }
+    pub fn allow_invite_join(&mut self, now: i64) -> bool {
+        self.invite_join.allow(now, 10, 60_000)
+    }
+    pub fn allow_invite_dm(&mut self, now: i64) -> bool {
+        self.invite_dm.allow(now, 15, 60_000)
     }
 }
 

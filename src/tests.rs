@@ -31,6 +31,36 @@ mod slowmode;
 mod forum_tags;
 #[path = "stage_ab_tests.rs"]
 mod stage_ab;
+#[path = "link_preview_tests.rs"]
+mod link_preview;
+#[path = "forward_tests.rs"]
+mod forward;
+#[path = "inbox_mute_tests.rs"]
+mod inbox_mute;
+#[path = "nickname_tests.rs"]
+mod nickname;
+#[path = "emoji_tests.rs"]
+mod emoji;
+#[path = "thread_c6_tests.rs"]
+mod thread_c6;
+#[path = "invites_tests.rs"]
+mod invites_tests;
+#[path = "gif_tests.rs"]
+mod gif;
+#[path = "profile_p1_tests.rs"]
+mod profile_p1;
+#[path = "profile_p2_tests.rs"]
+mod profile_p2;
+#[path = "profile_p5_tests.rs"]
+mod profile_p5;
+#[path = "profile_board_tests.rs"]
+mod profile_board;
+#[path = "profile_sharing_tests.rs"]
+mod profile_sharing;
+#[path = "cosmetic_collection_tests.rs"]
+mod cosmetic_collection;
+#[path = "voice_chat_tests.rs"]
+mod voice_chat;
 
 struct TestServer {
     addr: std::net::SocketAddr,

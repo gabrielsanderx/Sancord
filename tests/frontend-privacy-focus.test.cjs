@@ -35,8 +35,8 @@ function policy(settings) {
     friends: [{ username: 'Amiga' }],
     prefs: { notify_levels: {} },
   };
-  return take(polish, ['isFriendName', 'notifyLevelFor', 'notificationPolicy'], vm.createContext({
-    state, String,
+  return take(polish, ['isFriendName', 'notifyLevelFor', 'muteUntil', 'isMutedId', 'mutedChannelChain', 'isChannelMuted', 'notificationPolicy'], vm.createContext({
+    state, String, Date,
     isPrivateTextId: (id) => /^g?dm:/.test(id),
     isMessageRequest: () => false,
     isOwnMessage: (m) => m.author_name === 'Eu',

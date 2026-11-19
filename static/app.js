@@ -22,15 +22,43 @@ const DEFAULT_AUDIO_SETTINGS = {
   voiceProfile: "isolation", // "isolation" | "studio" | "custom"
   inputMode: "vad", // "vad" | "ptt"
   pttKey: "Space",
+  pttReleaseDelayMs: 120,
   gateThreshold: -52,
   noiseGate: true,
   highpass: true,
   compressor: true,
   aec: true,
   opusHd: true,
+  screenDefaultQuality: "1080",
+  screenDefaultFps: 30,
+  screenDefaultAudio: true,
   soundMessages: true,
   soundVoice: true,
+  soundEvents: {
+    message: true,
+    mention: true,
+    ring: true,
+    join: true,
+    leave: true,
+    mute: true,
+    deafen: true,
+    "stream-start": true,
+    "stream-stop": true,
+    "friend-request": true,
+  },
   compactMode: false,
+  showChatAvatars: true,
+  showChatTimestamps: true,
+  compactSidebar: false,
+  chatGroupGap: 14,
+  uiZoom: 100,
+  customAccentColor: "",
+  showProfileNameStyles: true,
+  showProfileDecorations: true,
+  showProfileFrames: true,
+  showProfileEffects: true,
+  showProfileNameplates: true,
+  showProfileAnimations: true,
   appTheme: "dark", // "light" | "ash" | "dark" | "oled" | "auto"
   autoDeviceTheme: false,
   customAccentTheme: "none",
@@ -42,10 +70,36 @@ const DEFAULT_AUDIO_SETTINGS = {
   voiceGlow: true,
   uiVolume: 100,
   desktopNotif: false,
+  notifShowPreview: true,
+  notifWhenFocused: false,
+  notifTitleBadge: true,
   showTyping: true,
   autoEmbeds: true,
   familyFocus: false,
   linkGuard: true,
+  // Acessibilidade
+  uiSaturation: 100,
+  highContrast: false,
+  roleColorsMode: "name", // "name" | "dot" | "none"
+  enhancedFocus: false,
+  ttsEnabled: false,
+  ttsRate: 1.0,
+  ttsVolume: 100,
+  // Chat e mensagens
+  chatConvertEmoticons: true,
+  chatInlineImages: true,
+  chatAutoplayVideo: false,
+  chatSpellcheck: true,
+  chatEnterSends: true,
+  chatGroupMessages: true,
+  chatGroupWindowMins: 7,
+  chatTimeFormat: "24h", // "auto" | "24h" | "12h"
+  regionalDateFormat: "pt-BR", // "pt-BR" | "en-US" | "iso"
+  // Atalhos customizados & Avançado
+  customShortcuts: {},
+  updatesAutoCheck: true,
+  developerMode: false,
+  logLevel: "normal",
 };
 
 function loadAudioSettings() {
@@ -90,6 +144,11 @@ function applyAppThemeSettings() {
   } else {
     delete document.body.dataset.accent;
   }
+  if (s.customAccentColor && /^#[0-9a-f]{6}$/i.test(s.customAccentColor)) {
+    document.documentElement.style.setProperty("--brand", s.customAccentColor);
+  } else {
+    document.documentElement.style.removeProperty("--brand");
+  }
   const glass = Number.isFinite(Number(s.glassIntensity)) ? Number(s.glassIntensity) : 60;
   document.documentElement.style.setProperty("--glass-intensity", String(glass));
   if (s.ambientFx && s.ambientFx !== "none") {
@@ -101,11 +160,27 @@ function applyAppThemeSettings() {
   document.body.classList.toggle("voice-glow-enabled", s.voiceGlow !== false);
   document.body.classList.toggle("compact-messages", Boolean(s.compactMode));
   document.body.classList.toggle("streamer-mode", Boolean(s.streamerMode));
+  document.body.classList.toggle("hide-chat-avatars", s.showChatAvatars === false);
+  document.body.classList.toggle("hide-chat-timestamps", s.showChatTimestamps === false);
+  document.body.classList.toggle("compact-sidebar", Boolean(s.compactSidebar));
+  document.body.classList.toggle("high-contrast", Boolean(s.highContrast));
+  document.body.classList.toggle("enhanced-focus", Boolean(s.enhancedFocus));
+  document.body.dataset.roleColors = s.roleColorsMode || "name";
   const fs = Number(s.chatFontSize) || 14;
   document.documentElement.style.setProperty("--chat-font-size", `${fs}px`);
+  const gap = Number.isFinite(Number(s.chatGroupGap)) ? Number(s.chatGroupGap) : 14;
+  document.documentElement.style.setProperty("--chat-group-gap", `${gap}px`);
+  const sat = Number.isFinite(Number(s.uiSaturation)) ? Math.max(0, Math.min(100, Number(s.uiSaturation))) / 100 : 1;
+  document.documentElement.style.setProperty("--ui-saturation", String(sat));
+  const zoom = [90, 100, 110, 125].includes(Number(s.uiZoom)) ? Number(s.uiZoom) : 100;
+  document.documentElement.style.fontSize = zoom === 100 ? "" : `${zoom}%`;
   if (appearanceFontPreview) {
     appearanceFontPreview.style.fontSize = `${fs}px`;
   }
+  const chatEl = document.getElementById("chat-input");
+  if (chatEl) chatEl.spellcheck = s.chatSpellcheck !== false;
+  document.getElementById("account-id-row")?.classList.toggle("hidden", !s.developerMode);
+  document.getElementById("advanced-dev-telemetry")?.classList.toggle("hidden", !s.developerMode);
 }
 
 window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", () => {
@@ -323,10 +398,15 @@ function getActiveTextChannelId() {
 
 // Sintetizador de efeitos sonoros estilo Discord (Web Audio API)
 let uiAudioCtx = null;
-function playUiSound(kind) {
-  if ((state.deafened || state.selfUser?.status_kind === "dnd") && kind !== "deafen") return;
-  if ((kind === "message" || kind === "mention") && (state.audioSettings?.soundMessages === false || state.audioSettings?.streamerMode)) return;
-  if ((kind === "join" || kind === "leave" || kind === "mute" || kind === "unmute") && state.audioSettings?.soundVoice === false) return;
+function playUiSound(kind, opts = {}) {
+  const forcePreview = Boolean(opts?.forcePreview);
+  if (!forcePreview) {
+    if ((state.deafened || state.selfUser?.status_kind === "dnd") && kind !== "deafen") return;
+    if ((kind === "message" || kind === "mention" || kind === "friend-request") && (state.audioSettings?.soundMessages === false || state.audioSettings?.streamerMode)) return;
+    if ((kind === "join" || kind === "leave" || kind === "mute" || kind === "unmute" || kind === "deafen" || kind === "stream-start" || kind === "stream-stop" || kind === "ring") && state.audioSettings?.soundVoice === false) return;
+    const evKey = kind === "unmute" ? "mute" : kind;
+    if (state.audioSettings?.soundEvents && state.audioSettings.soundEvents[evKey] === false) return;
+  }
   try {
     if (!uiAudioCtx) {
       uiAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -337,10 +417,11 @@ function playUiSound(kind) {
     const now = uiAudioCtx.currentTime;
 
     const volMult = Math.max(0, Math.min(1.5, (state.audioSettings?.uiVolume ?? 100) / 100));
-    if (volMult === 0) return;
+    if (volMult === 0 && !forcePreview) return;
+    const effectiveVol = volMult || 0.7;
 
     const tone = (freq, startOffset, duration, vol = 0.08, type = "sine") => {
-      const scaled = Math.max(0.002, vol * volMult);
+      const scaled = Math.max(0.002, vol * effectiveVol);
       const osc = uiAudioCtx.createOscillator();
       const gain = uiAudioCtx.createGain();
       osc.type = type;
@@ -370,6 +451,15 @@ function playUiSound(kind) {
         tone(360, 0, 0.07, 0.06, "sine");
         tone(520, 0.06, 0.09, 0.06, "sine");
         break;
+      case "deafen":
+        tone(340, 0, 0.08, 0.07, "triangle");
+        tone(240, 0.07, 0.13, 0.07, "triangle");
+        break;
+      case "ring":
+        tone(659.25, 0, 0.12, 0.08, "sine");
+        tone(783.99, 0.14, 0.14, 0.08, "sine");
+        tone(987.77, 0.28, 0.18, 0.08, "sine");
+        break;
       case "stream-start":
         tone(440, 0, 0.08, 0.07, "triangle");
         tone(554.37, 0.07, 0.08, 0.07, "triangle");
@@ -378,6 +468,10 @@ function playUiSound(kind) {
       case "stream-stop":
         tone(587.33, 0, 0.09, 0.07, "triangle");
         tone(440, 0.08, 0.14, 0.07, "triangle");
+        break;
+      case "friend-request":
+        tone(587.33, 0, 0.08, 0.07, "triangle");
+        tone(880, 0.09, 0.14, 0.08, "triangle");
         break;
       case "mention":
         tone(880, 0, 0.08, 0.08, "sine");
@@ -694,7 +788,7 @@ function getServerPermissionsFor(srv, username) {
       administrator: false, manage_server: false, manage_roles: false,
       manage_channels: srv?.id === "sancord", kick_members: false, ban_members: false,
       manage_messages: false, mention_everyone: false, send_messages: true,
-      attach_files: true, connect_voice: true, speak_voice: true, stream_video: true, create_invites: true,
+      attach_files: true, connect_voice: true, speak_voice: true, stream_video: true, create_invites: true, manage_invites: false,
     };
   }
   const lower = username.toLowerCase();
@@ -703,8 +797,9 @@ function getServerPermissionsFor(srv, username) {
       administrator: true, manage_server: true, manage_roles: true, manage_channels: true,
       kick_members: true, ban_members: true, manage_messages: true, mention_everyone: true,
       send_messages: true, attach_files: true, connect_voice: true, speak_voice: true,
-      stream_video: true, create_invites: true,
+      stream_video: true, create_invites: true, manage_invites: true,
       mute_members: true, deafen_members: true, move_members: true, view_audit_log: true, moderate_members: true,
+      change_nickname: true, manage_nicknames: true, manage_expressions: true,
     };
   }
   const everyone = (srv.roles || []).find((r) => r.id === "everyone")?.permissions || {};
@@ -713,8 +808,9 @@ function getServerPermissionsFor(srv, username) {
     manage_channels: srv.id === "sancord" && !srv.owner_username,
     kick_members: false, ban_members: false, manage_messages: false, mention_everyone: false,
     send_messages: true, attach_files: true, connect_voice: true, speak_voice: true,
-    stream_video: true, create_invites: true,
+    stream_video: true, create_invites: true, manage_invites: false,
     mute_members: false, deafen_members: false, move_members: false, view_audit_log: false, moderate_members: false,
+    change_nickname: true, manage_nicknames: false, manage_expressions: false,
     ...everyone,
   };
   for (const role of getUserServerRoles(srv, lower)) {
@@ -724,8 +820,9 @@ function getServerPermissionsFor(srv, username) {
         administrator: true, manage_server: true, manage_roles: true, manage_channels: true,
         kick_members: true, ban_members: true, manage_messages: true, mention_everyone: true,
         send_messages: true, attach_files: true, connect_voice: true, speak_voice: true,
-        stream_video: true, create_invites: true,
+        stream_video: true, create_invites: true, manage_invites: true,
         mute_members: true, deafen_members: true, move_members: true, view_audit_log: true, moderate_members: true,
+      change_nickname: true, manage_nicknames: true, manage_expressions: true,
       };
     }
     for (const k of Object.keys(perms)) {
@@ -739,7 +836,7 @@ function canUserEditServer(srv, username) {
   if (!srv || !username) return false;
   if (isServerOwner(srv, username)) return true;
   const p = getServerPermissionsFor(srv, username);
-  return Boolean(p.administrator || p.manage_server || p.manage_roles || p.manage_channels || p.kick_members || p.ban_members || p.view_audit_log || p.moderate_members);
+  return Boolean(p.administrator || p.manage_server || p.manage_roles || p.manage_channels || p.manage_invites || p.kick_members || p.ban_members || p.view_audit_log || p.moderate_members || p.manage_expressions);
 }
 
 function renderGuildRail() {
@@ -770,8 +867,9 @@ function switchToServerId(serverId, preferredTextChId = null) {
     state.activeServerId = srv.id;
     state.textChannels = srv.text_channels || [];
     state.voiceChannels = srv.voice_channels || [];
-    const validPreferred = preferredTextChId && state.textChannels.some((c) => c.id === preferredTextChId);
-    const keepCurrent = state.textChannels.some((c) => c.id === state.currentTextChannel);
+    const allChannels = [...state.textChannels, ...state.voiceChannels];
+    const validPreferred = preferredTextChId && allChannels.some((c) => c.id === preferredTextChId);
+    const keepCurrent = allChannels.some((c) => c.id === state.currentTextChannel);
     if (validPreferred) {
       state.currentTextChannel = preferredTextChId;
     } else if (!keepCurrent) {
@@ -1198,9 +1296,13 @@ async function handleServerMessage(msg) {
     case "Welcome": {
       state.prefs = payload.prefs || { guild_layout: [], muted_servers: [], collapsed_categories: [] };
       applySyncedUserPrefs(state.prefs);
+      if (typeof scheduleMuteExpiry === "function") scheduleMuteExpiry();
       state.historyPageSize = payload.history_page_size || 50;
       state.historyState = new Map();
       state.selfUser = payload.user;
+      resetBoardEditorOnAccountChange();
+      resetCollectionOnAccountChange();
+      resetProfileSharing();
       try {
         // Mantém o nome salvo em sincronia (usado só para exibição).
         const store = localStorage.getItem(SancordNet.sessionKey("sancord_token")) ? localStorage : sessionStorage;
@@ -1235,7 +1337,7 @@ async function handleServerMessage(msg) {
       updatePinnedBadge();
       refreshAudioDeviceLists();
       if (state.activeView !== "home") {
-        applyChannelHeader(activeSrv, state.textChannels.find((c) => c.id === state.currentTextChannel));
+        applyChannelHeader(activeSrv, state.textChannels.find((c) => c.id === state.currentTextChannel) || state.voiceChannels.find((c) => c.id === state.currentTextChannel));
       }
       onChannelOpened(getActiveTextChannelId());
       renderChatMessages();
@@ -1248,7 +1350,13 @@ async function handleServerMessage(msg) {
       if (state.pendingInviteCode) {
         const code = state.pendingInviteCode;
         state.pendingInviteCode = "";
-        setTimeout(() => openAddServerWizard("join", code), 250);
+        setTimeout(() => {
+          if (window.SancordInvites?.openInvitePreview) {
+            window.SancordInvites.openInvitePreview(code);
+          } else {
+            openAddServerWizard("join", code);
+          }
+        }, 250);
       }
       // Reconexão do WebSocket no meio de uma chamada: o servidor já nos tirou da voz.
       resumeVoiceAfterReconnect();
@@ -1285,7 +1393,7 @@ async function handleServerMessage(msg) {
     }
 
     case "ServerCreated": {
-      const { server, history } = payload;
+      const { server, history, default_channel_id } = payload;
       if (server) {
         const idx = state.servers.findIndex((s) => s.id === server.id);
         if (idx >= 0) state.servers[idx] = server;
@@ -1295,8 +1403,22 @@ async function handleServerMessage(msg) {
         state.chatHistory = { ...state.chatHistory, ...history };
       }
       if (server) {
-        switchToServerId(server.id, server.text_channels?.[0]?.id || null);
+        switchToServerId(server.id, default_channel_id || server.text_channels?.[0]?.id || null);
         showUiToast(`Entrou em ${server.name}!`);
+      }
+      break;
+    }
+
+    case "ServerMemberJoined": {
+      const msg = payload?.message;
+      if (msg && msg.channel_id) {
+        if (!state.chatHistory[msg.channel_id]) state.chatHistory[msg.channel_id] = [];
+        if (!state.chatHistory[msg.channel_id].some((m) => m.id === msg.id)) {
+          state.chatHistory[msg.channel_id].push(msg);
+          if (state.activeView === "server" && state.currentTextChannel === msg.channel_id && typeof appendMessageToDOM === "function") {
+            appendMessageToDOM(msg);
+          }
+        }
       }
       break;
     }
@@ -1305,7 +1427,12 @@ async function handleServerMessage(msg) {
       const { server } = payload;
       if (!server) break;
       const idx = state.servers.findIndex((s) => s.id === server.id);
-      reconcileServerAccess(idx >= 0 ? state.servers[idx] : null, server);
+      const previous = state.servers[idx];
+      reconcileServerAccess(previous || null, server);
+      const profilesChanged = previous && (
+        JSON.stringify(previous.member_nicks) !== JSON.stringify(server.member_nicks) ||
+        JSON.stringify(previous.member_profiles) !== JSON.stringify(server.member_profiles)
+      );
       if (idx >= 0) state.servers[idx] = server;
       else state.servers.push(server);
 
@@ -1313,7 +1440,9 @@ async function handleServerMessage(msg) {
         state.textChannels = server.text_channels || [];
         state.voiceChannels = server.voice_channels || [];
         let channelChanged = false;
-        if (!state.textChannels.some((c) => c.id === state.currentTextChannel)) {
+        const stillExists = state.textChannels.some((c) => c.id === state.currentTextChannel) ||
+          state.voiceChannels.some((c) => c.id === state.currentTextChannel);
+        if (!stillExists) {
           state.currentTextChannel = firstTextChannelId(server) || "";
           channelChanged = true;
         }
@@ -1325,16 +1454,38 @@ async function handleServerMessage(msg) {
           if (channelChanged) {
             switchToServerView();
           } else {
-            const ch = state.textChannels.find((c) => c.id === state.currentTextChannel);
+            const ch = state.textChannels.find((c) => c.id === state.currentTextChannel) ||
+              state.voiceChannels.find((c) => c.id === state.currentTextChannel);
             if (ch) currentTextChannelTitle.textContent = ch.name;
             applyChannelHeader(server, ch);
+            if (profilesChanged) renderChatMessages({ preserveScroll: true });
           }
         }
         // Fórum aberto: tags (filtro e etiquetas) podem ter mudado.
         if (state.forumViewChannel && typeof renderForumPosts === "function") renderForumPosts();
       }
+      if (profilesChanged) refreshVisitedServerProfile(server.id);
       renderGuildRail();
       refreshServerSettingsModalIfOpen();
+      break;
+    }
+
+    case "ServerProfileUpdated": {
+      const { server_id, username, profile } = payload;
+      const srv = state.servers.find(s => s.id === server_id);
+      if (!srv || !username) break;
+      const lower = username.toLowerCase();
+      if (profile) srv.member_profiles = { ...srv.member_profiles, [lower]: profile };
+      else if (srv.member_profiles) delete srv.member_profiles[lower];
+      if (state.activeView === "server" && state.activeServerId === server_id) {
+        renderMembersSidebar();
+        renderChatMessages({ preserveScroll: true });
+      }
+      if (currentPopoverUsername?.toLowerCase() === lower) refreshVisitedServerProfile(server_id);
+      if (typeof currentCompactProfile !== "undefined" && currentCompactProfile?.serverId === server_id &&
+          currentCompactProfile?.username?.toLowerCase() === lower && typeof refreshVisibleProfiles === "function") {
+        refreshVisibleProfiles(username);
+      }
       break;
     }
 
@@ -1364,6 +1515,7 @@ async function handleServerMessage(msg) {
     case "ServerRemoved": {
       const { server_id, reason } = payload;
       state.servers = state.servers.filter((s) => s.id !== server_id);
+      if (currentPopoverServerId === server_id) profilePopoverModal?.classList.add("hidden");
       if (serverSettingsModal && !serverSettingsModal.classList.contains("hidden") && editingServerId === server_id) {
         serverSettingsModal.classList.add("hidden");
       }
@@ -1378,6 +1530,23 @@ async function handleServerMessage(msg) {
 
     case "ServerFeedback": {
       const { ok, message: fbMsg, action } = payload;
+      if (action === "profile_board") {
+        handleBoardSaveFailure(fbMsg);
+        break;
+      }
+      if (action === "profile_sharing") {
+        setProfileSharingFeedback(fbMsg);
+        break;
+      }
+      if (action === "badge_admin") {
+        if (typeof setBadgeAdminFeedback === "function") setBadgeAdminFeedback(fbMsg);
+        break;
+      }
+      if (action === "cosmetic_collection") {
+        collectionStatus.textContent = fbMsg;
+        if (!ok) showErrorToast(fbMsg);
+        break;
+      }
       showUiToast(fbMsg);
       if (action === "join_voice" && !ok) onJoinVoiceRejected();
       if (action === "change_password") {
@@ -1612,8 +1781,15 @@ async function handleServerMessage(msg) {
         } else {
           state.voiceChannels = state.voiceChannels.filter((c) => c.id !== channel_id);
           delete state.voiceMembers[channel_id];
+          delete state.chatHistory[channel_id];
           if (state.currentVoiceChannel === channel_id) {
             leaveVoiceChannel();
+          }
+          if (state.currentTextChannel === channel_id) {
+            state.currentTextChannel = state.textChannels[0]?.id || "geral";
+            if (state.activeView === "server") {
+              switchToServerView();
+            }
           }
           renderVoiceChannels();
         }
@@ -1674,6 +1850,12 @@ async function handleServerMessage(msg) {
       const { dm_id, peer, messages } = payload;
       state.chatHistory[dm_id] = messages || [];
       openDmConversation(dm_id, peer);
+      // "Ligar" do menu do membro: abre a conversa e entra na chamada dela.
+      if (state.pendingCallPeer && state.pendingCallPeer === String(peer?.username || "").toLowerCase()) {
+        state.pendingCallPeer = null;
+        const voiceId = getDmVoiceIdFromDmId(dm_id);
+        if (state.currentVoiceChannel !== voiceId) joinVoiceChannel(voiceId, getFriendlyVoiceName(voiceId));
+      }
       break;
     }
 
@@ -1710,13 +1892,31 @@ async function handleServerMessage(msg) {
 
     case "VoiceStateSync": {
       state.voiceMembers = payload.voice_members;
+      // Perfil P1 (tempo real): mudou a aparência de alguém? Redesenha o chat aberto.
+      const looks = (u) => JSON.stringify([u.avatar_url, u.avatar_decoration, u.name_style, u.name_color,
+        u.name_color_secondary, u.name_gradient_direction, u.nameplate_style, u.display_name, u.bio, u.banner_url,
+        u.profile_frame, u.profile_effect, u.theme_primary, u.theme_accent, u.theme_highlight, u.theme_mode, u.theme_direction]);
+      const before = new Map([...state.users.values()].map((u) => [u.id, looks(u)]));
       state.users.clear();
+      let looksChanged = false;
+      let selfLookChanged = false;
       for (const u of payload.users) {
         state.users.set(u.id, u);
+        const changed = before.has(u.id) && before.get(u.id) !== looks(u);
+        if (changed) {
+          looksChanged = true;
+          if (profilePopoverModal && !profilePopoverModal.classList.contains("hidden") &&
+            currentPopoverUsername?.toLowerCase() === u.username.toLowerCase()) {
+            renderVisitedProfile({ ...visitedProfileBase, ...u, ...profileAppearanceForWire(u) }, u.username, currentPopoverUserId);
+          }
+        }
         if (state.selfUser && u.id === state.selfUser.id) {
           state.selfUser = u;
+          selfLookChanged = changed;
         }
       }
+      if (looksChanged) renderChatMessages({ preserveScroll: true });
+      if (selfLookChanged) renderCollectionInventory();
       updateSelfProfileUI();
       applyLocalMuteState();
       updateServerModerationUI();
@@ -1770,6 +1970,26 @@ async function handleServerMessage(msg) {
       onUserProfile(payload);
       break;
     }
+    case "ProfileSharingState": {
+      receiveProfileSharing(payload);
+      break;
+    }
+    case "BadgeAdminState": {
+      if (typeof receiveBadgeAdminState === "function") receiveBadgeAdminState(payload);
+      break;
+    }
+    case "ProfilePresentationChanged": {
+      refreshVisibleProfiles(payload.username);
+      break;
+    }
+    case "ProfileBoardState": {
+      receiveBoardEditorState(payload.board);
+      break;
+    }
+    case "ProfileBoardSaved": {
+      receiveBoardEditorState(payload.board, true);
+      break;
+    }
 
     case "AuditLog": {
       onAuditLog(payload);
@@ -1781,7 +2001,21 @@ async function handleServerMessage(msg) {
       break;
     }
 
+    case "CosmeticsState": {
+      if (typeof onCosmeticsState === "function") onCosmeticsState(payload);
+      break;
+    }
+    case "CosmeticCollectionUpdated": {
+      onCosmeticCollectionUpdated(payload.collection);
+      break;
+    }
+    case "ProfileLookApplied": {
+      onProfileLookApplied(payload.appearance);
+      break;
+    }
+
     case "SearchResults": {
+      if (typeof onInboxResults === "function" && onInboxResults(payload)) break;
       onSearchResults(payload);
       break;
     }
@@ -2088,6 +2322,7 @@ async function createLocalAudioStream(forceRebuild = false) {
       if (isSpeaking !== wasSpeaking) {
         if (isSpeaking) state.speakingUsers.add(selfId);
         else state.speakingUsers.delete(selfId);
+        if (typeof onFrameVoiceState === "function") onFrameVoiceState(selfId);
         document
           .querySelectorAll(`[data-speaking-user="${selfId}"]`)
           .forEach((el) => el.classList.toggle("speaking", isSpeaking));
@@ -2154,6 +2389,9 @@ async function joinVoiceChannel(channelId, friendlyLabel = null) {
     ? channelName
     : `CALL / ${channelName}`;
   stageTitle.textContent = `🔊 Em chamada: ${channelName}`;
+  if (typeof document !== "undefined") {
+    document.getElementById("stage-open-voice-chat-btn")?.classList.toggle("hidden", isPrivateVoiceId(channelId));
+  }
   voiceConnectionPanel.classList.remove("hidden");
   voiceStage.classList.remove("hidden");
   toggleStageBtn.classList.remove("hidden");
@@ -2406,12 +2644,24 @@ async function flushPendingCandidates(peerEntry) {
   }
 }
 
+function activeVoiceBitrateKbps() {
+  const vcId = state.currentVoiceChannel;
+  if (!vcId) return 0;
+  for (const srv of state.servers || []) {
+    const ch = (srv.voice_channels || []).find((c) => c.id === vcId);
+    if (ch && ch.bitrate_kbps >= 32 && ch.bitrate_kbps <= 256) return ch.bitrate_kbps;
+  }
+  return 0;
+}
+
 function boostSdpVideoBitrate(sdpStr, maxBitrateBps) {
   if (!sdpStr) return sdpStr;
   const maxKbps = Math.round((maxBitrateBps || 16000000) / 1000);
   const startKbps = Math.min(maxKbps, 8000);
   const minKbps = Math.min(maxKbps, 2500);
   const opusHd = Boolean(state.audioSettings?.opusHd);
+  const channelAudioKbps = activeVoiceBitrateKbps();
+  const targetAudioBps = channelAudioKbps > 0 ? channelAudioKbps * 1000 : opusHd ? 128000 : 0;
   const lines = sdpStr.split("\r\n");
   const out = [];
   let section = "";
@@ -2435,10 +2685,16 @@ function boostSdpVideoBitrate(sdpStr, maxBitrateBps) {
       continue;
     }
 
-    if (section === "audio" && opusHd && line.startsWith("a=fmtp:111 ")) {
+    if (section === "audio" && targetAudioBps > 0 && line.startsWith("a=fmtp:111 ")) {
       let upgraded = line;
-      if (!upgraded.includes("maxaveragebitrate=")) upgraded += ";maxaveragebitrate=128000";
-      if (!upgraded.includes("stereo=")) upgraded += ";stereo=1;sprop-stereo=1";
+      if (upgraded.includes("maxaveragebitrate=")) {
+        upgraded = upgraded.replace(/maxaveragebitrate=\d+/, `maxaveragebitrate=${targetAudioBps}`);
+      } else {
+        upgraded += `;maxaveragebitrate=${targetAudioBps}`;
+      }
+      if ((opusHd || channelAudioKbps >= 128) && !upgraded.includes("stereo=")) {
+        upgraded += ";stereo=1;sprop-stereo=1";
+      }
       if (!upgraded.includes("useinbandfec=")) upgraded += ";useinbandfec=1";
       out.push(upgraded);
       continue;
@@ -2715,6 +2971,7 @@ function closePeerConnection(peerId) {
     peerEntry.pc.close();
   }
   if (state.speakingUsers.delete(peerId)) {
+    if (typeof onFrameVoiceState === "function") onFrameVoiceState(peerId);
     document.querySelectorAll(`[data-speaking-user="${peerId}"]`).forEach((el) => el.classList.remove("speaking"));
     document.querySelectorAll(`[data-speaking-card="${peerId}"]`).forEach((el) => el.classList.remove("speaking-border"));
   }
@@ -3371,6 +3628,7 @@ function setupVoiceActivityDetection(stream, getUserIdFn) {
       if (isSpeaking !== wasSpeaking) {
         if (isSpeaking) state.speakingUsers.add(uid);
         else state.speakingUsers.delete(uid);
+        if (typeof onFrameVoiceState === "function") onFrameVoiceState(uid);
 
         document
           .querySelectorAll(`[data-speaking-user="${uid}"]`)
@@ -3468,9 +3726,13 @@ function getInitials(name) {
   return (name || "?").trim().slice(0, 2).toUpperCase();
 }
 
-function renderAvatarInner(username, avatarUrl) {
+function renderAvatarInner(username, avatarUrl, animated = false) {
   if (avatarUrl) {
-    return `<img src="${cachedMediaUrl(avatarUrl)}" alt="${escapeHtml(username)}" loading="lazy" decoding="async" />`;
+    const anim = animated || (typeof isAnimatedMediaUrl === "function" && isAnimatedMediaUrl(avatarUrl));
+    const src = escapeHtml(cachedMediaUrl(avatarUrl));
+    const alt = escapeHtml(username);
+    if (anim) return `<img data-profile-src="${src}" data-anim="1" alt="${alt}" decoding="async" /><span class="profile-media-fallback" aria-hidden="true">${escapeHtml(getInitials(username))}</span>`;
+    return `<img src="${src}" alt="${alt}" loading="lazy" decoding="async" />`;
   }
   return getInitials(username);
 }
@@ -3524,6 +3786,13 @@ const PROFILE_EFFECTS = [
   { id: "galaxy", name: "🌌 Nebulosa Rotativa", desc: "Luz cósmica girando suave" },
   { id: "glitch", name: "📺 Sinal Glitch VHS", desc: "Distorção elétrica retrô" },
   { id: "aurora", name: "🌈 Aurora Boreal", desc: "Ondas luminosas suaves" },
+  { id: "core-signal", name: "Sinal Core", desc: "Dois traços de luz percorrem as bordas", requiresCatalog: true },
+  { id: "star-trail", name: "Rastro Celeste", desc: "Um rastro cruzando o alto do cartão", requiresCatalog: true },
+  { id: "circuit-boot", name: "Circuito de Entrada", desc: "Linhas de circuito ganham forma nos cantos", requiresCatalog: true },
+  { id: "petal-drift", name: "Brisa de Pétalas", desc: "Pétalas passam suavemente pela borda", requiresCatalog: true },
+  { id: "polar-ribbon", name: "Fita Polar", desc: "Luz fria desliza como uma fita", requiresCatalog: true },
+  { id: "pixel-assembly", name: "Montagem de Pixels", desc: "Pixels se agrupam e desaparecem", requiresCatalog: true },
+  { id: "gravity-well", name: "Poço de Luz", desc: "Pontos de luz se recolhem em uma órbita", requiresCatalog: true },
 ];
 
 const NAMEPLATES = [
@@ -3539,7 +3808,20 @@ const NAMEPLATES = [
   { id: "void", name: "🕳️ Vazio Cósmico", desc: "Índigo noturno profundo" },
   { id: "toxic", name: "☢️ Tóxico Neon", desc: "Lima e esmeralda vibrante" },
   { id: "synthwave", name: "🌆 Synthwave Retrô", desc: "Magenta e pôr do sol" },
+  { id: "core-stripe", desc: "Faixa violeta com um brilho que cruza a borda", requiresCatalog: true },
+  { id: "circuit-weave", desc: "Trama de linhas ciano", requiresCatalog: true },
+  { id: "starlit-silt", desc: "Pontos de luz em um fundo violeta", requiresCatalog: true },
+  { id: "twilight-garden", desc: "Pétalas em degradê rosado", requiresCatalog: true },
+  { id: "gold-leaf", desc: "Faixa dourada discreta", requiresCatalog: true },
+  { id: "retro-horizon", desc: "Linhas de horizonte em cobre e rosa", requiresCatalog: true },
+  { id: "frost-vein", desc: "Veios de gelo em azul claro", requiresCatalog: true },
+  { id: "ember-line", desc: "Reflexo âmbar em movimento", requiresCatalog: true },
+  { id: "tide-glass", desc: "Reflexo turquesa como vidro sobre a água", requiresCatalog: true },
 ];
+
+const CLASSIC_NAME_STYLES = ["gta", "neon", "chrome", "gradient", "fire", "ice", "sakura", "retro", "gothic", "toxic", "royal"];
+const NEW_NAME_STYLES = ["modern", "rounded", "mono", "outline", "glow", "prism", "holographic", "custom-gradient"];
+const NAME_STYLE_IDS = new Set([...CLASSIC_NAME_STYLES, ...NEW_NAME_STYLES]);
 
 function wrapSvgDeco(inner) {
   return `<span class="deco-svg-layer" aria-hidden="true"><svg viewBox="0 0 100 100">${inner}</svg></span>`;
@@ -3547,6 +3829,9 @@ function wrapSvgDeco(inner) {
 
 function getDecoSvgHtml(decoId) {
   if (!decoId || decoId === "none") return "";
+  // Perfil P2: decorações novas do Sancord (arte em static/js/profile.js).
+  const art = typeof sancordDecorationArt === "function" ? sancordDecorationArt(decoId) : null;
+  if (art) return wrapSvgDeco(art);
   switch (decoId) {
     case "flame-violet":
       return wrapSvgDeco(`
@@ -3732,20 +4017,29 @@ function getDecoClass(decoId) {
 }
 
 function getNameStyleClass(styleId) {
-  return styleId && styleId !== "default" ? `name-style-${styleId}` : "";
+  return NAME_STYLE_IDS.has(styleId) ? `name-style-${styleId}` : "";
 }
 
 function getNameplateClass(npId) {
-  return npId && npId !== "none" ? `nameplate-${npId}` : "";
+  return npId !== "none" && NAMEPLATES.some(item => item.id === npId) ? `nameplate-${npId}` : "";
+}
+
+function applyNameplateChip(el, id) {
+  if (!el) return;
+  if (el.dataset.plateClass) el.classList.remove(el.dataset.plateClass);
+  const cls = getNameplateClass(id);
+  el.classList.toggle("profile-nameplate-chip", Boolean(cls));
+  el.dataset.plateClass = cls;
+  if (cls) el.classList.add(cls);
 }
 
 function applyDecoToElement(el, decoId) {
   if (!el) return;
-  Array.from(el.classList)
-    .filter((c) => c.startsWith("deco-"))
-    .forEach((c) => el.classList.remove(c));
-  el.querySelector(".deco-svg-layer")?.remove();
   const cls = getDecoClass(decoId);
+  if (el.dataset.decoClass === cls) return;
+  if (el.dataset.decoClass) el.classList.remove(el.dataset.decoClass);
+  el.querySelector(".deco-svg-layer")?.remove();
+  el.dataset.decoClass = cls;
   if (cls) {
     el.classList.add(cls);
     const markup = getDecoSvgHtml(decoId);
@@ -3757,58 +4051,76 @@ function applyDecoToElement(el, decoId) {
 // então vale como "cor do tema" (texto de título) em qualquer tema.
 function themedNameColor(col) {
   const v = String(col || "").trim().toLowerCase();
-  return v === "#fff" || v === "#ffffff" || v === "#f2f3f5" || v === "#dbdee1" ? "" : col || "";
+  if (["#fff", "#ffffff", "#f2f3f5", "#dbdee1"].includes(v)) return "";
+  return /^#(?:[a-f0-9]{3}|[a-f0-9]{6}|[a-f0-9]{8})$/.test(v) ? v : "";
 }
+
+const styledNameSources = new WeakMap();
 
 function applyNameStyleToEl(el, userObj, fallbackColor) {
   if (!el) return;
+  styledNameSources.set(el, { userObj, fallbackColor });
   Array.from(el.classList)
     .filter((c) => c.startsWith("name-style-"))
     .forEach((c) => el.classList.remove(c));
   el.classList.add("styled-name");
-  const st = userObj?.name_style || "default";
+  const enabled = state.audioSettings.showProfileNameStyles !== false || el.closest("#settings-tab-profile");
+  const st = enabled ? userObj?.name_style : "default";
   const cls = getNameStyleClass(st);
   if (cls) el.classList.add(cls);
-  const col = themedNameColor(userObj?.name_color || fallbackColor);
-  if (col && st !== "gradient") {
-    el.style.setProperty("--name-color", col);
-    el.style.color = col;
+  const roleMode = state.audioSettings.roleColorsMode || "name";
+  const rawRoleColor = themedNameColor(fallbackColor);
+  const baseColor = roleMode === "name" ? rawRoleColor : "";
+  const col = (enabled ? themedNameColor(userObj?.name_color) : "") || baseColor;
+  el.style.color = col;
+  if (col) el.style.setProperty("--name-color", col);
+  else el.style.removeProperty("--name-color");
+  const prevDot = el.previousElementSibling?.classList?.contains("role-color-dot") ? el.previousElementSibling : null;
+  if (roleMode === "dot" && rawRoleColor && !el.closest("#settings-tab-profile")) {
+    const dot = prevDot || document.createElement("span");
+    dot.className = "role-color-dot";
+    dot.style.background = rawRoleColor;
+    dot.setAttribute("aria-hidden", "true");
+    if (!prevDot) el.parentNode?.insertBefore(dot, el);
+  } else if (prevDot) {
+    prevDot.remove();
+  }
+  if (st === "custom-gradient") {
+    const primary = /^#[0-9a-f]{6}$/i.test(userObj.name_color || "") ? userObj.name_color : "#8977db";
+    const secondary = /^#[0-9a-f]{6}$/i.test(userObj.name_color_secondary || "") ? userObj.name_color_secondary : "#42beae";
+    const direction = userObj.name_gradient_direction;
+    const angles = { horizontal: "90deg", vertical: "180deg", diagonal: "135deg" };
+    const angle = Object.hasOwn(angles, direction) ? angles[direction] : "90deg";
+    const first = `color-mix(in srgb, ${primary} 38%, var(--name-ink))`;
+    const second = `color-mix(in srgb, ${secondary} 38%, var(--name-ink))`;
+    const gradient = direction === "radial" ? `radial-gradient(ellipse, ${first}, ${second})` : `linear-gradient(${angle}, ${first}, ${second})`;
+    el.style.setProperty("--sancord-name-gradient", gradient);
   } else {
-    el.style.removeProperty("--name-color");
-    el.style.color = "";
+    el.style.removeProperty("--sancord-name-gradient");
   }
 }
 
+const showProfileNameStyles = document.getElementById("appearance-show-name-styles");
+showProfileNameStyles?.addEventListener("change", () => {
+  state.audioSettings.showProfileNameStyles = showProfileNameStyles.checked;
+  saveAudioSettings();
+  document.querySelectorAll(".styled-name").forEach(el => {
+    const source = styledNameSources.get(el);
+    if (source) applyNameStyleToEl(el, source.userObj, source.fallbackColor);
+  });
+});
+
 function applyProfileCardVisuals(cardEl, bannerEl, effectEl, decoWrapEl, nameEl, userObj) {
-  if (cardEl) {
-    const pCol = userObj?.theme_primary || "#1e1f22";
-    const aCol = userObj?.theme_accent || "#111214";
-    if (userObj?.theme_primary || userObj?.theme_accent) {
-      cardEl.style.background = `linear-gradient(180deg, ${pCol} 0%, ${aCol} 100%)`;
-    } else {
-      cardEl.style.background = "var(--bg-floating)";
-    }
-  }
-  if (bannerEl) {
-    if (userObj?.banner_url) {
-      bannerEl.style.backgroundImage = `url("${userObj.banner_url}")`;
-      bannerEl.style.backgroundColor = userObj?.theme_primary || userObj?.avatar_color || "#5865f2";
-    } else {
-      bannerEl.style.backgroundImage = "";
-      bannerEl.style.backgroundColor = userObj?.theme_primary || userObj?.avatar_color || "#5865f2";
-    }
-  }
-  if (effectEl) {
-    effectEl.className = "profile-effect-layer";
-    if (userObj?.profile_effect && userObj.profile_effect !== "none") {
-      effectEl.classList.add(`effect-${userObj.profile_effect}`);
-    }
-  }
+  // Tema (sólido/gradiente, destaque, contraste) e banner: static/js/profile.js.
+  applyProfileTheme(cardEl, userObj);
+  setProfileBanner(bannerEl, userObj);
+  configureProfileEffect(effectEl, userObj?.profile_effect);
   if (decoWrapEl) {
     applyDecoToElement(decoWrapEl, userObj?.avatar_decoration);
   }
   if (nameEl) {
     applyNameStyleToEl(nameEl, userObj, "#ffffff");
+    applyNameplateChip(nameEl.closest(".profile-nameplate-wrap"), userObj?.nameplate_style);
   }
 }
 
@@ -3872,7 +4184,17 @@ const avatarCropError = document.getElementById("avatar-crop-error");
 const CROP_DIAMETER = 220;
 const MAX_AVATAR_GIF_BYTES = 6 * 1024 * 1024; // 6 MB
 
+// Perfil P1: o mesmo editor recorta avatar (círculo) e banner (faixa 2,5:1).
+const CROP_FRAMES = { avatar: { w: CROP_DIAMETER, h: CROP_DIAMETER, outW: 512, outH: 512 }, banner: { w: 340, h: 136, outW: 1200, outH: 480 } };
+const MAX_BANNER_BYTES = 8 * 1024 * 1024;
+
+function cropFrame() {
+  return CROP_FRAMES[cropEditor.mode] || CROP_FRAMES.avatar;
+}
+
 const cropEditor = {
+  mode: "avatar",
+  file: null,
   fileDataUrl: null,
   mimeType: "image/jpeg",
   isGif: false,
@@ -3900,7 +4222,8 @@ function getCropEffectiveDims() {
 function getCropTotalScale() {
   if (!cropEditor.natW || !cropEditor.natH) return 1;
   const { effW, effH } = getCropEffectiveDims();
-  const baseScale = Math.max(CROP_DIAMETER / effW, CROP_DIAMETER / effH);
+  const frame = cropFrame();
+  const baseScale = Math.max(frame.w / effW, frame.h / effH);
   return baseScale * cropEditor.zoom;
 }
 
@@ -3909,8 +4232,9 @@ function clampCropPan() {
   const totalScale = getCropTotalScale();
   const dispW = effW * totalScale;
   const dispH = effH * totalScale;
-  const maxX = Math.max(0, (dispW - CROP_DIAMETER) / 2);
-  const maxY = Math.max(0, (dispH - CROP_DIAMETER) / 2);
+  const frame = cropFrame();
+  const maxX = Math.max(0, (dispW - frame.w) / 2);
+  const maxY = Math.max(0, (dispH - frame.h) / 2);
   cropEditor.panX = Math.max(-maxX, Math.min(maxX, cropEditor.panX));
   cropEditor.panY = Math.max(-maxY, Math.min(maxY, cropEditor.panY));
 }
@@ -3933,15 +4257,21 @@ function resetCropEditorTransforms() {
   renderCropPreviewTransform();
 }
 
-function openAvatarCropModal(file) {
+function openAvatarCropModal(file, mode = "avatar") {
   if (!avatarCropModal || !avatarCropImg) return;
   avatarCropError?.classList.add("hidden");
 
   const isGif = file.type === "image/gif" || file.name?.toLowerCase().endsWith(".gif");
-  if (isGif && file.size > MAX_AVATAR_GIF_BYTES) {
-    showUiToast("Este GIF é maior que 6 MB. Escolha um GIF menor para usar como foto de perfil.");
+  const limit = mode === "banner" ? MAX_BANNER_BYTES : MAX_AVATAR_GIF_BYTES;
+  if (isGif && file.size > limit) {
+    showUiToast(mode === "banner" ? "Este GIF é maior que 8 MB. Escolha um GIF menor para o banner." : "Este GIF é maior que 6 MB. Escolha um GIF menor para usar como foto de perfil.");
     return;
   }
+  cropEditor.mode = mode === "banner" ? "banner" : "avatar";
+  cropEditor.file = file;
+  avatarCropStage?.classList.toggle("banner-mode", cropEditor.mode === "banner");
+  const title = avatarCropModal.querySelector(".avatar-crop-header h2");
+  if (title) title.textContent = cropEditor.mode === "banner" ? "Editar banner" : "Editar avatar";
 
   const reader = new FileReader();
   reader.onload = (ev) => {
@@ -3968,6 +4298,34 @@ function closeAvatarCropModal() {
   cropEditor.dragging = false;
   avatarCropStage?.classList.remove("dragging");
   avatarCropModal?.classList.add("hidden");
+}
+
+/** Recorte final como arquivo: GIF mantido como veio (animação) ou WebP do recorte. */
+function exportCroppedImageBlob() {
+  if (cropEditor.isGif && avatarKeepGifCheckbox?.checked && cropEditor.file) {
+    return Promise.resolve({ blob: cropEditor.file, name: `${cropEditor.mode}.gif`, animated: true });
+  }
+  const frame = cropFrame();
+  const canvas = drawCroppedCanvas(frame.outW, frame.outH, frame.outW / frame.w);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve({ blob, name: `${cropEditor.mode}.webp`, animated: false }) : reject(new Error("toBlob"))), "image/webp", 0.9);
+  });
+}
+
+function drawCroppedCanvas(outW, outH, ratio) {
+  const totalScale = getCropTotalScale();
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, outW, outH);
+  ctx.save();
+  ctx.translate(outW / 2 + cropEditor.panX * ratio, outH / 2 + cropEditor.panY * ratio);
+  ctx.scale(totalScale * ratio, totalScale * ratio);
+  ctx.rotate((cropEditor.rotation * Math.PI) / 180);
+  ctx.drawImage(avatarCropImg, -cropEditor.natW / 2, -cropEditor.natH / 2, cropEditor.natW, cropEditor.natH);
+  ctx.restore();
+  return canvas;
 }
 
 function exportCroppedAvatarDataUrl() {
@@ -4061,26 +4419,29 @@ avatarCropModal?.addEventListener("click", (e) => {
   if (e.target === avatarCropModal) closeAvatarCropModal();
 });
 
-avatarCropApplyBtn?.addEventListener("click", () => {
+avatarCropApplyBtn?.addEventListener("click", async () => {
   try {
-    const avatarDataUrl = exportCroppedAvatarDataUrl();
-    if (!avatarDataUrl) return;
-    if (state.selfUser) {
-      state.selfUser.avatar_url = avatarDataUrl;
-      updateSelfProfileUI();
-      refreshLiveProfilePreview();
-      renderChatMessages();
-      renderMembersSidebar();
-      renderDmList();
+    const out = await exportCroppedImageBlob();
+    const editorOpen = !document.getElementById("settings-tab-profile")?.classList.contains("hidden")
+      && !document.getElementById("settings-modal")?.classList.contains("hidden");
+    if (cropEditor.mode === "banner" || editorOpen) {
+      // No editor: vira rascunho e só vai ao servidor em "Salvar" (prévia ao vivo).
+      setPendingProfileMedia(cropEditor.mode, out);
+    } else {
+      // Fora do editor (clique no próprio avatar): aplica na hora.
+      avatarCropApplyBtn.disabled = true;
+      await applyProfileMedia("avatar", out.blob, out.name);
+      showUiToast("Enviando avatar…");
     }
-    sendWs("UpdateAvatar", { avatar_url: avatarDataUrl });
     closeAvatarCropModal();
   } catch (err) {
-    console.error("Erro ao aplicar avatar:", err);
+    console.error("Erro ao aplicar imagem de perfil:", err);
     if (avatarCropError) {
-      avatarCropError.textContent = "Não foi possível processar esta imagem.";
+      avatarCropError.textContent = err?.message && err.message !== "toBlob" ? err.message : "Não foi possível processar esta imagem.";
       avatarCropError.classList.remove("hidden");
     }
+  } finally {
+    avatarCropApplyBtn.disabled = false;
   }
 });
 
@@ -4462,6 +4823,21 @@ function renderPinnedPopover() {
   }
 }
 
+/** Etapa C2: responder mencionando (notifica o autor) ou não. Lembrado neste aparelho. */
+function replyMentionEnabled() {
+  return state.audioSettings?.replyMention !== false;
+}
+
+function renderReplyMentionToggle() {
+  const btn = document.getElementById("reply-mention-toggle");
+  if (!btn) return;
+  const on = replyMentionEnabled();
+  btn.textContent = on ? "@ ATIVADO" : "@ DESATIVADO";
+  btn.classList.toggle("is-on", on);
+  btn.setAttribute("aria-pressed", String(on));
+  btn.title = on ? "O autor será mencionado e notificado. Clique para desativar." : "O autor não será notificado. Clique para mencionar.";
+}
+
 function setReplyingTo(msg) {
   state.replyingTo = {
     id: msg.id,
@@ -4472,9 +4848,20 @@ function setReplyingTo(msg) {
     replyPreviewText.textContent = `Respondendo a @${msg.author_name}`;
     replyPreviewText.title = state.replyingTo.content.slice(0, 200);
   }
+  // Responder à própria mensagem não notifica ninguém: o botão "@" some.
+  const own = msg.author_name && msg.author_name.toLowerCase() === state.selfUser?.username?.toLowerCase();
+  document.getElementById("reply-mention-toggle")?.classList.toggle("hidden", Boolean(own));
+  renderReplyMentionToggle();
   replyPreviewBar?.classList.remove("hidden");
   chatInput?.focus();
 }
+
+document.getElementById("reply-mention-toggle")?.addEventListener("click", () => {
+  state.audioSettings.replyMention = !replyMentionEnabled();
+  saveAudioSettings();
+  renderReplyMentionToggle();
+  chatInput?.focus();
+});
 
 function clearReplyingTo() {
   state.replyingTo = null;
@@ -4521,23 +4908,26 @@ function sidebarMemberRows(server, users) {
 function renderMembersSidebar() {
   membersList.innerHTML = "";
   const srv = getActiveServer();
-  const allUsers = sidebarMemberRows(srv, state.users.values());
+  // Etapa C6: numa thread aberta, a lista mostra quem segue a thread.
+  const openThreadObj = state.activeView === "server" && typeof isThreadId === "function" && isThreadId(state.currentTextChannel)
+    ? threadById(state.currentTextChannel)
+    : null;
+  const threadMembers = openThreadObj ? new Set(openThreadObj.members || []) : null;
+  const allUsers = sidebarMemberRows(srv, state.users.values())
+    .filter(u => !threadMembers || threadMembers.has(u.username.toLowerCase()));
   const offline = allUsers.filter(u => u.status_kind === "offline" || u.status_kind === "invisible");
   const connected = allUsers.filter(u => u.status_kind !== "offline" && u.status_kind !== "invisible");
-  onlineCountTitle.textContent = `MEMBROS ONLINE — ${connected.length}`;
+  onlineCountTitle.textContent = threadMembers
+    ? `MEMBROS DA THREAD — ${allUsers.length}`
+    : `MEMBROS ONLINE — ${connected.length}`;
 
   const renderSingleMember = (u, topRole) => {
     const li = document.createElement("li");
-    const npCls = getNameplateClass(u.nameplate_style);
-    li.className = `member-item ${npCls}`;
+    const appearance = resolveServerProfile(srv, u.username, u);
+    const plateCls = getNameplateClass(appearance.nameplate_style);
+    li.className = plateCls ? `member-item ${plateCls}` : "member-item";
     const sk = u.status_kind || "online";
-    const decoCls = getDecoClass(u.avatar_decoration);
-    const nameCls = getNameStyleClass(u.name_style);
-    const resolvedNameCol = themedNameColor(u.name_color) || topRole?.color || "";
-    const nameCol =
-      u.name_style === "gradient" || !resolvedNameCol
-        ? ""
-        : `color: ${resolvedNameCol}; --name-color: ${resolvedNameCol};`;
+    const decoCls = getDecoClass(appearance.avatar_decoration);
 
     const isOffline = sk === "offline" || sk === "invisible";
     let activity = isOffline ? "Offline" : u.custom_status || STATUS_LABELS[sk] || "Online";
@@ -4557,38 +4947,35 @@ function renderMembersSidebar() {
     const badge = topRole?.badge_emoji ? `<span title="${escapeHtml(topRole.name)}">${escapeHtml(topRole.badge_emoji)}</span> ` : "";
     const timeoutUntil = memberTimeoutUntil(srv, u.username);
     if (timeoutUntil) activity = `⏱️ De castigo até ${formatTimeoutEnd(timeoutUntil)}`;
+    const nick = memberNickname(srv, u.username);
+    const shownName = nick || u.display_name || u.username;
     li.innerHTML = `
       <div class="user-avatar-wrap ${decoCls}">
         <div class="avatar" style="background: ${u.avatar_color}">
-          ${renderAvatarInner(u.username, u.avatar_url)}
+          ${renderAvatarInner(u.username, appearance.avatar_url, appearance.avatar_animated)}
         </div>
-        ${getDecoSvgHtml(u.avatar_decoration)}
+        ${getDecoSvgHtml(appearance.avatar_decoration)}
         <span class="status-badge ${sk}"></span>
       </div>
       <div class="member-details">
-        <div class="member-name styled-name ${nameCls}" style="${nameCol}">${badge}${escapeHtml(u.username)}</div>
+        <div class="member-name"${shownName !== u.username ? ` title="@${escapeHtml(u.username)}"` : ""}>${badge}<span class="member-display-name">${escapeHtml(shownName)}</span></div>
         <div class="member-activity">${escapeHtml(activity)}</div>
       </div>
     `;
+    applyNameStyleToEl(li.querySelector(".member-display-name"), appearance, topRole?.color);
     li.classList.toggle("is-timed-out", Boolean(timeoutUntil));
     li.classList.toggle("offline", isOffline);
-    const openProfile = () => openMemberProfilePopover(u.id, {author_name:u.username, author_color:u.avatar_color, author_avatar:u.avatar_url});
+    const data = {author_name:u.username, author_color:u.avatar_color, author_avatar:u.avatar_url};
+    const openProfile = () => openMemberProfilePopover(u.id, data);
+    const openCompact = () => openCompactProfile(u.id, data);
     li.tabIndex = 0;
     li.setAttribute("role", "button");
-    li.setAttribute("aria-label", `${u.username}, ${activity}`);
-    li.addEventListener("click", openProfile);
-    li.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProfile(); } });
+    li.setAttribute("aria-label", `${shownName !== u.username ? `${shownName} (${u.username})` : u.username}, ${activity}`);
+    li.addEventListener("click", openCompact);
+    li.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCompact(); } });
     li.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const items = [
-        { header: u.display_name || u.username },
-        { label: "Ver perfil", icon: "👤", onSelect: openProfile },
-      ];
-      const mod = typeof memberModerationMenuItems === "function"
-        ? memberModerationMenuItems(srv, u.username, u.display_name || u.username)
-        : timeoutMenuItems(srv, u.username, u.display_name || u.username);
-      if (mod.length) items.push({ separator: true }, { header: "Moderação do servidor" }, ...mod);
-      SancordUI.contextMenu(e.clientX, e.clientY, items);
+      SancordUI.contextMenu(e.clientX, e.clientY, memberUserMenuItems(srv, u, openProfile));
     });
     membersList.appendChild(li);
   };
@@ -4638,7 +5025,11 @@ function renderMembersSidebar() {
     membersList.appendChild(hdr);
     offline.sort((a,b) => a.username.localeCompare(b.username, "pt-BR")).forEach(u => renderSingleMember(u, getUserServerRoles(srv, u.username)[0] || null));
   }
-  if (!allUsers.length) membersList.innerHTML = SancordUI.emptyHTML({icon:"users",title:"Ninguém por aqui",description:"Os membros aparecerão nesta lista."});
+  if (!allUsers.length) {
+    membersList.innerHTML = threadMembers
+      ? SancordUI.emptyHTML({icon:"thread",title:"Ninguém segue esta thread",description:"Quem escrever aqui ou escolher Seguir thread aparece nesta lista."})
+      : SancordUI.emptyHTML({icon:"users",title:"Ninguém por aqui",description:"Os membros aparecerão nesta lista."});
+  }
 }
 
 function escapeHtml(str) {
@@ -5103,55 +5494,50 @@ function openMessageContextMenu(e, msg) {
   msgContextMenu.style.top = `${y}px`;
 }
 
-function openForwardMessageModal(msg) {
-  if (!forwardMsgModal || !forwardTargetsList) return;
-  forwardSourceMsg = msg;
-  const previewStr = msg.content
-    ? `${msg.author_name}: "${msg.content.slice(0, 70)}${msg.content.length > 70 ? "..." : ""}"`
-    : `Anexo de imagem de ${msg.author_name}`;
-  if (forwardMsgPreview) {
-    forwardMsgPreview.textContent = `Encaminhando de ${previewStr}`;
+/**
+ * Etapa C2: encaminhar de verdade. O servidor guarda uma cópia congelada (texto,
+ * anexos e prévias) e marca como encaminhada; até 5 destinos e comentário opcional.
+ * Destinos: canais de texto onde se pode escrever (todos os servidores), DMs e grupos.
+ */
+function forwardTargets() {
+  const out = [];
+  for (const srv of state.servers || []) {
+    for (const ch of srv.text_channels || []) {
+      if (ch.kind === "announcement" || ch.kind === "forum") continue;
+      if (typeof canPostIn === "function" && !canPostIn(srv, ch)) continue;
+      out.push({ value: ch.id, label: `# ${ch.name} · ${srv.name}` });
+    }
   }
-
-  forwardTargetsList.innerHTML = "";
-  const targets = [
-    ...(state.textChannels || []).map((c) => ({
-      id: c.id,
-      label: `# ${c.name}`,
-      badge: "Canal",
-    })),
-    ...(state.dmConversations || []).map((dm) => ({
-      id: dm.dm_id,
-      label: `@ ${dm.peer?.username || "DM"}`,
-      badge: "DM",
-    })),
-  ];
-
-  for (const tgt of targets) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "forward-target-btn";
-    btn.innerHTML = `<span>${escapeHtml(tgt.label)}</span><span class="badge">${tgt.badge}</span>`;
-    btn.addEventListener("click", () => {
-      if (!forwardSourceMsg) return;
-      const bodyText = forwardSourceMsg.content
-        ? `↪ *Encaminhado de ${forwardSourceMsg.author_name}:*\n${forwardSourceMsg.content}`
-        : `↪ *Imagem encaminhada de ${forwardSourceMsg.author_name}*`;
-      const ok = sendChatPayload({
-        channel_id: tgt.id,
-        content: bodyText,
-        image_url: forwardSourceMsg.image_url || null,
-        reply_to_id: null,
-      });
-      forwardMsgModal.classList.add("hidden");
-      forwardSourceMsg = null;
-      if (ok) showUiToast(`Encaminhada para ${tgt.label}!`);
-    });
-    forwardTargetsList.appendChild(btn);
-  }
-
-  forwardMsgModal.classList.remove("hidden");
+  for (const dm of state.dmConversations || []) out.push({ value: dm.dm_id, label: `@ ${dm.peer?.username || "DM"}` });
+  for (const g of state.groupDms || []) out.push({ value: g.id, label: `👥 ${g.name || "Grupo"}` });
+  return out;
 }
+
+async function openForwardMessageModal(msg) {
+  if (!msg?.id || msg.poll) {
+    showErrorToast(msg?.poll ? "Enquetes não podem ser encaminhadas." : "Esta mensagem não pode ser encaminhada.");
+    return;
+  }
+  const preview = (msg.forward?.content || msg.content || "").trim();
+  const values = await SancordUI.formDialog({
+    title: "Encaminhar mensagem",
+    description: preview ? `"${preview.slice(0, 120)}${preview.length > 120 ? "…" : ""}"` : "Mensagem com anexos ou prévias.",
+    fields: [
+      { name: "targets", label: "DESTINOS (ATÉ 5)", type: "checklist", value: [], max: 5, options: forwardTargets(), emptyText: "Nenhum lugar onde você possa escrever." },
+      { name: "comment", label: "COMENTÁRIO (OPCIONAL)", type: "textarea", rows: 2, maxlength: 2000, placeholder: "Adicione uma mensagem" },
+    ],
+    submitLabel: "Encaminhar",
+  });
+  const targets = (values?.targets || []).slice(0, 5);
+  if (!targets.length) return;
+  const source = { channel_id: msg.channel_id, message_id: msg.id };
+  let sent = 0;
+  for (const channel_id of targets) {
+    if (sendChatPayload({ channel_id, content: (values.comment || "").trim(), forward: source, reply_to_id: null, attachment_ids: [] })) sent++;
+  }
+  if (sent) showUiToast(sent === 1 ? "Mensagem encaminhada." : `Mensagem encaminhada para ${sent} lugares.`);
+}
+
 
 cancelForwardBtn?.addEventListener("click", () => {
   forwardMsgModal?.classList.add("hidden");
@@ -5292,6 +5678,9 @@ document.addEventListener("click", (e) => {
 // Cartão Completo de Perfil em 2 Colunas (Estilo Discord)
 let currentPopoverUserId = null;
 let currentPopoverUsername = null;
+let currentPopoverServerId = null;
+let currentPopoverPrivacy = null;
+let visitedProfileBase = null;
 
 function getRelationshipWith(username) {
   if (!username) return "none";
@@ -5329,15 +5718,19 @@ function switchProfileModalTab(tabKey) {
     btn.classList.toggle("active", btn.dataset.profileTab === tabKey);
   });
   document.getElementById("profile-tab-activity")?.classList.toggle("hidden", tabKey !== "activity");
+  document.getElementById("profile-tab-board")?.classList.toggle("hidden", tabKey !== "board");
   document.getElementById("profile-tab-mutual-friends")?.classList.toggle("hidden", tabKey !== "mutual-friends");
   document.getElementById("profile-tab-mutual-servers")?.classList.toggle("hidden", tabKey !== "mutual-servers");
 }
 
 document.querySelectorAll(".profile-tab-btn[data-profile-tab]").forEach((btn) => {
-  btn.addEventListener("click", () => switchProfileModalTab(btn.dataset.profileTab));
+  btn.addEventListener("click", () => {
+    switchProfileModalTab(btn.dataset.profileTab);
+    if (btn.dataset.profileTab === "board" && currentPopoverUsername) requestFullProfile(currentPopoverUsername);
+  });
 });
 
-function populateProfileRightTabs(user, userId, name, customStatus, sk) {
+function populateProfileActivity(user, userId, sk) {
   // 1. Atividade atual (call, tela, câmera, status)
   if (profileActivityCardList) {
     const cards = [];
@@ -5413,91 +5806,74 @@ function populateProfileRightTabs(user, userId, name, customStatus, sk) {
       profileActivityCardList.appendChild(row);
     }
   }
+}
 
-  // 2. Amigos em comum
-  const mutualFriends = (state.friends || []).filter(
-    (f) => f.username.toLowerCase() !== name.toLowerCase()
-  );
-  if (profileMutualFriendsLabel) {
-    const n = mutualFriends.length;
-    profileMutualFriendsLabel.textContent = n === 1 ? "1 amigo em comum" : `${n} amigos em comum`;
+// A mesma apresentação vale para a prévia local e para o perfil vindo do servidor.
+function renderVisitedProfile(globalProfile, name, userId) {
+  visitedProfileBase = globalProfile;
+  const srv = state.servers.find(s => s.id === currentPopoverServerId);
+  const user = resolveServerProfile(srv, name, globalProfile);
+  const appearance = {
+    ...user,
+    bio: currentPopoverPrivacy?.bio_visible === false ? null : user.bio,
+    banner_url: currentPopoverPrivacy?.banner_visible === false ? null : user.banner_url,
+  };
+  const lower = name.toLowerCase();
+  const serverNick = memberNickname(srv, lower);
+  const status = user.status_kind || "invisible";
+  const custom = customStatusText(user) || (user.online === false ? "Offline" : STATUS_LABELS[status]) || "Offline";
+  const handle = `@${lower.replace(/\s+/g, "")}${user.pronouns ? ` • ${user.pronouns}` : ""}`;
+  if (profileCardAvatar) {
+    profileCardAvatar.style.background = user.avatar_color || "#5865f2";
+    setVisitedProfileAvatar(name, user.avatar_url, user.avatar_animated);
   }
-  if (profileMutualFriendsList) {
-    profileMutualFriendsList.innerHTML = "";
-    if (mutualFriends.length === 0) {
-      profileMutualFriendsList.innerHTML = `<div class="pinned-empty">Nenhum outro amigo conectado em comum no momento.</div>`;
-    } else {
-      for (const f of mutualFriends) {
-        const row = document.createElement("div");
-        row.className = "profile-mutual-row";
-        row.innerHTML = `
-          <div class="profile-mutual-row-left">
-            <div class="user-avatar-wrap">
-              <div class="avatar small-avatar" style="background: ${f.avatar_color || "#5865f2"}">
-                ${renderAvatarInner(f.username, f.avatar_url)}
-              </div>
-              <span class="status-badge ${f.online ? f.status_kind || "online" : "invisible"}"></span>
-            </div>
-            <div>
-              <strong style="font-size: 13.5px; color: #f2f3f5;">${escapeHtml(f.username)}</strong>
-              <div style="font-size: 11.5px; color: #949ba4;">${f.online ? "Online" : "Offline"}</div>
-            </div>
-          </div>
-          <span style="font-size: 11.5px; color: #b5bac1;">Ver perfil ›</span>
-        `;
-        row.addEventListener("click", () => {
-          openMemberProfilePopover(f.live_id || null, {
-            author_name: f.username,
-            author_color: f.avatar_color,
-            author_avatar: f.avatar_url,
-          });
-        });
-        profileMutualFriendsList.appendChild(row);
-      }
-    }
-  }
+  if (profileCardStatusDot) profileCardStatusDot.className = `status-badge ${status}`;
+  if (profileCardName) profileCardName.textContent = serverNick || user.display_name || name;
+  if (profileCardHandle) profileCardHandle.textContent = handle;
+  const moreHandle = document.getElementById("profile-more-handle-sub");
+  if (moreHandle) moreHandle.textContent = handle;
+  if (profileCardCustomStatus) profileCardCustomStatus.textContent = `• ${custom}`;
+  renderProfileBio(profileCardBio, appearance.bio);
 
-  // 3. Servidores em comum
-  const targetLow = (name || "").toLowerCase();
-  const mutualServers = (state.servers || []).filter(
-    (s) => s.id === "sancord" || s.owner_username === targetLow || (s.members || []).includes(targetLow)
-  );
-  if (profileMutualServersLabel) {
-    const n = mutualServers.length;
-    profileMutualServersLabel.textContent = n === 1 ? "1 servidor em comum" : `${n} servidores em comum`;
+  const card = document.getElementById("profile-popover-card");
+  applyProfileCardVisuals(card, profileCardBanner, document.getElementById("profile-card-effect-layer"),
+    document.getElementById("profile-card-deco-wrap"), profileCardName, appearance);
+  applyProfileFrame(card, user.profile_frame);
+  setFrameReactiveState(card, { ...user, id: userId });
+  renderProfileBadges(document.getElementById("profile-card-badges"), user.badges);
+  if (card) refreshAnimatedMedia(card);
+}
+
+let visitedAvatarSource = null;
+function setVisitedProfileAvatar(name, url, animated) {
+  if (visitedAvatarSource && visitedAvatarSource.url === url && visitedAvatarSource.name === name &&
+      visitedAvatarSource.animated === animated) return;
+  visitedAvatarSource = { name, url, animated };
+  profileCardAvatar.innerHTML = renderAvatarInner(name, url, animated);
+}
+
+function refreshVisitedServerProfile(serverId) {
+  if (currentPopoverServerId === serverId && visitedProfileBase &&
+      profilePopoverModal && !profilePopoverModal.classList.contains("hidden")) {
+    renderVisitedProfile(visitedProfileBase, currentPopoverUsername, currentPopoverUserId);
   }
-  if (profileMutualServersList) {
-    profileMutualServersList.innerHTML = "";
-    for (const s of mutualServers) {
-      const srvRow = document.createElement("div");
-      srvRow.className = "profile-mutual-row";
-      const initials = (s.name || "S").slice(0, 2).toUpperCase();
-      const iconHtml = s.icon_url
-        ? `<img src="${cachedMediaUrl(s.icon_url)}" alt="${escapeHtml(s.name)}" style="width:100%;height:100%;object-fit:cover;" />`
-        : escapeHtml(initials);
-      srvRow.innerHTML = `
-        <div class="profile-mutual-row-left">
-          <div class="avatar small-avatar" style="background: ${s.icon_color || "#5865f2"}; border-radius: 12px;">
-            ${iconHtml}
-          </div>
-          <div>
-            <strong style="font-size: 13.5px; color: #f2f3f5;">${escapeHtml(s.name)}</strong>
-            <div style="font-size: 11.5px; color: #949ba4;">${s.id === "sancord" ? state.users.size : (s.members?.length || 1)} membro(s)</div>
-          </div>
-        </div>
-        <span style="font-size: 11.5px; color: #b5bac1;">Abrir servidor ›</span>
-      `;
-      srvRow.addEventListener("click", () => {
-        profilePopoverModal?.classList.add("hidden");
-        switchToServerId(s.id);
-      });
-      profileMutualServersList.appendChild(srvRow);
-    }
+}
+
+let visitedProfileEffectPlayed = false;
+
+function playVisitedProfileEffectOnce() {
+  if (!visitedProfileEffectPlayed) {
+    visitedProfileEffectPlayed = playProfileEffect(document.getElementById("profile-card-effect-layer"));
   }
 }
 
 function openMemberProfilePopover(userId, fallbackMsg = null) {
   if (!profilePopoverModal) return;
+  closeCompactProfile(false);
+  currentPopoverPrivacy = null;
+  renderVisitedProfileLinks([]);
+  stopProfileEffect(document.getElementById("profile-card-effect-layer"));
+  visitedProfileEffectPlayed = false;
   const fallbackLower = fallbackMsg?.author_name?.toLowerCase();
   const user =
     state.users.get(userId) ||
@@ -5517,24 +5893,16 @@ function openMemberProfilePopover(userId, fallbackMsg = null) {
   const color = user?.avatar_color || fallbackMsg?.author_color || "#5865f2";
   const avatarUrl = user?.avatar_url || fallbackMsg?.author_avatar || null;
   const sk = user?.status_kind || (user ? "online" : "invisible");
-  const custom = customStatusText(user) || (user ? STATUS_LABELS[sk] : "Offline");
-  const bio = user?.bio || "";
 
   currentPopoverUserId = resolvedUserId;
   currentPopoverUsername = name;
+  const activeSrv = fallbackMsg?.channel_id
+    ? serverForChannel(fallbackMsg.channel_id)
+    : state.activeView === "server" ? getActiveServer() : null;
+  currentPopoverServerId = activeSrv?.id && activeSrv.id !== "sancord" ? activeSrv.id : null;
   profileCardMoreMenu?.classList.add("hidden");
   document.getElementById("profile-invite-submenu")?.classList.add("hidden");
 
-  if (profileCardAvatar) {
-    profileCardAvatar.style.background = color;
-    profileCardAvatar.innerHTML = renderAvatarInner(name, avatarUrl);
-  }
-  if (profileCardStatusDot) profileCardStatusDot.className = `status-badge ${sk}`;
-  if (profileCardName) profileCardName.textContent = user?.display_name || name;
-  const handleStr = `@${nameLower.replace(/\s+/g, "")}${user?.pronouns ? ` • ${user.pronouns}` : ""}`;
-  if (profileCardHandle) profileCardHandle.textContent = handleStr;
-  const moreHandleSub = document.getElementById("profile-more-handle-sub");
-  if (moreHandleSub) moreHandleSub.textContent = handleStr;
   const moreIgnoreLabel = document.getElementById("profile-more-ignore-label");
   if (moreIgnoreLabel) {
     moreIgnoreLabel.textContent = state.ignoredUsers.has(nameLower) ? "Deixar de ignorar" : "Ignorar";
@@ -5543,7 +5911,6 @@ function openMemberProfilePopover(userId, fallbackMsg = null) {
   if (moreBlockLabel) {
     moreBlockLabel.textContent = state.blockedUsers.has(nameLower) ? "Desbloquear" : "Bloquear";
   }
-  if (profileCardCustomStatus) profileCardCustomStatus.textContent = custom ? `• ${custom}` : "";
   if (profileCardMemberSince) {
     const isSelf = state.selfUser?.username?.toLowerCase() === nameLower;
     profileCardMemberSince.textContent =
@@ -5558,13 +5925,8 @@ function openMemberProfilePopover(userId, fallbackMsg = null) {
     if (profileCardFriendsSince) profileCardFriendsSince.textContent = "Amigos no Sancord ✓";
   }
 
-  if (profileCardBio) {
-    profileCardBio.textContent = bio || "Nenhuma biografia definida.";
-  }
-
   const rolesWrap = document.getElementById("profile-card-roles-wrap");
   const rolesListEl = document.getElementById("profile-card-roles-list");
-  const activeSrv = getActiveServer();
   const memberRoles = getUserServerRoles(activeSrv, name);
   if (rolesWrap && rolesListEl) {
     rolesWrap.classList.toggle("hidden", memberRoles.length === 0);
@@ -5580,14 +5942,7 @@ function openMemberProfilePopover(userId, fallbackMsg = null) {
     profileCardNoteInput.value = getUserProfileNote(name);
   }
 
-  applyProfileCardVisuals(
-    document.getElementById("profile-popover-card"),
-    profileCardBanner,
-    document.getElementById("profile-card-effect-layer"),
-    document.getElementById("profile-card-deco-wrap"),
-    profileCardName,
-    user || { avatar_color: color }
-  );
+  renderVisitedProfile({ online: Boolean(user), ...user, avatar_color: color, avatar_url: avatarUrl, status_kind: sk }, name, resolvedUserId);
 
   const showVol = Boolean(resolvedUserId && resolvedUserId !== state.selfUser?.id);
   if (profileCardVolumeWrap) {
@@ -5610,9 +5965,10 @@ function openMemberProfilePopover(userId, fallbackMsg = null) {
     }
   }
 
-  populateProfileRightTabs(user, resolvedUserId, name, custom, sk);
+  if (profileActivityCardList) profileActivityCardList.textContent = "Carregando atividade…";
   switchProfileModalTab("activity");
   profilePopoverModal.classList.remove("hidden");
+  playVisitedProfileEffectOnce();
   // Perfil completo (amigos/servidores em comum, data de entrada) vem do servidor.
   requestFullProfile(name);
 }
@@ -5868,13 +6224,27 @@ document.addEventListener("click", (e) => {
 // Modal de Configurações Full-Screen (Minha Conta, Editar Perfil, Privacidade, Notificações, Voz, Aparência, Atalhos)
 const SETTINGS_TAB_TITLES = {
   account: "Minha Conta",
-  profile: "Editar Perfil",
-  privacy: "Dados e privacidade",
+  profile: "Perfis",
+  security: "Segurança",
+  devices: "Dispositivos",
+  connections: "Conexões",
+  privacy: "Dados e Privacidade",
+  social: "Conteúdo e Social",
+  requests: "Solicitações de Mensagem",
+  blocked: "Usuários Bloqueados",
+  activity: "Atividade e Presença",
+  voice: "Voz e Vídeo",
   notifications: "Notificações",
-  voice: "Voz e vídeo",
   appearance: "Aparência",
+  accessibility: "Acessibilidade",
+  chat: "Chat e Mensagens",
+  language: "Idioma",
   shortcuts: "Atalhos",
+  windows: "Configurações do Windows",
   updates: "Atualizações",
+  advanced: "Avançado",
+  diagnostics: "Diagnóstico",
+  about: "Sobre o Sancord",
 };
 
 // Rascunho e Editor Completo de Perfil (Molduras Animadas/Estáticas, Banner/GIF, Tema, Nome, Efeito, Placa)
@@ -5888,8 +6258,16 @@ const profileDraft = {
   theme_accent: "#111214",
   name_style: "default",
   name_color: "#ffffff",
+  name_color_secondary: "",
+  name_gradient_direction: "horizontal",
   nameplate_style: "none",
   profile_effect: "none",
+  // Perfil P1: tema completo e mídia pendente ({ blob, url, name, animated } | "remove").
+  theme_highlight: "",
+  theme_mode: "gradient",
+  theme_direction: "vertical",
+  profile_frame: "none",
+  media: {},
 };
 
 const bannerFileInput = document.getElementById("banner-file-input");
@@ -5903,6 +6281,24 @@ const settingsDecoPreviewAvatar = document.getElementById("settings-deco-preview
 const settingsDecoLabel = document.getElementById("settings-deco-label");
 const settingsNameShowcase = document.getElementById("settings-name-showcase");
 const settingsNameStyleSelect = document.getElementById("settings-name-style-select");
+const settingsNameColorSecondary = document.getElementById("settings-name-color-secondary");
+const settingsNameGradientDirection = document.getElementById("settings-name-gradient-direction");
+
+function syncNameStyleOptions() {
+  if (!settingsNameStyleSelect) return;
+  settingsNameStyleSelect.querySelectorAll('[data-catalog-name-style]').forEach(option => option.remove());
+  for (const id of NEW_NAME_STYLES) {
+    const item = cosmeticInfo("name_style", id);
+    if (!item) continue;
+    const option = document.createElement("option");
+    option.dataset.catalogNameStyle = "";
+    option.value = id;
+    option.textContent = item.name;
+    option.disabled = !ownsCosmetic("name_style", id);
+    settingsNameStyleSelect.appendChild(option);
+  }
+  settingsNameStyleSelect.value = profileDraft.name_style;
+}
 const settingsNameColorInput = document.getElementById("settings-name-color-input");
 const custThemePreviewBox = document.getElementById("cust-theme-preview-box");
 const settingsThemePrimary = document.getElementById("settings-theme-primary");
@@ -5941,7 +6337,10 @@ let tempPickedDeco = "none";
 
 function refreshLiveProfilePreview() {
   if (!state.selfUser) return;
-  const avHtml = renderAvatarInner(state.selfUser.username, state.selfUser.avatar_url);
+  // Prévia usa a mídia do rascunho (ainda não salva) quando houver.
+  const draftUser = draftPreviewUser();
+  const avatarAnimated = profileDraft.media?.avatar?.animated || (!profileDraft.media?.avatar && state.selfUser.avatar_animated);
+  const avHtml = renderAvatarInner(state.selfUser.username, draftUser.avatar_url, avatarAnimated);
 
   if (settingsDecoPreviewAvatar) {
     settingsDecoPreviewAvatar.innerHTML = avHtml;
@@ -5949,8 +6348,14 @@ function refreshLiveProfilePreview() {
   }
   applyDecoToElement(settingsDecoPreviewWrap, profileDraft.avatar_decoration);
   if (settingsDecoLabel) {
-    const found = AVATAR_DECORATIONS.find((d) => d.id === profileDraft.avatar_decoration);
-    settingsDecoLabel.textContent = found && found.id !== "none" ? found.name : "Moldura";
+    // Nome vem do catálogo do servidor (com o antigo como reserva).
+    const found = cosmeticInfo("avatar_decoration", profileDraft.avatar_decoration) || AVATAR_DECORATIONS.find((d) => d.id === profileDraft.avatar_decoration);
+    settingsDecoLabel.textContent = found && found.id !== "none" ? found.name : "Decoração";
+  }
+  const frameLabel = document.getElementById("settings-frame-label");
+  if (frameLabel) {
+    const fr = cosmeticInfo("profile_frame", profileDraft.profile_frame);
+    frameLabel.textContent = fr ? fr.name : "Moldura";
   }
 
   if (nameplateMiniAvatar) {
@@ -5958,7 +6363,7 @@ function refreshLiveProfilePreview() {
     nameplateMiniAvatar.style.background = state.selfUser.avatar_color;
   }
   if (nameplateCurrentLabel) {
-    const np = NAMEPLATES.find((n) => n.id === profileDraft.nameplate_style);
+    const np = cosmeticInfo("nameplate", profileDraft.nameplate_style) || NAMEPLATES.find((n) => n.id === profileDraft.nameplate_style);
     nameplateCurrentLabel.textContent = np ? np.name : "Sem placa";
   }
   if (openNameplatePickerBtn) {
@@ -5970,29 +6375,30 @@ function refreshLiveProfilePreview() {
   }
 
   if (settingsNameShowcase) {
-    settingsNameShowcase.textContent = state.selfUser.username;
+    settingsNameShowcase.textContent = draftUser.display_name || state.selfUser.username;
     applyNameStyleToEl(settingsNameShowcase, profileDraft, "#ffffff");
   }
+  document.getElementById("settings-name-gradient-controls")?.classList.toggle("hidden", profileDraft.name_style !== "custom-gradient");
 
   if (custThemePreviewBox) {
-    custThemePreviewBox.style.background = `linear-gradient(180deg, ${profileDraft.theme_primary} 0%, ${profileDraft.theme_accent} 100%)`;
+    custThemePreviewBox.style.background = profileThemeBackground(profileDraft) || "var(--bg-floating)";
   }
+  document.getElementById("theme-direction-field")?.classList.toggle("hidden", profileDraft.theme_mode !== "gradient");
 
+  const draftBanner = draftUser.banner_url;
   if (custBannerPreviewBox) {
-    custBannerPreviewBox.style.backgroundImage = profileDraft.banner_url
-      ? `url("${profileDraft.banner_url}")`
-      : "";
+    custBannerPreviewBox.style.backgroundImage = draftBanner ? `url("${cachedMediaUrl(draftBanner)}")` : "";
     custBannerPreviewBox.style.backgroundColor = profileDraft.theme_primary;
   }
   if (settingsBannerBtnLabel) {
-    settingsBannerBtnLabel.textContent = profileDraft.banner_url
-      ? "Alterar Banner / GIF"
-      : "+ Enviar Banner / GIF";
+    settingsBannerBtnLabel.textContent = draftBanner ? "Alterar banner" : "+ Enviar banner";
   }
-  settingsRemoveBannerBtn?.classList.toggle("hidden", !profileDraft.banner_url);
+  settingsRemoveBannerBtn?.classList.toggle("hidden", !draftBanner);
+  document.getElementById("settings-remove-avatar-btn")?.classList.toggle("hidden", !draftUser.avatar_url);
+  updateBioCounter();
 
   if (settingsEffectLabel) {
-    const ef = PROFILE_EFFECTS.find((e) => e.id === profileDraft.profile_effect);
+    const ef = cosmeticInfo("profile_effect", profileDraft.profile_effect) || PROFILE_EFFECTS.find((e) => e.id === profileDraft.profile_effect);
     settingsEffectLabel.textContent = ef ? `Efeito: ${ef.name}` : "Efeito: Nenhum";
   }
 
@@ -6004,13 +6410,13 @@ function refreshLiveProfilePreview() {
   if (previewCardStatusDot) {
     previewCardStatusDot.className = `status-badge ${profileDraft.status_kind || "online"}`;
   }
-  if (previewCardName) previewCardName.textContent = state.selfUser.username;
+  if (previewCardName) previewCardName.textContent = draftUser.display_name || state.selfUser.username;
   if (previewCardCustomStatus) {
     previewCardCustomStatus.textContent =
       profileDraft.custom_status || STATUS_LABELS[profileDraft.status_kind] || "Online";
   }
   if (previewCardBio) {
-    previewCardBio.textContent = profileDraft.bio || "Nenhuma biografia definida.";
+    renderProfileBio(previewCardBio, profileDraft.bio);
   }
 
   applyProfileCardVisuals(
@@ -6019,28 +6425,44 @@ function refreshLiveProfilePreview() {
     previewEffectLayer,
     previewDecoWrap,
     previewCardName,
-    {
-      ...state.selfUser,
-      ...profileDraft,
-    }
+    { ...draftUser, banner_animated: profileDraft.media?.banner?.animated || (!profileDraft.media?.banner && state.selfUser.banner_animated) }
   );
+  // Perfil P2: moldura, estado reativo e badges na prévia.
+  applyProfileFrame(liveProfilePreviewCard, profileDraft.profile_frame);
+  setFrameReactiveState(liveProfilePreviewCard, { ...state.selfUser, status_kind: profileDraft.status_kind });
+  renderProfileBadges(document.getElementById("preview-card-badges"), state.selfUser.badges);
+  renderProfileContextPreview();
+  refreshAnimatedMedia(document.getElementById("settings-tab-profile") || document);
   updateProfileDirtyState();
+}
+
+function normalizedProfileAppearance(u) {
+  const theme = profileTheme(u);
+  return {
+    avatar_decoration: u.avatar_decoration || "none",
+    theme_primary: (u.theme_primary || "#5c1726").toLowerCase(),
+    theme_accent: (u.theme_accent || "#111214").toLowerCase(),
+    name_style: u.name_style || "default",
+    name_color: (u.name_color || u.avatar_color || "#ffffff").toLowerCase(),
+    name_color_secondary: (u.name_color_secondary || "").toLowerCase(),
+    name_gradient_direction: u.name_gradient_direction || "horizontal",
+    nameplate_style: u.nameplate_style || "none",
+    profile_effect: u.profile_effect || "none",
+    theme_highlight: (u.theme_highlight || "").toLowerCase(),
+    theme_mode: theme.mode,
+    theme_direction: theme.direction,
+    profile_frame: u.profile_frame || "none",
+  };
 }
 
 function getNormalizedSavedProfile() {
   const u = state.selfUser || {};
   return {
+    ...normalizedProfileAppearance(u),
     status_kind: u.status_kind || "online",
     custom_status: u.custom_status || "",
     bio: u.bio || "",
-    avatar_decoration: u.avatar_decoration || "none",
     banner_url: u.banner_url || "",
-    theme_primary: (u.theme_primary || "#5c1726").toLowerCase(),
-    theme_accent: (u.theme_accent || "#111214").toLowerCase(),
-    name_style: u.name_style || "default",
-    name_color: (u.name_color || u.avatar_color || "#ffffff").toLowerCase(),
-    nameplate_style: u.nameplate_style || "none",
-    profile_effect: u.profile_effect || "none",
   };
 }
 
@@ -6048,6 +6470,11 @@ function isProfileDraftDirty() {
   if (!state.selfUser) return false;
   const saved = getNormalizedSavedProfile();
   return (
+    Object.keys(profileDraft.media || {}).length > 0 ||
+    (profileDraft.theme_highlight || "").toLowerCase() !== saved.theme_highlight ||
+    profileDraft.theme_mode !== saved.theme_mode ||
+    profileDraft.theme_direction !== saved.theme_direction ||
+    (profileDraft.profile_frame || "none") !== saved.profile_frame ||
     (profileDraft.status_kind || "online") !== saved.status_kind ||
     (profileDraft.custom_status || "") !== saved.custom_status ||
     (profileDraft.bio || "") !== saved.bio ||
@@ -6057,6 +6484,8 @@ function isProfileDraftDirty() {
     (profileDraft.theme_accent || "#111214").toLowerCase() !== saved.theme_accent ||
     (profileDraft.name_style || "default") !== saved.name_style ||
     (profileDraft.name_color || "#ffffff").toLowerCase() !== saved.name_color ||
+    profileDraft.name_color_secondary !== saved.name_color_secondary ||
+    profileDraft.name_gradient_direction !== saved.name_gradient_direction ||
     (profileDraft.nameplate_style || "none") !== saved.nameplate_style ||
     (profileDraft.profile_effect || "none") !== saved.profile_effect
   );
@@ -6069,28 +6498,33 @@ function updateProfileDirtyState() {
   unsavedProfileBar.classList.toggle("hidden", !(isProfileVisible && isProfileDraftDirty()));
 }
 
+function loadAppearanceDraft(u) {
+  Object.assign(profileDraft, normalizedProfileAppearance(u));
+  const hl = document.getElementById("settings-theme-highlight");
+  if (hl) hl.value = profileDraft.theme_highlight || "#8f7dff";
+  document.querySelectorAll('input[name="theme-mode"]').forEach((r) => (r.checked = r.value === profileDraft.theme_mode));
+  const dir = document.getElementById("settings-theme-direction");
+  if (dir) dir.value = profileDraft.theme_direction;
+
+  if (settingsNameStyleSelect) settingsNameStyleSelect.value = profileDraft.name_style;
+  if (settingsNameColorInput) settingsNameColorInput.value = profileDraft.name_color;
+  if (settingsNameColorSecondary) settingsNameColorSecondary.value = profileDraft.name_color_secondary || "#42beae";
+  if (settingsNameGradientDirection) settingsNameGradientDirection.value = profileDraft.name_gradient_direction;
+  if (settingsThemePrimary) settingsThemePrimary.value = profileDraft.theme_primary;
+  if (settingsThemeAccent) settingsThemeAccent.value = profileDraft.theme_accent;
+}
+
 function loadDraftFromSelfUser() {
   const u = state.selfUser || {};
   profileDraft.status_kind = u.status_kind || "online";
   profileDraft.custom_status = u.custom_status || "";
   profileDraft.bio = u.bio || "";
-  profileDraft.avatar_decoration = u.avatar_decoration || "none";
   profileDraft.banner_url = u.banner_url || "";
-  profileDraft.theme_primary = u.theme_primary || "#5c1726";
-  profileDraft.theme_accent = u.theme_accent || "#111214";
-  profileDraft.name_style = u.name_style || "default";
-  profileDraft.name_color = u.name_color || u.avatar_color || "#ffffff";
-  profileDraft.nameplate_style = u.nameplate_style || "none";
-  profileDraft.profile_effect = u.profile_effect || "none";
-
+  discardPendingProfileMedia();
+  loadAppearanceDraft(u);
   if (settingsStatusSelect) settingsStatusSelect.value = profileDraft.status_kind;
   if (settingsCustomStatus) settingsCustomStatus.value = profileDraft.custom_status;
   if (settingsBioInput) settingsBioInput.value = profileDraft.bio;
-  if (settingsNameStyleSelect) settingsNameStyleSelect.value = profileDraft.name_style;
-  if (settingsNameColorInput) settingsNameColorInput.value = profileDraft.name_color;
-  if (settingsThemePrimary) settingsThemePrimary.value = profileDraft.theme_primary;
-  if (settingsThemeAccent) settingsThemeAccent.value = profileDraft.theme_accent;
-
   refreshLiveProfilePreview();
 }
 
@@ -6103,6 +6537,7 @@ function syncSettingsModalFields() {
   if (typeof renderPrivacySettings === "function") renderPrivacySettings();
 
   const s = state.audioSettings;
+  if (showProfileNameStyles) showProfileNameStyles.checked = s.showProfileNameStyles !== false;
   if (cameraQualitySelect) cameraQualitySelect.value = ["480", "720", "1080"].includes(s.cameraQuality) ? s.cameraQuality : "720";
   if (micGainSlider) micGainSlider.value = s.micGain;
   if (micGainValue) micGainValue.textContent = `${s.micGain}%`;
@@ -6180,12 +6615,14 @@ function syncSettingsModalFields() {
     }
     applyDecoToElement(heroDeco, state.selfUser.avatar_decoration);
     if (heroBanner) {
-      heroBanner.style.backgroundImage = state.selfUser.banner_url ? `url("${state.selfUser.banner_url}")` : "";
+      heroBanner.style.backgroundImage = state.selfUser.banner_url ? `url("${cachedMediaUrl(state.selfUser.banner_url)}")` : "";
       heroBanner.style.backgroundColor = state.selfUser.theme_primary || "#5865f2";
     }
-    if (heroName) heroName.textContent = state.selfUser.username;
+    if (heroName) heroName.textContent = state.selfUser.display_name || state.selfUser.username;
     if (heroSub) heroSub.textContent = `@${state.selfUser.username.toLowerCase().replace(/\s+/g, "")} • ${STATUS_LABELS[state.selfUser.status_kind || "online"] || "Online"}`;
-    if (infoUser) infoUser.textContent = state.selfUser.username;
+    const dispEl = document.getElementById("account-info-display-name");
+    if (dispEl) dispEl.textContent = state.selfUser.display_name || state.selfUser.username;
+    if (infoUser) infoUser.textContent = `@${state.selfUser.username}`;
     if (infoId) infoId.textContent = state.selfUser.id || "—";
   }
   const stSrv = document.getElementById("stat-servers-count");
@@ -6202,6 +6639,7 @@ function syncSettingsModalFields() {
   }
 
   applyAppThemeSettings();
+  if (typeof syncSettingsCenterFields === "function") syncSettingsCenterFields();
   refreshAudioDeviceLists();
 }
 
@@ -6224,35 +6662,28 @@ function closeSettingsModal() {
     if (micTestBtn) micTestBtn.textContent = "Teste do microfone";
     applyDspParametersRealtime();
   }
+  if (typeof stopSettingsCameraTest === "function") stopSettingsCameraTest();
   state.recordingPttKey = false;
-  if (pttRecordBtn) pttRecordBtn.textContent = "Alterar Tecla";
+  if (pttRecordBtn) pttRecordBtn.textContent = "Alterar tecla";
   unsavedProfileBar?.classList.add("hidden");
   settingsModal?.classList.add("hidden");
   if (!state.currentVoiceChannel) releaseLocalAudioStream();
 }
 
 function switchAccountSubTab(subKey) {
-  document.querySelectorAll(".settings-subnav-item[data-account-sub]").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.accountSub === subKey);
-  });
-  ["info", "security", "status", "family"].forEach((k) => {
-    document.getElementById(`account-sub-${k}`)?.classList.toggle("hidden", k !== subKey);
-  });
+  if (subKey === "security") switchSettingsTab("security");
+  else if (subKey === "family") switchSettingsTab("social");
+  else switchSettingsTab("account");
 }
 
-document.querySelectorAll(".settings-subnav-item[data-account-sub]").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    switchSettingsTab("account");
-    switchAccountSubTab(btn.dataset.accountSub);
-  });
-});
-
 function switchSettingsTab(tabName) {
+  if (tabName !== "voice" && typeof stopSettingsCameraTest === "function") stopSettingsCameraTest();
+  if (tabName === "privacy" || tabName === "connections" || tabName === "activity") requestProfileSharing();
+  if (tabName === "devices" || tabName === "security") sendWs("ListSessions");
   document.querySelectorAll(".settings-nav-item[data-settings-tab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.settingsTab === tabName);
   });
   settingsNavProfileCard?.classList.toggle("active", tabName === "profile");
-  document.getElementById("settings-account-subnav")?.classList.toggle("hidden", tabName !== "account");
   Object.keys(SETTINGS_TAB_TITLES).forEach((key) => {
     document.getElementById(`settings-tab-${key}`)?.classList.toggle("hidden", key !== tabName);
   });
@@ -6262,6 +6693,9 @@ function switchSettingsTab(tabName) {
   if (tabName === "voice") {
     refreshAudioDeviceLists();
   }
+  const scrollArea = document.getElementById("settings-content-scroll");
+  if (scrollArea) scrollArea.scrollTop = 0;
+  if (typeof onSettingsCenterTabShown === "function") onSettingsCenterTabShown(tabName);
   updateProfileDirtyState();
 }
 
@@ -6309,6 +6743,14 @@ settingsNameColorInput?.addEventListener("input", (e) => {
   profileDraft.name_color = e.target.value;
   refreshLiveProfilePreview();
 });
+settingsNameColorSecondary?.addEventListener("input", (e) => {
+  profileDraft.name_color_secondary = e.target.value;
+  refreshLiveProfilePreview();
+});
+settingsNameGradientDirection?.addEventListener("change", (e) => {
+  profileDraft.name_gradient_direction = e.target.value;
+  refreshLiveProfilePreview();
+});
 settingsThemePrimary?.addEventListener("input", (e) => {
   profileDraft.theme_primary = e.target.value;
   refreshLiveProfilePreview();
@@ -6320,49 +6762,16 @@ settingsThemeAccent?.addEventListener("input", (e) => {
 
 settingsChangeBannerBtn?.addEventListener("click", () => bannerFileInput?.click());
 settingsRemoveBannerBtn?.addEventListener("click", () => {
-  profileDraft.banner_url = "";
-  refreshLiveProfilePreview();
+  setPendingProfileMedia("banner", "remove");
 });
 
+// Perfil P1: banner passa pelo mesmo editor de recorte (formato faixa) e só vai ao
+// servidor ao clicar em Salvar. GIF mantém a animação (sem recorte).
 bannerFileInput?.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
   bannerFileInput.value = "";
   if (!file || !file.type.startsWith("image/")) return;
-
-  const isGif = file.type === "image/gif" || file.name?.toLowerCase().endsWith(".gif");
-  if (isGif && file.size > MAX_AVATAR_GIF_BYTES) {
-    showUiToast("Este GIF de banner ultrapassa 6 MB. Escolha um GIF menor.");
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    const dataUrl = ev.target.result;
-    if (isGif) {
-      profileDraft.banner_url = dataUrl;
-      refreshLiveProfilePreview();
-      return;
-    }
-    const img = new Image();
-    img.onload = () => {
-      const maxW = 900;
-      const maxH = 360;
-      let w = img.width;
-      let h = img.height;
-      const scale = Math.min(1, maxW / w, maxH / h);
-      w = Math.round(w * scale);
-      h = Math.round(h * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, w, h);
-      profileDraft.banner_url = canvas.toDataURL("image/jpeg", 0.88);
-      refreshLiveProfilePreview();
-    };
-    img.src = dataUrl;
-  };
-  reader.readAsDataURL(file);
+  openAvatarCropModal(file, "banner");
 });
 
 // Modal Seletor de Decorações / Molduras (Animadas e Estáticas)
@@ -6419,8 +6828,9 @@ document.querySelectorAll(".deco-filter-tab").forEach((btn) => {
   });
 });
 
-openDecorationPickerBtn?.addEventListener("click", openDecorationPickerModal);
-openDecoQuickBtn?.addEventListener("click", openDecorationPickerModal);
+// Perfil P2: decoração (avatar) e moldura (cartão) têm seletores separados, ambos do catálogo.
+openDecorationPickerBtn?.addEventListener("click", () => openCosmeticPicker("avatar_decoration"));
+openDecoQuickBtn?.addEventListener("click", () => openCosmeticPicker("profile_frame"));
 closeDecoPickerBtn?.addEventListener("click", () => decorationPickerModal?.classList.add("hidden"));
 cancelDecoPickerBtn?.addEventListener("click", () => decorationPickerModal?.classList.add("hidden"));
 decorationPickerModal?.addEventListener("click", (e) => {
@@ -6433,31 +6843,57 @@ applyDecoPickerBtn?.addEventListener("click", () => {
 });
 
 // Modal Seletor de Efeito de Perfil & Placa de Identificação
-let currentPickerMode = "effect"; // "effect" | "nameplate"
-
 function openEffectOrNameplatePicker(mode) {
   if (!effectPickerModal || !effectGrid) return;
-  currentPickerMode = mode;
+  stopProfileEffect();
   if (effectPickerTitle) {
     effectPickerTitle.textContent =
       mode === "effect" ? "Efeito de Perfil Animado" : "Placa de Identificação";
   }
 
-  const list = mode === "effect" ? PROFILE_EFFECTS : NAMEPLATES;
+  const kind = mode === "effect" ? "profile_effect" : "nameplate";
+  const list = (mode === "effect" ? PROFILE_EFFECTS : NAMEPLATES)
+    .filter(item => !item.requiresCatalog || cosmeticInfo(kind, item.id));
   const activeId =
     mode === "effect" ? profileDraft.profile_effect : profileDraft.nameplate_style;
 
   effectGrid.innerHTML = "";
+  const preview = document.getElementById("effect-picker-preview");
+  const layer = document.getElementById("picker-effect-layer");
+  preview?.classList.toggle("hidden", mode !== "effect");
+  const platePreview = document.getElementById("nameplate-picker-preview");
+  platePreview?.classList.toggle("hidden", mode !== "nameplate");
+  if (mode === "nameplate" && platePreview) {
+    platePreview.textContent = draftPreviewUser().display_name || state.selfUser?.username || "Prévia da placa";
+    applyNameplateChip(platePreview, activeId);
+  }
+  configureProfileEffect(layer, mode === "effect" ? activeId : null);
   for (const item of list) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `effect-choice-btn ${activeId === item.id ? "selected" : ""}`;
-    btn.innerHTML = `<strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.desc)}</span>`;
+    btn.setAttribute("aria-pressed", String(activeId === item.id));
+    const catalogItem = cosmeticInfo(kind, item.id);
+    btn.disabled = !ownsCosmetic(kind, item.id);
+    if (mode === "nameplate") {
+      const swatch = document.createElement("span");
+      swatch.className = `nameplate-option-swatch ${getNameplateClass(item.id)}`;
+      swatch.setAttribute("aria-hidden", "true");
+      btn.appendChild(swatch);
+    }
+    btn.insertAdjacentHTML("beforeend", `<strong>${escapeHtml(catalogItem?.name || item.name)}</strong><span>${escapeHtml(item.desc)}</span>`);
     btn.addEventListener("click", () => {
       if (mode === "effect") profileDraft.profile_effect = item.id;
       else profileDraft.nameplate_style = item.id;
-      openEffectOrNameplatePicker(mode);
+      for (const choice of effectGrid.querySelectorAll("button")) {
+        choice.classList.toggle("selected", choice === btn);
+        choice.setAttribute("aria-pressed", String(choice === btn));
+      }
       refreshLiveProfilePreview();
+      if (mode === "effect") {
+        configureProfileEffect(layer, item.id);
+        playProfileEffect(layer);
+      } else applyNameplateChip(platePreview, item.id);
     });
     effectGrid.appendChild(btn);
   }
@@ -6477,7 +6913,13 @@ resetProfileDraftBtn?.addEventListener("click", () => {
   showUiToast("Alterações não salvas redefinidas.");
 });
 
-saveProfileBtn?.addEventListener("click", () => {
+saveProfileBtn?.addEventListener("click", async () => {
+  // Perfil P1: avatar/banner pendentes sobem antes (anexo + SetProfileMedia).
+  if (Object.keys(profileDraft.media || {}).length) {
+    saveProfileBtn.disabled = true;
+    const ok = await flushPendingProfileMedia().finally(() => (saveProfileBtn.disabled = false));
+    if (!ok) return;
+  }
   const statusKind = settingsStatusSelect?.value || "online";
   const customStatus = settingsCustomStatus?.value.trim() || null;
   const bio = settingsBioInput?.value.trim() || null;
@@ -6486,17 +6928,46 @@ saveProfileBtn?.addEventListener("click", () => {
   profileDraft.custom_status = customStatus || "";
   profileDraft.bio = bio || "";
 
+  const sent = sendWs("UpdateProfile", {
+    status_kind: statusKind,
+    custom_status: customStatus,
+    bio,
+    avatar_decoration: profileDraft.avatar_decoration || "none",
+    theme_highlight: profileDraft.theme_highlight || "",
+    theme_mode: profileDraft.theme_mode || "gradient",
+    theme_direction: profileDraft.theme_direction || "vertical",
+    profile_frame: profileDraft.profile_frame || "none",
+    theme_primary: profileDraft.theme_primary || "",
+    theme_accent: profileDraft.theme_accent || "",
+    name_style: profileDraft.name_style || "default",
+    name_color: profileDraft.name_color || "",
+    name_color_secondary: profileDraft.name_color_secondary,
+    name_gradient_direction: profileDraft.name_gradient_direction,
+    nameplate_style: profileDraft.nameplate_style || "none",
+    profile_effect: profileDraft.profile_effect || "none",
+    ...collectSocialProfileFields(),
+  });
+  if (!sent) {
+    showErrorToast("Sem conexão para salvar o perfil. Tente novamente quando reconectar.");
+    return;
+  }
+
   if (state.selfUser) {
     state.selfUser.status_kind = statusKind;
     state.selfUser.custom_status = customStatus;
     state.selfUser.bio = bio;
     state.selfUser.avatar_decoration =
       profileDraft.avatar_decoration === "none" ? null : profileDraft.avatar_decoration;
-    state.selfUser.banner_url = profileDraft.banner_url || null;
+    state.selfUser.theme_highlight = profileDraft.theme_highlight || null;
+    state.selfUser.theme_mode = profileDraft.theme_mode;
+    state.selfUser.theme_direction = profileDraft.theme_direction;
+    state.selfUser.profile_frame = profileDraft.profile_frame === "none" ? null : profileDraft.profile_frame;
     state.selfUser.theme_primary = profileDraft.theme_primary;
     state.selfUser.theme_accent = profileDraft.theme_accent;
     state.selfUser.name_style = profileDraft.name_style;
     state.selfUser.name_color = profileDraft.name_color;
+    state.selfUser.name_color_secondary = profileDraft.name_color_secondary || null;
+    state.selfUser.name_gradient_direction = profileDraft.name_gradient_direction;
     state.selfUser.nameplate_style =
       profileDraft.nameplate_style === "none" ? null : profileDraft.nameplate_style;
     state.selfUser.profile_effect =
@@ -6506,23 +6977,8 @@ saveProfileBtn?.addEventListener("click", () => {
     renderMembersSidebar();
   }
 
-  sendWs("UpdateProfile", {
-    status_kind: statusKind,
-    custom_status: customStatus,
-    bio,
-    avatar_decoration: profileDraft.avatar_decoration || "none",
-    banner_url: profileDraft.banner_url || "",
-    theme_primary: profileDraft.theme_primary || "",
-    theme_accent: profileDraft.theme_accent || "",
-    name_style: profileDraft.name_style || "default",
-    name_color: profileDraft.name_color || "",
-    nameplate_style: profileDraft.nameplate_style || "none",
-    profile_effect: profileDraft.profile_effect || "none",
-    ...collectSocialProfileFields(),
-  });
-
   updateProfileDirtyState();
-  showUiToast("✓ Perfil atualizado com sucesso!");
+  showUiToast("Alterações de perfil enviadas.");
 });
 
 micDeviceSelect?.addEventListener("change", (e) => {
@@ -6724,6 +7180,7 @@ resetLocalAudioBtn?.addEventListener("click", () => {
   state.audioSettings = { ...DEFAULT_AUDIO_SETTINGS };
   saveAudioSettings();
   syncSettingsModalFields();
+  applyProfileVisualSettings();
   updateQuickKrispBtnUI();
   ensureLocalAudioStream(true);
 });
@@ -6813,7 +7270,13 @@ window.addEventListener("keyup", (e) => {
   if (state.audioSettings.inputMode === "ptt") {
     const keyMatch = e.code === state.audioSettings.pttKey || e.key === state.audioSettings.pttKey;
     if (keyMatch) {
-      state.pttHeld = false;
+      const delay = Math.max(0, Math.min(1000, Number(state.audioSettings.pttReleaseDelayMs) || 0));
+      clearTimeout(state.pttReleaseTimer);
+      if (delay > 0) {
+        state.pttReleaseTimer = setTimeout(() => { state.pttHeld = false; }, delay);
+      } else {
+        state.pttHeld = false;
+      }
     }
   }
 });
@@ -6853,7 +7316,8 @@ function switchToServerView() {
   appLayout?.classList.toggle("hide-members", !toggleMembersBtn?.classList.contains("active"));
 
   const srv = getActiveServer();
-  const ch = state.textChannels.find((c) => c.id === state.currentTextChannel);
+  const ch = state.textChannels.find((c) => c.id === state.currentTextChannel) ||
+    state.voiceChannels.find((c) => c.id === state.currentTextChannel);
   const chName = ch ? ch.name : "Sem canais acessíveis";
   currentTextChannelTitle.textContent = chName;
   // Ícone por tipo, descrição do canal e bloqueio de escrita em anúncios.
@@ -6868,6 +7332,7 @@ function switchToServerView() {
 
   onChannelOpened(getActiveTextChannelId());
   renderTextChannels();
+  renderVoiceChannels();
   renderChatMessages();
   updatePinnedBadge();
   renderTypingIndicator();
@@ -7069,33 +7534,21 @@ function renderDmPeerPanel(peerParam = null) {
   const rel = getRelationshipWith(peer.username);
 
   const decoCls = getDecoClass(peer.avatar_decoration);
-  const nameCls = getNameStyleClass(peer.name_style);
-  const nameCol =
-    peer.name_style === "gradient" || !themedNameColor(peer.name_color)
-      ? ""
-      : `color: ${peer.name_color}; --name-color: ${peer.name_color};`;
-  const bannerStyle = peer.banner_url
-    ? `background-image: url('${peer.banner_url}'); background-color: ${peer.theme_primary || peer.avatar_color}; height: 76px;`
-    : `background: ${peer.theme_primary || peer.avatar_color}; height: 76px;`;
   const cardBgStyle =
     peer.theme_primary || peer.theme_accent
       ? `width: 100%; box-shadow: none; background: linear-gradient(180deg, ${peer.theme_primary || "#1e1f22"} 0%, ${peer.theme_accent || "#111214"} 100%);`
       : `width: 100%; box-shadow: none;`;
-  const effCls =
-    peer.profile_effect && peer.profile_effect !== "none" ? `effect-${peer.profile_effect}` : "";
-
   dmPeerPanel.innerHTML = `
     <div class="profile-card" style="${cardBgStyle}">
-      <div class="profile-effect-layer ${effCls}"></div>
-      <div class="profile-card-banner" style="${bannerStyle}"></div>
+      <div class="profile-card-banner" style="height: 76px;"></div>
       <div class="profile-card-body">
         <div class="profile-card-avatar-wrap ${decoCls}">
           <div class="avatar large-avatar" style="background: ${peer.avatar_color}">
-            ${renderAvatarInner(peer.username, peer.avatar_url)}
+            ${renderAvatarInner(peer.username, peer.avatar_url, peer.avatar_animated)}
           </div>
           <span class="status-badge ${sk}" style="width: 16px; height: 16px;"></span>
         </div>
-        <h3 class="styled-name ${nameCls}" style="${nameCol}">${escapeHtml(peer.display_name || peer.username)}</h3>
+        <div class="profile-nameplate-wrap"><h3 class="dm-peer-name">${escapeHtml(peer.display_name || peer.username)}</h3></div>
         <div class="profile-card-handle">@${escapeHtml(peer.username.toLowerCase())}${peer.pronouns ? ` • ${escapeHtml(peer.pronouns)}` : ""}</div>
         <div class="profile-card-custom-status">${escapeHtml(statusLabel)}</div>
         <div class="profile-card-section">
@@ -7117,6 +7570,10 @@ function renderDmPeerPanel(peerParam = null) {
       </div>
     </div>
   `;
+
+  applyNameStyleToEl(dmPeerPanel.querySelector(".dm-peer-name"), peer);
+  applyNameplateChip(dmPeerPanel.querySelector(".profile-nameplate-wrap"), peer.nameplate_style);
+  setProfileBanner(dmPeerPanel.querySelector(".profile-card-banner"), peer);
 
   dmPeerPanel.querySelector("#dm-panel-add-friend")?.addEventListener("click", () => {
     sendWs("SendFriendRequest", { target_username: peer.username });
@@ -7255,7 +7712,8 @@ function renderDmList() {
     const isActive = state.activeView === "home" && state.activeDmId === conv.dm_id;
 
     const li = document.createElement("li");
-    li.className = `dm-item ${isActive ? "active" : ""}`;
+    const dmMuted = typeof isMutedId === "function" && isMutedId(conv.dm_id);
+    li.className = `dm-item ${isActive ? "active" : ""}${dmMuted ? " is-muted" : ""} ${getNameplateClass(p.nameplate_style)}`;
     li.innerHTML = `
       <div class="dm-item-left">
         <div class="user-avatar-wrap">
@@ -7271,8 +7729,29 @@ function renderDmList() {
       </div>
       ${unread > 0 ? `<span class="dm-count-badge">${unread}</span>` : ""}
     `;
+    applyNameStyleToEl(li.querySelector(".dm-item-name"), p);
     li.addEventListener("click", () => {
       sendWs("OpenDm", { target_username: p.username });
+    });
+    li.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const name = p.display_name || p.username;
+      SancordUI.contextMenu(e.clientX, e.clientY, [
+        { header: name },
+        { label: "Abrir conversa", icon: "💬", onSelect: () => sendWs("OpenDm", { target_username: p.username }) },
+        {
+          label: "Marcar como lida",
+          icon: "✔️",
+          disabled: !unread,
+          onSelect: () => {
+            const hist = state.chatHistory?.[conv.dm_id] || [];
+            const last = hist[hist.length - 1];
+            if (last) sendWs("AckChannel", { channel_id: conv.dm_id, message_id: last.id });
+          },
+        },
+        ...(typeof muteMenuItems === "function" ? [{ separator: true }, ...muteMenuItems(conv.dm_id, "conversa", name, { x: e.clientX, y: e.clientY })] : []),
+        ...(typeof notifyMenuItems === "function" ? notifyMenuItems(conv.dm_id) : []),
+      ]);
     });
     dmListEl.appendChild(li);
   }
@@ -7438,7 +7917,7 @@ function buildFriendRow(f) {
     : "Offline";
 
   const li = document.createElement("li");
-  li.className = "friend-row";
+  li.className = `friend-row ${getNameplateClass(f.nameplate_style)}`;
   li.innerHTML = `
     <div class="friend-row-left">
       <div class="user-avatar-wrap">
@@ -7448,7 +7927,7 @@ function buildFriendRow(f) {
         <span class="status-badge ${sk}"></span>
       </div>
       <div>
-        <div class="friend-row-name">${escapeHtml(f.display_name || f.username)}${f.display_name ? ` <span class="friend-row-handle">@${escapeHtml(f.username.toLowerCase())}</span>` : ""}</div>
+        <div class="friend-row-name"><span class="friend-display-name">${escapeHtml(f.display_name || f.username)}</span>${f.display_name ? ` <span class="friend-row-handle">@${escapeHtml(f.username.toLowerCase())}</span>` : ""}</div>
         <div class="friend-row-sub">${escapeHtml(statusText)}</div>
       </div>
     </div>
@@ -7458,6 +7937,7 @@ function buildFriendRow(f) {
       <button type="button" class="friend-circle-btn" data-act="more" title="Mais opções">⋯</button>
     </div>
   `;
+  applyNameStyleToEl(li.querySelector(".friend-display-name"), f);
   li.querySelector('[data-act="more"]')?.addEventListener("click", (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     SancordUI.contextMenu(r.left, r.bottom + 4, [
@@ -7590,6 +8070,11 @@ function renderQuickAddMembers() {
 
 navHomeBtn?.addEventListener("click", () => switchToHomeFriendsView());
 navServerBtn?.addEventListener("click", () => switchToServerView());
+document.getElementById("stage-open-voice-chat-btn")?.addEventListener("click", () => {
+  if (state.currentVoiceChannel && !isPrivateVoiceId(state.currentVoiceChannel) && typeof openVoiceTextChat === "function") {
+    openVoiceTextChat(state.currentVoiceChannel);
+  }
+});
 openFriendsTabBtn?.addEventListener("click", () => switchToHomeFriendsView());
 document.getElementById("open-starred-tab-btn")?.addEventListener("click", () => switchToHomeStarredView());
 document.getElementById("open-discover-servers-btn")?.addEventListener("click", () => openAddServerWizard("join"));
@@ -7659,10 +8144,27 @@ document.getElementById("account-copy-id-btn")?.addEventListener("click", () => 
   copyTextSafe(state.selfUser?.id || "", "ID da conta copiado!");
 });
 
+function maskEmailAddress(email) {
+  if (!email || !email.includes("@")) return email || "Não cadastrado";
+  const [local, domain] = email.split("@");
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}${"*".repeat(Math.max(3, local.length - visible.length))}@${domain}`;
+}
+
 function renderAccountEmailUI() {
   const el = document.getElementById("account-info-email");
+  const revealBtn = document.getElementById("account-reveal-email-btn");
   if (!el) return;
-  el.textContent = state.accountEmail || "Não cadastrado";
+  if (!state.accountEmail) {
+    el.textContent = "Não cadastrado";
+    revealBtn?.classList.add("hidden");
+    return;
+  }
+  el.textContent = state.accountEmailRevealed ? state.accountEmail : maskEmailAddress(state.accountEmail);
+  if (revealBtn) {
+    revealBtn.classList.remove("hidden");
+    revealBtn.textContent = state.accountEmailRevealed ? "Ocultar" : "Revelar";
+  }
 }
 
 function renderAccountSessionsUI() {
@@ -7686,13 +8188,13 @@ function renderAccountSessionsUI() {
     row.className = "srv-manage-row";
     const info = document.createElement("div");
     const statusBadge = s.current
-      ? `<span class="security-pill ok" style="margin-left:6px;">Sessão atual</span>`
+      ? `<span class="security-pill ok" style="margin-left:6px;">Este dispositivo</span>`
       : s.connected
-      ? `<span class="security-pill" style="margin-left:6px;">Conectado agora</span>`
+      ? `<span class="security-pill" style="margin-left:6px;">Ativo agora</span>`
       : "";
     info.innerHTML = `
       <div>
-        <strong>Dispositivo Sancord (${escapeHtml(s.id.slice(0, 8))})</strong>${statusBadge}
+        <strong>💻 Sancord (${escapeHtml(s.id.slice(0, 8))})</strong>${statusBadge}
       </div>
       <div class="settings-hint-text">
         Criada em ${escapeHtml(fmt(s.created_at))} • Última atividade: ${escapeHtml(fmt(s.last_seen_at))} • ${s.remember ? "Sessão longa (30 dias)" : "Sessão temporária (24 h)"}
@@ -7703,7 +8205,7 @@ function renderAccountSessionsUI() {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn-secondary small-btn danger-text";
-      btn.textContent = "Encerrar";
+      btn.textContent = "Sair";
       btn.addEventListener("click", async () => {
         if (await SancordUI.confirm({ title: "Encerrar sessão?", message: "Desconectar este dispositivo imediatamente?", confirmLabel: "Encerrar sessão", danger: true })) {
           sendWs("RevokeSession", { session_id: s.id });
@@ -8066,6 +8568,9 @@ document.getElementById("create-srv-submit-btn")?.addEventListener("click", () =
 });
 
 function extractInviteCodeFromRaw(raw) {
+  if (typeof SancordNet !== "undefined" && typeof SancordNet.extractInviteCode === "function") {
+    return SancordNet.extractInviteCode(raw);
+  }
   const txt = (raw || "").trim();
   const idx = txt.indexOf("invite=");
   if (idx !== -1) {
@@ -8146,95 +8651,24 @@ document.getElementById("join-srv-submit-btn")?.addEventListener("click", () => 
     }
     return;
   }
-  sendWs("JoinServerByInvite", { invite_code: code });
   addServerWizardModal?.classList.add("hidden");
+  if (window.SancordInvites?.openInvitePreview) {
+    window.SancordInvites.openInvitePreview(code);
+  } else {
+    sendWs("JoinServerByInvite", { invite_code: code });
+  }
 });
 
 // ----------------------------------------------------------------------------
-// Modal Convidar Amigos para o Servidor (Link, Código e DM 1-Clique)
+// Modal Convidar Amigos para o Servidor (delegado para static/js/invites.js)
 // ----------------------------------------------------------------------------
 const inviteServerModal = document.getElementById("invite-server-modal");
 
-async function openInviteServerModal() {
-  const srv = getActiveServer();
-  if (!inviteServerModal || !srv) return;
-  const origin = await resolvePublicOriginUrl();
-  const fullLink = SancordNet.link({ invite: srv.invite_code }, origin);
-
-  const title = document.getElementById("invite-modal-title");
-  const linkInput = document.getElementById("invite-modal-link-input");
-  const codeBadge = document.getElementById("invite-modal-code-badge");
-  const regenBtn = document.getElementById("invite-modal-regen-btn");
-  const listEl = document.getElementById("invite-modal-friends-list");
-
-  if (title) title.textContent = `Convidar para ${srv.name}`;
-  if (linkInput) linkInput.value = fullLink;
-  if (codeBadge) codeBadge.textContent = srv.invite_code;
-  const expiryNote = document.getElementById("invite-modal-expiry-note");
-  if (expiryNote) expiryNote.textContent = "Convite padrão: não expira e não tem limite de usos.";
-  const optionsBox = document.getElementById("invite-modal-options");
-  if (optionsBox) {
-    optionsBox.open = false;
-    optionsBox.classList.toggle("hidden", !getServerPermissionsFor(srv, state.selfUser?.username).create_invites);
+async function openInviteServerModal(serverId = null, channelId = null) {
+  if (window.SancordInvites?.openInviteModal) {
+    return window.SancordInvites.openInviteModal(serverId, channelId);
   }
-  const canEdit = canUserEditServer(srv, state.selfUser?.username);
-  regenBtn?.classList.toggle("hidden", !canEdit);
-
-  if (listEl) {
-    listEl.innerHTML = "";
-    const friends = state.friends || [];
-    if (friends.length === 0) {
-      listEl.innerHTML = `<div class="pinned-empty">Adicione amigos na aba Home para convidá-los em 1 clique!</div>`;
-    } else {
-      for (const f of friends) {
-        const row = document.createElement("div");
-        row.className = "invite-friend-row";
-        row.innerHTML = `
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div class="avatar small-avatar" style="background:${f.avatar_color || "#5865f2"}">${renderAvatarInner(f.username, f.avatar_url)}</div>
-            <strong style="font-size:13px;">${escapeHtml(f.username)}</strong>
-          </div>
-          <button type="button" class="btn-primary small-btn">Enviar DM</button>
-        `;
-        const btn = row.querySelector("button");
-        btn?.addEventListener("click", () => {
-          sendWs("InviteFriendToServer", { server_id: srv.id, target_username: f.username });
-          btn.textContent = "Enviado ✓";
-          btn.disabled = true;
-        });
-        listEl.appendChild(row);
-      }
-    }
-  }
-  inviteServerModal.classList.remove("hidden");
 }
-
-document.getElementById("close-invite-modal-btn")?.addEventListener("click", () => inviteServerModal?.classList.add("hidden"));
-inviteServerModal?.addEventListener("click", (e) => {
-  if (e.target === inviteServerModal) inviteServerModal.classList.add("hidden");
-});
-document.getElementById("invite-modal-copy-link-btn")?.addEventListener("click", () => {
-  const val = document.getElementById("invite-modal-link-input")?.value || "";
-  copyTextSafe(val, "Link de convite copiado!");
-});
-document.getElementById("invite-modal-copy-code-btn")?.addEventListener("click", () => {
-  const val = document.getElementById("invite-modal-code-badge")?.textContent || "";
-  copyTextSafe(val, "Código copiado!");
-});
-document.getElementById("invite-modal-regen-btn")?.addEventListener("click", () => {
-  const srv = getActiveServer();
-  if (!srv) return;
-  sendWs("UpdateServer", {
-    server_id: srv.id,
-    name: srv.name,
-    description: srv.description || null,
-    icon_url: null,
-    banner_url: null,
-    icon_color: null,
-    regenerate_invite: true,
-  });
-  setTimeout(() => openInviteServerModal(), 250);
-});
 
 leaveServerBtn?.addEventListener("click", async () => {
   const srv = getActiveServer();
@@ -8257,7 +8691,7 @@ function switchServerSettingsTab(tabKey) {
   document.querySelectorAll(".settings-nav-item[data-srv-tab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.srvTab === tabKey);
   });
-  ["overview", "roles", "channels", "members", "invites", "automod", "audit", "integrations"].forEach((k) => {
+  ["overview", "roles", "channels", "members", "invites", "emojis", "automod", "audit", "integrations"].forEach((k) => {
     document.getElementById(`srv-tab-${k}`)?.classList.toggle("hidden", k !== tabKey);
   });
   const titles = {
@@ -8266,6 +8700,7 @@ function switchServerSettingsTab(tabKey) {
     channels: "Canais",
     members: "Membros & Moderação",
     invites: "Convites",
+    emojis: "Emojis",
     automod: "AutoMod",
     audit: "Registro de auditoria",
     integrations: t("server.integrations"),
@@ -8301,6 +8736,7 @@ function refreshServerSettingsModalIfOpen() {
     return;
   }
   populateServerSettingsUI(srv);
+  if (typeof renderEmojiSettings === "function") renderEmojiSettings(srv);
 }
 
 function renderRoleEditorPanel(srv) {
@@ -8469,6 +8905,7 @@ function populateServerSettingsUI(srv) {
   const bnPrev = document.getElementById("srv-edit-banner-preview");
   const nameIn = document.getElementById("srv-edit-name-input");
   const descIn = document.getElementById("srv-edit-desc-input");
+  const rulesIn = document.getElementById("srv-edit-rules-input");
   const colIn = document.getElementById("srv-edit-color-input");
   const chosenIcon = srvEditIconDraft !== null ? srvEditIconDraft : (srv.icon_url || "");
   const chosenBanner = srvEditBannerDraft !== null ? srvEditBannerDraft : (srv.banner_url || "");
@@ -8485,6 +8922,7 @@ function populateServerSettingsUI(srv) {
   }
   if (nameIn && nameIn !== document.activeElement) nameIn.value = srv.name || "";
   if (descIn && descIn !== document.activeElement) descIn.value = srv.description || "";
+  if (rulesIn && rulesIn !== document.activeElement) rulesIn.value = srv.rules_text || "";
   if (colIn) colIn.value = srv.icon_color || "#5865f2";
 
   // Cargos
@@ -8625,6 +9063,7 @@ function populateServerSettingsUI(srv) {
       invLinkEl.value = SancordNet.link({ invite: srv.invite_code }, orig);
     });
   }
+  window.SancordInvites?.syncCustomSlugUI?.(srv);
 }
 
 function openServerSettingsModal() {
@@ -8685,6 +9124,7 @@ document.getElementById("srv-edit-save-btn")?.addEventListener("click", () => {
   if (!srv) return;
   const name = document.getElementById("srv-edit-name-input")?.value.trim() || srv.name;
   const description = document.getElementById("srv-edit-desc-input")?.value.trim() || null;
+  const rules_text = document.getElementById("srv-edit-rules-input")?.value.trim() ?? "";
   const icon_color = document.getElementById("srv-edit-color-input")?.value || srv.icon_color;
   sendWs("UpdateServer", {
     server_id: srv.id,
@@ -8694,6 +9134,7 @@ document.getElementById("srv-edit-save-btn")?.addEventListener("click", () => {
     banner_url: srvEditBannerDraft,
     icon_color,
     regenerate_invite: false,
+    rules_text,
   });
 });
 
@@ -8724,7 +9165,7 @@ document.getElementById("srv-add-role-btn")?.addEventListener("click", () => {
       administrator: false, manage_server: false, manage_roles: false, manage_channels: false,
       kick_members: false, ban_members: false, manage_messages: false, mention_everyone: false,
       send_messages: true, attach_files: true, connect_voice: true, speak_voice: true,
-      stream_video: true, create_invites: true,
+      stream_video: true, create_invites: true, manage_invites: false,
     },
   });
 });
@@ -8748,10 +9189,14 @@ function applyRolePreset(kind) {
     manage_channels: admin || mod,
     kick_members: admin || mod,
     moderate_members: admin || mod,
+    manage_nicknames: admin || mod,
+    manage_expressions: admin || mod,
+    change_nickname: true,
     ban_members: admin,
     manage_messages: admin || mod,
     mention_everyone: admin || mod,
     create_invites: true,
+    manage_invites: admin || mod,
     send_messages: true,
     attach_files: true,
     connect_voice: true,

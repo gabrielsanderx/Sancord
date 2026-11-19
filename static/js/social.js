@@ -10,7 +10,6 @@ state.blockedList = state.blockedList || [];
 state.messageRequests = state.messageRequests || [];
 state.groupDms = state.groupDms || [];
 state.pendingGroupOpen = null;
-state.fullProfiles = new Map();
 
 function myLowerName() {
   return (state.selfUser?.username || "").toLowerCase();
@@ -151,7 +150,7 @@ function buildGroupDmItem(g) {
   const unread = state.unreadDms.get(g.id) || 0;
   const isActive = state.activeView === "home" && state.activeDmId === g.id;
   const li = document.createElement("li");
-  li.className = `dm-item ${isActive ? "active" : ""}`;
+  li.className = `dm-item ${isActive ? "active" : ""}${typeof isMutedId === "function" && isMutedId(g.id) ? " is-muted" : ""}`;
   const left = document.createElement("div");
   left.className = "dm-item-left";
   const meta = document.createElement("div");
@@ -187,6 +186,7 @@ function groupContextMenu(g, x, y) {
     { label: "Abrir", icon: "💬", onSelect: () => openGroupConversation(g.id) },
     { label: "Adicionar amigos", icon: "➕", onSelect: () => openAddGroupMembersDialog(g) },
     { label: "Editar grupo", icon: "✏️", onSelect: () => openEditGroupDialog(g) },
+    ...(typeof muteMenuItems === "function" ? [{ separator: true }, ...muteMenuItems(g.id, "conversa", groupDisplayName(g), { x, y })] : []),
     { separator: true },
     { label: owner ? "Sair do grupo (posse passa a outro membro)" : "Sair do grupo", icon: "🚪", danger: true, onSelect: () => confirmLeaveGroup(g) },
   ]);
@@ -612,9 +612,18 @@ async function openReportUserDialog(username, messageId = null) {
 // ---------------------------------------------------------------------------
 
 function requestFullProfile(username) {
-  if (!username || username === "Sancord Bot") return;
-  const srv = state.activeView === "server" ? getActiveServer() : null;
-  sendWs("GetUserProfile", { username, server_id: srv && srv.id !== "sancord" ? srv.id : null });
+  const sent = username && username !== "Sancord Bot" && sendWs("GetUserProfile", {
+    username, server_id: currentPopoverServerId,
+  });
+  renderVisitedBoard(null, sent ? "Carregando mural…" : "Mural indisponível.");
+  renderVisitedProfileLinks([]);
+  for (const [label, list, title] of [
+    [profileMutualFriendsLabel, profileMutualFriendsList, "Amigos em comum"],
+    [profileMutualServersLabel, profileMutualServersList, "Servidores em comum"],
+  ]) {
+    if (label) label.textContent = title;
+    if (list) list.textContent = sent ? "Carregando…" : "Dados indisponíveis.";
+  }
 }
 
 function formatProfileDate(ms) {
@@ -628,19 +637,31 @@ function formatProfileDate(ms) {
 function onUserProfile(p) {
   const u = p.user;
   if (!u) return;
-  state.fullProfiles.set(u.username.toLowerCase(), p);
-  // Só atualiza o cartão se ele ainda mostra esta pessoa.
-  if ((currentPopoverUsername || "").toLowerCase() !== u.username.toLowerCase()) return;
+  renderCompactProfileReply(p);
+  // Respostas atrasadas de outro perfil ou contexto ficam fora do cartão atual.
+  if (currentPopoverUsername?.toLowerCase() !== u.username.toLowerCase() ||
+      (p.server_id ?? null) !== currentPopoverServerId || profilePopoverModal?.classList.contains("hidden")) return;
+  currentPopoverPrivacy = { bio_visible: p.bio_visible, banner_visible: p.banner_visible };
+  renderVisitedBoard(p.board);
+  renderVisitedProfileLinks(p.links);
 
   if (profileCardMemberSince) {
-    const parts = [`Sancord: ${u.created_at || "—"}`];
+    const parts = u.created_at ? [`Sancord: ${u.created_at}`] : [];
     if (p.joined_server_at) {
       const srv = state.servers.find((s) => s.id === p.server_id);
       parts.push(`${srv?.name || "Servidor"}: ${formatProfileDate(p.joined_server_at)}`);
     }
-    profileCardMemberSince.textContent = parts.join(" • ");
+    profileCardMemberSince.textContent = parts.join(" • ") || "Informação indisponível";
   }
-  if (profileCardName && u.display_name) profileCardName.textContent = u.display_name;
+  const live = state.users.get(currentPopoverUserId);
+  const profile = { ...live, ...u, ...profileAppearanceForWire(u) };
+  renderVisitedProfile(profile, u.username, currentPopoverUserId);
+  if (p.activity_visible === false) {
+    if (profileActivityCardList) profileActivityCardList.textContent = "Atividade indisponível.";
+  } else {
+    populateProfileActivity(profile, currentPopoverUserId, profile.status_kind);
+  }
+  playVisitedProfileEffectOnce();
   const moreBlockLabel = document.getElementById("profile-more-block-label");
   if (moreBlockLabel) moreBlockLabel.textContent = p.relationship === "blocked" ? "Desbloquear" : "Bloquear";
   if (profileCardActions && p.relationship === "blocked") {
@@ -757,20 +778,32 @@ function renderPrivacySettings() {
   if (dm && document.activeElement !== dm) dm.value = privacy.dm_policy || "requests";
   if (fr && document.activeElement !== fr) fr.value = privacy.friend_requests || "everyone";
 
+  const dmPolicy = privacy.dm_policy || "requests";
+  document.querySelectorAll('input[name="settings-dm-request-mode"]').forEach((r) => {
+    r.checked = r.value === dmPolicy;
+  });
+
   const ul = document.getElementById("privacy-blocked-list");
   if (!ul) return;
   ul.innerHTML = "";
+  const query = (document.getElementById("blocked-users-search")?.value || "").trim().toLowerCase();
+  const blocked = (state.blockedList || []).filter((u) => !query || (u.username || "").toLowerCase().includes(query) || (u.display_name || "").toLowerCase().includes(query));
   if ((state.blockedList || []).length === 0) {
-    ul.innerHTML = `<div class="settings-hint-text">Ninguém bloqueado.</div>`;
+    ul.innerHTML = `<div class="settings-hint-text">Você não bloqueou ninguém.</div>`;
     return;
   }
-  for (const u of state.blockedList) {
+  if (blocked.length === 0) {
+    ul.innerHTML = `<div class="settings-hint-text">Nenhum usuário bloqueado corresponde à busca.</div>`;
+    return;
+  }
+  for (const u of blocked) {
     ul.appendChild(
       socialRow(u, "Bloqueado", [
         { label: "Desbloquear", onClick: () => sendWs("UnblockUser", { target_username: u.username }) },
       ])
     );
   }
+  if (typeof renderSettingsRequestsList === "function") renderSettingsRequestsList();
 }
 
 function savePrivacySettings() {

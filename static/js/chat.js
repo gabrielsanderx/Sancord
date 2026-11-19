@@ -96,18 +96,41 @@ function formatDayLabel(ts) {
   return d.toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
 }
 
+function formatDateRegional(ts) {
+  const d = new Date(ts);
+  const fmt = state.audioSettings?.regionalDateFormat || "pt-BR";
+  if (fmt === "iso") {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  return d.toLocaleDateString(fmt === "en-US" ? "en-US" : "pt-BR");
+}
+
+function formatClockRegional(ts, fallbackStamp) {
+  const mode = state.audioSettings?.chatTimeFormat || "24h";
+  if (ts) {
+    if (mode === "12h") {
+      return new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+    }
+    if (mode === "auto") {
+      return new Date(ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    }
+  }
+  const validStamp = /^\d{1,2}:\d{2}$/.test(fallbackStamp || "");
+  if (validStamp) return fallbackStamp;
+  if (ts) return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return fallbackStamp || "";
+}
+
 /** "Hoje às 14:50", "Ontem às 09:12" ou "12/11/2026 14:50". */
 function formatMessageTime(msg) {
-  const validStamp = /^\d{1,2}:\d{2}$/.test(msg.timestamp || "");
-  const hhmm = validStamp
-    ? msg.timestamp
-    : msg.created_at
-      ? new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
-      : msg.timestamp || "";
+  const hhmm = formatClockRegional(msg.created_at, msg.timestamp);
   if (!msg.created_at) return hhmm;
   const label = formatDayLabel(msg.created_at);
   if (label === "Hoje" || label === "Ontem") return `${label} às ${hhmm}`;
-  return `${new Date(msg.created_at).toLocaleDateString("pt-BR")} ${hhmm}`;
+  return `${formatDateRegional(msg.created_at)} ${hhmm}`;
 }
 
 function myLower() {
@@ -129,7 +152,74 @@ function serverForChannel(channelId) {
   if (!channelId || isPrivateTextId(channelId)) return null;
   const thread = state.threadIndex?.get(channelId);
   if (thread) return (state.servers || []).find((s) => s.id === thread.server_id) || null;
-  return (state.servers || []).find((s) => (s.text_channels || []).some((c) => c.id === channelId)) || null;
+  return (state.servers || []).find(
+    (s) => (s.text_channels || []).some((c) => c.id === channelId) || (s.voice_channels || []).some((c) => c.id === channelId)
+  ) || null;
+}
+
+/** Etapa C4: apelido da pessoa neste servidor, ou null. */
+function memberNickname(srv, username) {
+  const lower = username?.toLowerCase();
+  return srv?.member_nicks && Object.hasOwn(srv.member_nicks, lower) ? srv.member_nicks[lower] : null;
+}
+
+/** Nome mostrado num canal: apelido do servidor do canal, senão o nome de usuário. */
+function displayNameIn(channelId, username) {
+  const srv = serverForChannel(channelId);
+  return memberNickname(srv, username) || (srv && findLiveUserByName(username?.toLowerCase())?.display_name) || username || "";
+}
+
+// ---------------------------------------------------------------------------
+// Etapa C5: emojis próprios dos servidores. Código na mensagem: <:nome:id> ou
+// <a:nome:id> (animado); o id é o do anexo com a imagem. O servidor só mantém
+// códigos que o autor pode usar; o resto chega como :nome:.
+// ---------------------------------------------------------------------------
+const CUSTOM_EMOJI_TOKEN = /<(a?):([A-Za-z0-9_]{1,32}):([0-9a-f]{32})>/g;
+
+function customEmojiUrl(id) {
+  return SancordNet.imageUrl(`/api/attachments/${encodeURIComponent(id)}/emoji`);
+}
+
+function customEmojiToken(e) {
+  return `<${e.animated ? "a" : ""}:${e.name}:${e.id}>`;
+}
+
+/** Emojis de todos os meus servidores; os do servidor aberto vêm primeiro. */
+function allServerEmojis() {
+  const active = state.activeView === "server" ? state.activeServerId : null;
+  const servers = [...(state.servers || [])].sort((a, b) => Number(b.id === active) - Number(a.id === active));
+  return servers.flatMap((s) => (s.emojis || []).map((e) => ({ ...e, server: s })));
+}
+
+function findCustomEmojiByName(name) {
+  const lower = String(name || "").toLowerCase();
+  return allServerEmojis().find((e) => e.name.toLowerCase() === lower) || null;
+}
+
+function customEmojiHtml(name, id, cls = "custom-emoji") {
+  const safe = escapeHtml(name);
+  return `<img class="${cls}" src="${escapeHtml(customEmojiUrl(id))}" alt=":${safe}:" title=":${safe}:" draggable="false">`;
+}
+
+/** No campo de texto: ":nome:" vira código do emoji (fora de trechos de código). */
+function encodeCustomEmojis(text) {
+  if (!text.includes(":")) return text;
+  return String(text)
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(/(^|[^<\w:])(:([A-Za-z0-9_]{2,32}):)(?![\w])/g, (m, pre, _all, name) => {
+            const e = findCustomEmojiByName(name);
+            return e ? `${pre}${customEmojiToken(e)}` : m;
+          })
+    )
+    .join("");
+}
+
+/** Para editar: códigos de emoji voltam a ser ":nome:". */
+function decodeCustomEmojis(text) {
+  return String(text || "").replace(CUSTOM_EMOJI_TOKEN, (_m, _a, name) => `:${name}:`);
 }
 
 /** A mensagem menciona o usuário atual? Usa as menções resolvidas pelo servidor. */
@@ -180,9 +270,15 @@ function renderMarkdown(src, msg = null) {
 
   let html = escapeHtml(text);
 
+  // Emojis do servidor (antes do markdown: "_" do nome não vira itálico). Só emojis = grandes.
+  const onlyEmojis = /<a?:/.test(text) && !text.replace(CUSTOM_EMOJI_TOKEN, "").replace(/\u0000\d+\u0000/g, "x").trim();
+  html = html.replace(/&lt;(a?):([A-Za-z0-9_]{1,32}):([0-9a-f]{32})&gt;/g, (_m, _a, name, id) =>
+    ph(customEmojiHtml(name, id, onlyEmojis ? "custom-emoji jumbo" : "custom-emoji"))
+  );
+
   // Cartão de convite enviado pelo próprio Sancord: [[INVITE:CODIGO:NOME]]
   html = html.replace(/\[\[INVITE:([A-Za-z0-9_-]+):([^\]]+)\]\]/g, (_m, code, srvName) =>
-    ph(`<div class="dm-server-invite-card"><div class="dm-server-invite-meta"><strong>🎟️ ${srvName}</strong><span>Código: <code>${code}</code></span></div><button type="button" class="btn-primary small-btn dm-join-invite-btn" data-join-invite="${code}">Entrar</button></div>`)
+    ph(`<div class="dm-server-invite-card" data-invite-code="${code}"><div class="dm-invite-eyebrow">Convite para entrar no servidor</div><div class="dm-invite-main"><div class="avatar dm-invite-icon">${srvName.slice(0, 2).toUpperCase()}</div><div class="dm-server-invite-meta"><strong class="dm-invite-name">${srvName}</strong><span class="dm-invite-stats">Código: <code>${code}</code></span></div><button type="button" class="btn-primary small-btn dm-join-invite-btn" data-join-invite="${code}">Entrar no servidor</button></div></div>`)
   );
 
   // Convites e referências abrem no aplicativo, sem uma página pública.
@@ -322,18 +418,128 @@ function fileIconFor(att) {
   return "📦";
 }
 
+/**
+ * Prévias de links (Etapa C1), geradas pelo servidor. Só texto via textContent;
+ * a imagem vem do proxy do Sancord (nunca direto do site, para não expor o IP).
+ * Desligado em "Pré-visualizar … automaticamente" (privacidade).
+ */
+function buildEmbedsNode(msg, embeds = msg.embeds, indexBase = 0) {
+  const list = Array.isArray(embeds) ? embeds : [];
+  if (!list.length || state.audioSettings?.autoEmbeds === false) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "message-embeds";
+  list.forEach((e, index) => {
+    if (!e || (!e.title && !e.description && !e.image_url)) return;
+    const safeUrl = /^https?:\/\//i.test(e.url || "") ? e.url : null;
+    const card = document.createElement("div");
+    card.className = `link-embed${e.title || e.description ? "" : " image-only"}`;
+    if (e.site_name) {
+      const site = document.createElement("span");
+      site.className = "link-embed-site";
+      site.textContent = e.site_name;
+      card.appendChild(site);
+    }
+    if (e.title) {
+      const title = document.createElement(safeUrl ? "a" : "strong");
+      title.className = "link-embed-title";
+      if (safeUrl) {
+        title.classList.add("chat-link");
+        title.href = safeUrl;
+        title.target = "_blank";
+        title.rel = "noopener noreferrer";
+      }
+      title.textContent = e.title;
+      card.appendChild(title);
+    }
+    if (e.description) {
+      const desc = document.createElement("p");
+      desc.className = "link-embed-desc";
+      desc.textContent = e.description;
+      card.appendChild(desc);
+    }
+    if (e.image_url) {
+      const img = document.createElement("img");
+      img.className = "link-embed-image";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.alt = e.title || e.site_name || "Prévia do link";
+      img.src = SancordNet.imageUrl(`/api/link-preview/${encodeURIComponent(msg.channel_id)}/${encodeURIComponent(msg.id)}/${indexBase + index}`);
+      img.addEventListener("error", () => img.remove(), { once: true });
+      card.appendChild(img);
+    }
+    wrap.appendChild(card);
+  });
+  return wrap.childElementCount ? wrap : null;
+}
+
+/**
+ * Etapa C2: mensagem encaminhada. A cópia vem congelada do servidor; o autor
+ * original não aparece. O rodapé leva à mensagem original (se você tiver acesso).
+ */
+function buildForwardNode(msg) {
+  const f = msg.forward;
+  if (!f) return null;
+  const box = document.createElement("div");
+  box.className = "forwarded-block";
+  const label = document.createElement("div");
+  label.className = "forwarded-label";
+  label.textContent = "↪ Encaminhada";
+  box.appendChild(label);
+  if (f.content) {
+    const text = document.createElement("div");
+    text.className = "message-text forwarded-text";
+    text.innerHTML = renderMarkdown(f.content, null);
+    box.appendChild(text);
+  }
+  const atts = buildAttachmentsNode({ ...msg, image_url: null, attachments: [...(f.attachments || [])] });
+  if (atts) box.appendChild(atts);
+  const embeds = buildEmbedsNode(msg, f.embeds, 100);
+  if (embeds) box.appendChild(embeds);
+  const source = document.createElement("button");
+  source.type = "button";
+  source.className = "forwarded-source link-btn";
+  const when = f.original_created_at ? new Date(f.original_created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+  source.textContent = [f.source_label, when].filter(Boolean).join(" • ");
+  source.title = "Ir para a mensagem original";
+  source.addEventListener("click", () => {
+    if (typeof jumpToMessage === "function") jumpToMessage(f.source_channel_id, f.source_message_id);
+  });
+  box.appendChild(source);
+  return box;
+}
+
 function buildAttachmentsNode(msg) {
   const list = msg.attachments || [];
   if (!list.length && !msg.image_url) return null;
   const wrap = document.createElement("div");
   wrap.className = "message-attachments";
   const showMedia = state.audioSettings?.autoEmbeds !== false;
+  const showImages = showMedia && state.audioSettings?.chatInlineImages !== false;
   if (msg.image_url) {
     // Formato antigo (imagem embutida como data URL).
     list.unshift({ id: "legacy", kind: "image", url: msg.image_url, filename: "imagem", size: 0 });
   }
   for (const att of list) {
-    if (att.kind === "image" && showMedia) {
+    if (att.kind === "image" && showImages) {
+      // GIF: estrela para favoritar (aparece ao passar o mouse), como no Discord.
+      let holder = wrap;
+      if (typeof isGifAttachment === "function" && isGifAttachment(att)) {
+        holder = document.createElement("span");
+        holder.className = "attachment-gif-wrap";
+        const star = document.createElement("button");
+        star.type = "button";
+        star.className = `gif-fav-btn${isFavoriteGif(att.id) ? " is-fav" : ""}`;
+        star.dataset.gifId = att.id;
+        star.textContent = isFavoriteGif(att.id) ? "★" : "☆";
+        star.setAttribute("aria-label", isFavoriteGif(att.id) ? "Remover dos GIFs favoritos" : "Adicionar aos GIFs favoritos");
+        star.title = star.getAttribute("aria-label");
+        star.addEventListener("click", (e) => {
+          e.stopPropagation();
+          toggleFavoriteGif(att.id);
+        });
+        holder.appendChild(star);
+        wrap.appendChild(holder);
+      }
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "attachment-image";
@@ -363,12 +569,19 @@ function buildAttachmentsNode(msg) {
         lightboxImg.src = SancordNet.imageUrl(att.url);
         imageLightboxModal.classList.remove("hidden");
       });
-      wrap.appendChild(btn);
+      if (holder === wrap) wrap.appendChild(btn);
+      else holder.insertBefore(btn, holder.firstChild);
     } else if (att.kind === "video" && showMedia) {
       const video = document.createElement("video");
       video.className = "attachment-video";
       video.controls = true;
       video.preload = "metadata";
+      if (state.audioSettings?.chatAutoplayVideo) {
+        video.autoplay = true;
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+      }
       video.src = SancordNet.url(att.url);
       wrap.appendChild(video);
     } else {
@@ -425,13 +638,15 @@ function buildReactionsNode(msg) {
     btn.className = `reaction-pill ${reacted ? "reacted" : ""}`;
     btn.setAttribute("aria-pressed", String(reacted));
     const e = document.createElement("span");
-    e.textContent = emoji;
+    const custom = /^<(a?):([A-Za-z0-9_]{1,32}):([0-9a-f]{32})>$/.exec(emoji);
+    if (custom) e.innerHTML = customEmojiHtml(custom[2], custom[3], "custom-emoji reaction-emoji");
+    else e.textContent = emoji;
     const c = document.createElement("span");
     c.className = "reaction-count";
     c.textContent = users.length;
     btn.append(e, c);
     const names = users.slice(0, 6).join(", ") + (users.length > 6 ? ` e mais ${users.length - 6}` : "");
-    SancordUI.tooltip(btn, `${emoji} ${names}`, "top");
+    SancordUI.tooltip(btn, `${custom ? `:${custom[2]}:` : emoji} ${names}`, "top");
     btn.addEventListener("click", () => {
       pushRecentEmoji(emoji);
       sendWs("ToggleReaction", { channel_id: msg.channel_id, message_id: msg.id, emoji });
@@ -546,38 +761,38 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
   ].filter(Boolean).join(" ");
   div.dataset.msgId = msg.id;
   div.dataset.author = authorLower;
-  div.setAttribute("role", "article");
-  div.setAttribute("aria-label", `${msg.author_name}, ${formatMessageTime(msg)}`);
-
   const liveUser = findLiveUserByName(authorLower) || state.users.get(msg.author_id);
-  const avatarUrl = liveUser?.avatar_url || msg.author_avatar;
-  const rawNameColor = typeof themedNameColor === "function" ? themedNameColor(liveUser?.name_color) : liveUser?.name_color;
-  const nameColor = rawNameColor || (typeof themedNameColor === "function" ? themedNameColor(msg.author_color) : msg.author_color);
-  const safeColor = /^#[0-9a-f]{3,8}$/i.test(nameColor || "") ? nameColor : "";
+  // Mensagens de sistema e integração mantêm a identidade gravada.
+  const srv = authorKindOf(msg) === "user" ? serverForChannel(msg.channel_id) : null;
+  const author = resolveServerProfile(srv, msg.author_name, liveUser);
+  const shownName = memberNickname(srv, msg.author_name) || (srv && liveUser?.display_name) || msg.author_name;
+  div.setAttribute("role", "article");
+  div.setAttribute("aria-label", `${shownName}, ${formatMessageTime(msg)}`);
+  const avatarUrl = author?.avatar_url || msg.author_avatar;
   const avatarColor = /^#[0-9a-f]{3,8}$/i.test(msg.author_color || "") ? msg.author_color : "#5865f2";
-  const decoCls = getDecoClass(liveUser?.avatar_decoration);
-  const nameCls = getNameStyleClass(liveUser?.name_style);
+  const decoCls = getDecoClass(author?.avatar_decoration);
   const isEditing = state.editingMsgId === msg.id;
+  const nickTitle = shownName !== msg.author_name ? ` title="@${escapeHtml(msg.author_name)}"` : "";
 
   const replyHtml = msg.reply_to
     ? `<div class="reply-context-line" role="button" tabindex="0" data-jump-msg="${escapeHtml(msg.reply_to.id)}" title="Ir para a mensagem original">
          <span class="reply-spine" aria-hidden="true"></span>
-         <strong>@${escapeHtml(msg.reply_to.author_name)}</strong>
-         <span class="reply-preview-text">${escapeHtml((msg.reply_to.preview || "").slice(0, 100))}</span>
+         <strong>@${escapeHtml(displayNameIn(msg.channel_id, msg.reply_to.author_name))}</strong>
+         <span class="reply-preview-text">${escapeHtml(decodeCustomEmojis(msg.reply_to.preview || "").slice(0, 100))}</span>
        </div>`
     : "";
 
   const header = grouped
     ? `<span class="grouped-time" aria-hidden="true">${escapeHtml(msg.timestamp || "")}</span>`
     : `<div class="avatar-status-wrap ${decoCls}">
-         <div class="avatar clickable-profile" style="background: ${avatarColor}">${renderAvatarInner(msg.author_name, avatarUrl)}</div>
-         ${getDecoSvgHtml(liveUser?.avatar_decoration)}
+         <div class="avatar clickable-profile" style="background: ${avatarColor}">${renderAvatarInner(msg.author_name, avatarUrl, author?.avatar_animated)}</div>
+         ${getDecoSvgHtml(author?.avatar_decoration)}
        </div>`;
 
   const meta = grouped
     ? ""
     : `<div class="message-meta">
-         <span class="message-author clickable-profile styled-name ${nameCls}" style="${liveUser?.name_style === "gradient" || !safeColor ? "" : `color:${safeColor};--name-color:${safeColor};`}">${escapeHtml(msg.author_name)}</span>
+         <span class="message-author clickable-profile"${nickTitle}>${escapeHtml(shownName)}</span>
          ${authorKindOf(msg) !== "user" ? `<span class="bot-tag author-${authorKindOf(msg)}">${typeof t === "function" ? t(`author.${authorKindOf(msg)}`) : "SISTEMA"}</span>` : ""}
          <time class="message-time" ${msg.created_at ? `datetime="${new Date(msg.created_at).toISOString()}" title="${escapeHtml(new Date(msg.created_at).toLocaleString("pt-BR"))}"` : ""}>${escapeHtml(formatMessageTime(msg))}</time>
          ${msg.pinned ? `<span class="pin-tag">📌 Fixada</span>` : ""}
@@ -600,7 +815,7 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
       ${meta}
       ${isEditing
         ? `<form class="inline-edit-form">
-             <textarea class="inline-edit-input" rows="1" maxlength="2000">${escapeHtml(msg.content || "")}</textarea>
+             <textarea class="inline-edit-input" rows="1" maxlength="2000">${escapeHtml(decodeCustomEmojis(msg.content || ""))}</textarea>
              <div class="inline-edit-hint">esc para <button type="button" class="link-btn" data-edit-cancel>cancelar</button> • enter para <button type="submit" class="link-btn">salvar</button></div>
            </form>`
         : msg.content
@@ -610,12 +825,17 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
   `;
 
   const contentWrap = div.querySelector(".message-content-wrap");
+  if (!grouped) applyNameStyleToEl(div.querySelector(".message-author"), authorKindOf(msg) === "user" ? author : null, msg.author_color);
   const permissions = messagePermissions(msg);
   div.querySelectorAll("[data-quick-react], [data-act=react]").forEach(btn => { btn.disabled = !permissions.add_reactions; });
   const editButton = div.querySelector("[data-act=edit]");
   if (editButton) editButton.disabled = !permissions.send_messages;
   const atts = buildAttachmentsNode({ ...msg, attachments: [...(msg.attachments || [])] });
   if (atts) contentWrap.appendChild(atts);
+  const embeds = buildEmbedsNode(msg);
+  if (embeds) contentWrap.appendChild(embeds);
+  const forwarded = buildForwardNode(msg);
+  if (forwarded) contentWrap.appendChild(forwarded);
   // Enquete (Fase 8): static/js/community.js.
   const pollNode = msg.poll && typeof buildPollNode === "function" ? buildPollNode(msg) : null;
   if (pollNode) contentWrap.appendChild(pollNode);
@@ -627,15 +847,24 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
 
   div.querySelectorAll(".clickable-profile").forEach((el) => {
     el.style.cursor = "pointer";
-    el.addEventListener("click", () => openMemberProfilePopover(liveUser?.id || msg.author_id, msg));
+    el.addEventListener("click", () => openCompactProfile(liveUser?.id || msg.author_id, msg));
   });
   div.querySelector(".reply-context-line")?.addEventListener("click", () => jumpToMessage(msg.channel_id, msg.reply_to.id));
   div.querySelectorAll(".dm-join-invite-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (btn.dataset.joinInvite) sendWs("JoinServerByInvite", { invite_code: btn.dataset.joinInvite });
+      const code = btn.dataset.joinInvite;
+      if (!code) return;
+      if (window.SancordInvites?.openInvitePreview) {
+        window.SancordInvites.openInvitePreview(code);
+      } else {
+        sendWs("JoinServerByInvite", { invite_code: code });
+      }
     });
   });
+  if (window.SancordInvites?.hydrateInviteCards && div.querySelector(".dm-server-invite-card")) {
+    window.SancordInvites.hydrateInviteCards(div);
+  }
   div.querySelectorAll("[data-quick-react]").forEach((btn) => {
     btn.addEventListener("click", () => {
       pushRecentEmoji(btn.dataset.quickReact);
@@ -678,7 +907,8 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
         return;
       }
       state.editingMsgId = null;
-      if (next !== msg.content) sendWs("EditChat", { channel_id: msg.channel_id, message_id: msg.id, content: next });
+      const encoded = encodeCustomEmojis(next);
+      if (encoded !== msg.content) sendWs("EditChat", { channel_id: msg.channel_id, message_id: msg.id, content: encoded });
       stopEditingMessage(msg);
     });
   }
@@ -727,10 +957,13 @@ chatMessagesEl?.addEventListener("keydown", (e) => {
 // Lista de mensagens: agrupamento, separadores de dia, divisor de não lidas
 // ---------------------------------------------------------------------------
 function shouldGroup(prev, msg) {
+  if (state.audioSettings?.chatGroupMessages === false) return false;
   if (!prev || msg.reply_to || authorKindOf(prev) !== "user" || authorKindOf(msg) !== "user") return false;
   if ((prev.author_name || "").toLowerCase() !== (msg.author_name || "").toLowerCase()) return false;
   if (!prev.created_at || !msg.created_at) return false;
   if (dayKey(prev.created_at) !== dayKey(msg.created_at)) return false;
+  const windowMins = Number(state.audioSettings?.chatGroupWindowMins) || 7;
+  const windowMs = windowMins * 60 * 1000;
   // Mensagens migradas das versões antigas têm created_at artificial (segundos de
   // diferença); o horário "HH:MM" original evita agrupar conversas distantes.
   const toMin = (t) => {
@@ -739,8 +972,8 @@ function shouldGroup(prev, msg) {
   };
   const a = toMin(prev.timestamp);
   const b = toMin(msg.timestamp);
-  if (a !== null && b !== null && Math.abs(b - a) > GROUP_WINDOW_MS / 60000) return false;
-  return msg.created_at - prev.created_at < GROUP_WINDOW_MS;
+  if (a !== null && b !== null && Math.abs(b - a) > windowMins) return false;
+  return msg.created_at - prev.created_at < windowMs;
 }
 
 function buildDaySeparator(ts) {
@@ -1089,7 +1322,8 @@ function serverUnreadInfo(srv) {
   let mentions = 0;
   for (const ch of srv?.text_channels || []) {
     const info = channelUnreadInfo(ch.id);
-    unread = unread || info.unread;
+    // Canal/categoria silenciado não acende o servidor; menções continuam contando.
+    unread = unread || (info.unread && !(typeof isChannelMuted === "function" && isChannelMuted(ch.id)));
     mentions += info.mentions;
   }
   return { unread: unread && !isServerMuted(srv.id), mentions };
@@ -1206,7 +1440,9 @@ function refreshUnreadIndicators() {
 
 function updateDocumentTitle() {
   let mentions = 0;
-  for (const rs of state.readStates?.values?.() || []) mentions += rs.mention_count || 0;
+  if (state.audioSettings?.notifTitleBadge !== false) {
+    for (const rs of state.readStates?.values?.() || []) mentions += rs.mention_count || 0;
+  }
   document.title = mentions > 0 ? `(${mentions}) Sancord` : "Sancord";
   // No .exe a janela não usa o título da página: avisa o app nativo (só quando muda).
   if (state.lastBadgeSent !== mentions) {
@@ -1239,6 +1475,9 @@ function onNewMessageForUnread(message) {
       if (typeof requestWindowAttention === "function") requestWindowAttention();
     }
   }
+  if (!own && active && state.audioSettings?.ttsEnabled && typeof speakSettingsTts === "function" && message.content) {
+    speakSettingsTts(`${message.author_name} disse: ${decodeCustomEmojis(message.content).slice(0, 240)}`);
+  }
   if (isPrivateTextId(chId)) {
     if (rs.mention_count > 0) state.unreadDms.set(chId, rs.mention_count);
     else state.unreadDms.delete(chId);
@@ -1250,14 +1489,21 @@ function onNewMessageForUnread(message) {
 }
 
 function maybeDesktopNotify(message) {
-  if (!state.audioSettings?.desktopNotif || document.hasFocus()) return;
+  if (!state.audioSettings?.desktopNotif) return;
+  const focused = document.hasFocus();
+  if (focused && (!state.audioSettings?.notifWhenFocused || message.channel_id === getActiveTextChannelId())) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const srv = serverForChannel(message.channel_id);
-  if (srv && isServerMuted(srv.id) && !(message.mentions?.users || []).includes(myLower())) return;
+  const muted = typeof isChannelMuted === "function" ? isChannelMuted(message.channel_id) : srv && isServerMuted(srv.id);
+  if (muted && !(message.mentions?.users || []).includes(myLower())) return;
   try {
-    const where = srv ? `${srv.name} • #${(srv.text_channels || []).find((c) => c.id === message.channel_id)?.name || ""}` : "Mensagem direta";
+    const chObj = srv ? [...(srv.text_channels || []), ...(srv.voice_channels || [])].find((c) => c.id === message.channel_id) : null;
+    const where = srv ? `${srv.name} • ${chObj?.kind === "voice" ? "🔊" : "#"}${chObj?.name || ""}` : "Mensagem direta";
+    const body = state.audioSettings?.notifShowPreview === false
+      ? "Nova mensagem recebida"
+      : (decodeCustomEmojis(message.content) || (message.attachments?.length ? "📎 Anexo" : "")).slice(0, 180);
     const n = new Notification(`${message.author_name} (${where})`, {
-      body: (message.content || (message.attachments?.length ? "📎 Anexo" : "")).slice(0, 180),
+      body,
       tag: message.channel_id,
       silent: true,
     });
@@ -1381,6 +1627,10 @@ function autocompleteCandidates(trigger, query) {
       if (normalizeSearch(c.name).includes(q)) out.push({ kind: "channel", label: c.name, hint: c.kind === "announcement" ? "anúncios" : "", insert: `#${c.name} ` });
     }
   } else if (trigger === ":" && q.length >= 2) {
+    // Emojis dos servidores primeiro (o aberto antes), depois os Unicode.
+    for (const c of allServerEmojis()) {
+      if (normalizeSearch(c.name).includes(q)) out.push({ kind: "custom", label: c.name, custom: c, hint: c.server.name, insert: `:${c.name}: ` });
+    }
     for (const em of searchEmojis(q, 8)) out.push({ kind: "emoji", label: em.k.split(" ")[0], emoji: em.e, insert: `${em.e} ` });
   }
   out.sort((a, b) => Number(normalizeSearch(b.label).startsWith(q)) - Number(normalizeSearch(a.label).startsWith(q)));
@@ -1422,6 +1672,8 @@ function renderAutocomplete(trigger) {
       icon.innerHTML = `<span class="avatar small-avatar" style="background:${/^#[0-9a-f]{3,8}$/i.test(live?.avatar_color || "") ? live.avatar_color : "#5865f2"}">${renderAvatarInner(item.label, live?.avatar_url)}</span>`;
     } else if (item.kind === "emoji") {
       icon.textContent = item.emoji;
+    } else if (item.kind === "custom") {
+      icon.innerHTML = customEmojiHtml(item.custom.name, item.custom.id);
     } else if (item.kind === "channel") {
       icon.textContent = "#";
     } else {
@@ -1430,7 +1682,7 @@ function renderAutocomplete(trigger) {
     }
     const label = document.createElement("span");
     label.className = "ac-label";
-    label.textContent = item.kind === "emoji" ? `:${item.label}:` : item.label;
+    label.textContent = item.kind === "emoji" || item.kind === "custom" ? `:${item.label}:` : item.label;
     const hint = document.createElement("span");
     hint.className = "ac-hint";
     hint.textContent = item.hint || "";
@@ -1454,6 +1706,7 @@ function applyAutocomplete() {
   const pos = ac.start + item.insert.length;
   chatInput.setSelectionRange(pos, pos);
   if (item.kind === "emoji") pushRecentEmoji(item.emoji);
+  if (item.kind === "custom") pushRecentEmoji(customEmojiToken(item.custom));
   closeAutocomplete();
   autosizeTextarea(chatInput);
   chatInput.focus();
@@ -1485,7 +1738,8 @@ chatInput?.addEventListener("keydown", (e) => {
       return;
     }
   }
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+  const enterSends = state.audioSettings?.chatEnterSends !== false;
+  if (e.key === "Enter" && !e.isComposing && (enterSends ? !e.shiftKey : (e.ctrlKey || e.metaKey))) {
     e.preventDefault();
     chatForm.requestSubmit();
     return;
@@ -1679,12 +1933,21 @@ function renderComposerTray() {
   }
 }
 
+function convertBasicEmoticons(text) {
+  if (!text || state.audioSettings?.chatConvertEmoticons === false) return text;
+  const map = { ":)": "🙂", ":-)": "🙂", ":D": "😄", ":-D": "😄", ":(": "🙁", ":-(": "🙁", ";)": "😉", ";-)": "😉", "<3": "❤️", ":P": "😛", ":-P": "😛", ":'(": "😢" };
+  return text.split(/(```[\s\S]*?```|`[^`]+`)/g).map((seg, i) => {
+    if (i % 2 === 1) return seg;
+    return seg.replace(/(^|\s)(:-\)|:\)|:-D|:D|:-\(|:\(|;-\)|;\)|<3|:-P|:P|:'\()(?=\s|$)/g, (_, pre, tok) => pre + (map[tok] || tok));
+  }).join("");
+}
+
 /** Envio do composer (texto + anexos). */
 function submitComposer() {
   if (chatInput.disabled) { showErrorToast("Você não pode enviar mensagens neste canal."); return; }
   const slowWait = currentSlowmodeWait(getActiveTextChannelId());
   if (slowWait > 0) { showErrorToast(`Modo lento: aguarde ${formatSlowmodeWait(slowWait)} para enviar de novo.`); return; }
-  const content = chatInput.value.trim();
+  const content = convertBasicEmoticons(chatInput.value.trim());
   const files = state.composerFiles;
   if (files.some((f) => f.status === "uploading")) {
     state.sendWhenUploaded = true;
@@ -1699,8 +1962,9 @@ function submitComposer() {
   if (!content && !attachmentIds.length) return;
   const sent = sendChatPayload({
     channel_id: getActiveTextChannelId(),
-    content,
+    content: encodeCustomEmojis(content),
     reply_to_id: state.replyingTo ? state.replyingTo.id : null,
+    reply_mention: state.replyingTo ? replyMentionEnabled() : true,
     attachment_ids: attachmentIds,
   });
   if (!sent) return;
@@ -1721,7 +1985,8 @@ chatMainView?.addEventListener("dragenter", (e) => {
   if (!hasFiles(e) || chatInput?.disabled) return;
   e.preventDefault();
   dragDepth += 1;
-  const where = state.activeView === "server" ? `#${state.textChannels.find((c) => c.id === state.currentTextChannel)?.name || "canal"}` : "esta conversa";
+  const activeCh = state.textChannels.find((c) => c.id === state.currentTextChannel) || state.voiceChannels.find((c) => c.id === state.currentTextChannel);
+  const where = state.activeView === "server" ? `${activeCh?.kind === "voice" ? "🔊" : "#"}${activeCh?.name || "canal"}` : "esta conversa";
   const target = document.getElementById("chat-drop-target");
   if (target) target.textContent = `Os arquivos serão enviados para ${where}.`;
   dropOverlay?.classList.remove("hidden");
@@ -1789,21 +2054,47 @@ function initEmojiPicker() {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "emoji-choice-btn";
-        b.textContent = em.e;
-        b.title = em.k ? `:${em.k.split(" ")[0]}:` : em.e;
-        b.dataset.emoji = em.e;
+        if (em.custom) {
+          // Emoji do servidor: reação usa o código; no texto entra ":nome:".
+          b.classList.add("custom");
+          b.innerHTML = customEmojiHtml(em.custom.name, em.custom.id);
+          b.title = `:${em.custom.name}:${em.custom.server ? ` — ${em.custom.server.name}` : ""}`;
+          b.dataset.emoji = customEmojiToken(em.custom);
+          b.dataset.insert = `:${em.custom.name}:`;
+        } else {
+          b.textContent = em.e;
+          b.title = em.k ? `:${em.k.split(" ")[0]}:` : em.e;
+          b.dataset.emoji = em.e;
+        }
         grid.appendChild(b);
       }
       body.append(h, grid);
     };
+    const customs = allServerEmojis();
     if (q) {
-      const found = searchEmojis(q, 80);
+      const nq = normalizeSearch(q).replace(/^:|:$/g, "");
+      const mine = customs.filter((c) => normalizeSearch(c.name).includes(nq)).slice(0, 40).map((c) => ({ custom: c }));
+      const found = [...mine, ...searchEmojis(q, 80)];
       if (found.length) addGrid(`Resultados para "${q}"`, found);
       else body.innerHTML = `<div class="pinned-empty">Nenhum emoji encontrado.</div>`;
       return;
     }
-    const recents = getRecentEmojis().map((e) => ALL_EMOJIS.find((x) => x.e === e) || { e, k: "" });
+    const recents = getRecentEmojis()
+      .map((e) => {
+        const m = /^<a?:[A-Za-z0-9_]{1,32}:([0-9a-f]{32})>$/.exec(e);
+        if (!m) return ALL_EMOJIS.find((x) => x.e === e) || { e, k: "" };
+        const c = customs.find((x) => x.id === m[1]);
+        return c ? { custom: c } : null; // emoji excluído ou de servidor que você deixou
+      })
+      .filter(Boolean);
     addGrid("Recentes", recents, 0);
+    // Um bloco por servidor com emojis (o aberto primeiro).
+    const byServer = new Map();
+    for (const c of customs) {
+      if (!byServer.has(c.server.id)) byServer.set(c.server.id, { name: c.server.name, items: [] });
+      byServer.get(c.server.id).items.push({ custom: c });
+    }
+    for (const group of byServer.values()) addGrid(group.name, group.items);
     EMOJI_CATEGORIES.forEach((c, i) => addGrid(c.label, c.emojis, i + 1));
   };
   search.addEventListener("input", renderBody);
@@ -1827,7 +2118,7 @@ function initEmojiPicker() {
       emojiPopover.style.cssText = "";
       emojiPopover.classList.add("hidden");
     } else {
-      insertAtCaret(chatInput, em);
+      insertAtCaret(chatInput, btn.dataset.insert || em);
       if (!e.shiftKey) emojiPopover.classList.add("hidden");
     }
   });
@@ -1864,9 +2155,209 @@ function openEmojiPickerFor(msg, anchorEl) {
 }
 
 emojiPickerBtn?.addEventListener("click", () => {
+  closeGifPicker();
   initEmojiPicker();
   emojiPopover.renderBody?.();
   setTimeout(() => {
     if (!emojiPopover.classList.contains("hidden")) emojiPopover.querySelector(".emoji-search")?.focus();
   }, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Etapa C7: seletor de GIF — só local, sem serviço externo. "Favoritos" vêm da
+// conta (prefs.favorite_gifs, IDs de anexos GIF); "Nas conversas" são os GIFs
+// das mensagens já carregadas. Enviar = mandar a mensagem com aquele anexo.
+// ---------------------------------------------------------------------------
+const GIF_ID = /^[0-9a-f]{32}$/;
+
+function isGifAttachment(att) {
+  return Boolean(att && att.content_type === "image/gif" && GIF_ID.test(att.id || ""));
+}
+
+function favoriteGifIds() {
+  return Array.isArray(state.prefs?.favorite_gifs) ? state.prefs.favorite_gifs : [];
+}
+
+function isFavoriteGif(id) {
+  return favoriteGifIds().includes(id);
+}
+
+function gifUrl(id) {
+  return SancordNet.imageUrl(`/api/attachments/${encodeURIComponent(id)}/gif`);
+}
+
+function toggleFavoriteGif(id) {
+  if (!GIF_ID.test(id || "")) return;
+  const list = favoriteGifIds();
+  const fav = list.includes(id);
+  const next = fav ? list.filter((x) => x !== id) : [id, ...list].slice(0, 200);
+  state.prefs = { ...(state.prefs || {}), favorite_gifs: next };
+  sendWs("UpdateUserPrefs", { favorite_gifs: next });
+  showUiToast(fav ? "GIF removido dos favoritos." : "GIF adicionado aos favoritos.");
+  refreshGifStars();
+}
+
+/** Atualiza as estrelas já desenhadas e o seletor aberto. */
+function refreshGifStars() {
+  document.querySelectorAll(".gif-fav-btn[data-gif-id]").forEach((b) => {
+    const fav = isFavoriteGif(b.dataset.gifId);
+    b.classList.toggle("is-fav", fav);
+    b.textContent = fav ? "★" : "☆";
+    b.setAttribute("aria-label", fav ? "Remover dos GIFs favoritos" : "Adicionar aos GIFs favoritos");
+    b.title = b.getAttribute("aria-label");
+  });
+  if (!document.getElementById("gif-popover")?.classList.contains("hidden")) renderGifGrid();
+}
+
+/** GIFs das mensagens carregadas (inclusive encaminhadas), mais recentes primeiro, sem repetir. */
+function conversationGifs(limit = 60) {
+  const found = new Map();
+  for (const list of Object.values(state.chatHistory || {})) {
+    for (const m of list || []) {
+      for (const att of [...(m.attachments || []), ...(m.forward?.attachments || [])]) {
+        if (!isGifAttachment(att)) continue;
+        const prev = found.get(att.id);
+        const at = m.created_at || 0;
+        if (!prev || prev.at < at) found.set(att.id, { id: att.id, name: att.filename || "GIF", at });
+      }
+    }
+  }
+  return [...found.values()].sort((a, b) => b.at - a.at).slice(0, limit);
+}
+
+const gifPicker = { tab: "favorites" };
+
+function gifPopoverEl() {
+  return document.getElementById("gif-popover");
+}
+
+function buildGifPicker() {
+  const pop = gifPopoverEl();
+  if (!pop || pop.dataset.built) return;
+  pop.dataset.built = "1";
+  pop.innerHTML = `
+    <div class="gif-picker-head" role="tablist">
+      <button type="button" class="gif-tab" data-gif-tab="favorites" role="tab">Favoritos</button>
+      <button type="button" class="gif-tab" data-gif-tab="recent" role="tab">Nas conversas</button>
+    </div>
+    <input type="search" class="emoji-search gif-search" placeholder="Filtrar pelo nome do arquivo" aria-label="Filtrar GIFs" />
+    <div class="gif-grid" tabindex="-1"></div>
+    <div class="gif-picker-foot">Sem busca na internet: favorite um GIF clicando na ☆ sobre ele no chat.</div>
+  `;
+  pop.querySelectorAll("[data-gif-tab]").forEach((b) =>
+    b.addEventListener("click", () => {
+      gifPicker.tab = b.dataset.gifTab;
+      renderGifGrid();
+    })
+  );
+  pop.querySelector(".gif-search").addEventListener("input", renderGifGrid);
+  pop.querySelector(".gif-search").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeGifPicker();
+  });
+}
+
+function renderGifGrid() {
+  const pop = gifPopoverEl();
+  const grid = pop?.querySelector(".gif-grid");
+  if (!grid) return;
+  const favs = favoriteGifIds();
+  const recent = conversationGifs();
+  const names = new Map(recent.map((g) => [g.id, g.name]));
+  pop.querySelectorAll("[data-gif-tab]").forEach((b) => {
+    const on = b.dataset.gifTab === gifPicker.tab;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", String(on));
+    b.textContent = b.dataset.gifTab === "favorites" ? `Favoritos (${favs.length})` : `Nas conversas (${recent.length})`;
+  });
+  const q = normalizeSearch(pop.querySelector(".gif-search")?.value || "").trim();
+  const items = (gifPicker.tab === "favorites" ? favs.map((id) => ({ id, name: names.get(id) || "GIF favorito" })) : recent)
+    .filter((g) => !q || normalizeSearch(g.name).includes(q));
+  grid.innerHTML = "";
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "pinned-empty";
+    empty.textContent = q
+      ? "Nenhum GIF com esse nome."
+      : gifPicker.tab === "favorites"
+        ? "Você ainda não favoritou GIFs. Passe o mouse sobre um GIF no chat e clique na ☆."
+        : "Nenhum GIF nas conversas abertas até agora.";
+    grid.appendChild(empty);
+    return;
+  }
+  for (const g of items) {
+    const cell = document.createElement("div");
+    cell.className = "gif-cell";
+    const pick = document.createElement("button");
+    pick.type = "button";
+    pick.className = "gif-pick";
+    pick.title = `Enviar ${g.name}`;
+    pick.dataset.gifId = g.id;
+    const img = document.createElement("img");
+    img.src = gifUrl(g.id);
+    img.alt = g.name;
+    img.decoding = "async";
+    pick.appendChild(img);
+    pick.addEventListener("click", () => sendGif(g.id));
+    const star = document.createElement("button");
+    star.type = "button";
+    star.className = `gif-fav-btn${isFavoriteGif(g.id) ? " is-fav" : ""}`;
+    star.dataset.gifId = g.id;
+    star.textContent = isFavoriteGif(g.id) ? "★" : "☆";
+    star.setAttribute("aria-label", isFavoriteGif(g.id) ? "Remover dos GIFs favoritos" : "Adicionar aos GIFs favoritos");
+    star.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleFavoriteGif(g.id);
+    });
+    cell.append(pick, star);
+    grid.appendChild(cell);
+  }
+}
+
+function openGifPicker() {
+  buildGifPicker();
+  const pop = gifPopoverEl();
+  if (!pop) return;
+  // Sem favoritos, abre direto nos GIFs das conversas.
+  if (!favoriteGifIds().length && conversationGifs().length) gifPicker.tab = "recent";
+  emojiPopover?.classList.add("hidden");
+  pop.classList.remove("hidden");
+  document.getElementById("gif-picker-btn")?.setAttribute("aria-expanded", "true");
+  renderGifGrid();
+  setTimeout(() => pop.querySelector(".gif-search")?.focus(), 0);
+}
+
+function closeGifPicker() {
+  gifPopoverEl()?.classList.add("hidden");
+  document.getElementById("gif-picker-btn")?.setAttribute("aria-expanded", "false");
+}
+
+function sendGif(id) {
+  if (!GIF_ID.test(id || "")) return;
+  if (chatInput?.disabled) {
+    showErrorToast("Você não pode enviar mensagens neste canal.");
+    return;
+  }
+  const channelId = getActiveTextChannelId();
+  if (!channelId) return;
+  const sent = sendChatPayload({
+    channel_id: channelId,
+    content: "",
+    reply_to_id: state.replyingTo ? state.replyingTo.id : null,
+    reply_mention: state.replyingTo ? replyMentionEnabled() : true,
+    attachment_ids: [id],
+  });
+  if (!sent) return;
+  clearReplyingTo();
+  closeGifPicker();
+  chatInput?.focus();
+}
+
+document.getElementById("gif-picker-btn")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (gifPopoverEl()?.classList.contains("hidden")) openGifPicker();
+  else closeGifPicker();
+});
+document.addEventListener("mousedown", (e) => {
+  const pop = gifPopoverEl();
+  if (pop && !pop.classList.contains("hidden") && !pop.contains(e.target) && !e.target.closest?.("#gif-picker-btn")) closeGifPicker();
 });

@@ -4328,7 +4328,7 @@ body.compact-messages .message-item {
     transparent 2px,
     transparent 9px
   );
-  animation: glitchShift 1.4s steps(4) infinite;
+  animation: glitchShift 1.4s ease-in-out infinite;
 }
 
 .profile-effect-layer.effect-aurora::before {
@@ -4341,10 +4341,8 @@ body.compact-messages .message-item {
 }
 
 @keyframes lightningFlash {
-  0%, 78%, 100% { opacity: 0.15; }
-  82% { opacity: 0.95; }
-  86% { opacity: 0.25; }
-  90% { opacity: 0.85; }
+  0%, 100% { opacity: 0.18; }
+  50% { opacity: 0.42; }
 }
 
 @keyframes snowFall {
@@ -4354,10 +4352,8 @@ body.compact-messages .message-item {
 }
 
 @keyframes glitchShift {
-  0% { transform: translateX(0); opacity: 0.6; }
-  33% { transform: translateX(-2px); opacity: 0.85; }
-  66% { transform: translateX(2px); opacity: 0.5; }
-  100% { transform: translateX(0); opacity: 0.7; }
+  0%, 100% { transform: translateX(0); opacity: 0.45; }
+  50% { transform: translateX(2px); opacity: 0.56; }
 }
 
 @keyframes auroraWave {

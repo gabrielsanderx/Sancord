@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sancord</title>
   <link rel="icon" type="image/svg+xml" href="/sancord-icon.svg" />
-  <link rel="stylesheet" href="/styles.css?v=18" />
+  <link rel="stylesheet" href="/styles.css?v=20" />
   <!-- Design system e refatoração visual: camada final, depois de styles.css. -->
-  <link rel="stylesheet" href="/ui.css?v=1" />
+  <link rel="stylesheet" href="/ui.css?v=13" />
 </head>
 <body>
   <!-- Modal de Autenticação (Criar Conta / Entrar) -->
@@ -306,6 +306,9 @@
             <button type="button" class="friends-tab-btn" data-friends-tab="blocked" data-i18n="friends.blocked">Bloqueados</button>
             <button type="button" class="friends-tab-btn add-tab" data-friends-tab="add" data-i18n="friends.add">Adicionar amigo</button>
           </div>
+          <button id="friends-inbox-btn" class="header-tool-btn friends-inbox-btn" type="button" title="Caixa de menções" aria-label="Caixa de menções" aria-haspopup="dialog" aria-expanded="false">
+            <span data-ui-icon="bell" aria-hidden="true"></span>
+          </button>
         </header>
 
         <div class="friends-layout-grid">
@@ -416,6 +419,23 @@
               <div id="search-results-list" class="pinned-popover-list"></div>
             </div>
           </div>
+
+          <div class="header-popover-anchor">
+            <button id="mentions-inbox-btn" class="header-tool-btn" type="button" title="Caixa de menções" aria-label="Caixa de menções" aria-haspopup="dialog" aria-expanded="false">
+              <span data-ui-icon="bell" aria-hidden="true"></span>
+            </button>
+            <div id="mentions-inbox-panel" class="pinned-popover search-results-panel mentions-inbox-panel hidden" role="dialog" aria-label="Caixa de menções">
+              <div class="pinned-popover-header">
+                <span>@ Menções</span>
+                <select id="mentions-inbox-scope" class="search-scope-select" title="De onde mostrar">
+                  <option value="all">Todos os servidores e conversas</option>
+                  <option value="server">Só este servidor</option>
+                </select>
+                <button id="mentions-inbox-close" class="inbox-close-btn" type="button" aria-label="Fechar">✕</button>
+              </div>
+              <div id="mentions-inbox-list" class="pinned-popover-list"></div>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -424,6 +444,7 @@
         <div class="stage-header">
           <span id="stage-title">Em chamada: Sala Geral</span>
           <span class="stage-hint">Duplo clique na transmissão para Tela Cheia</span>
+          <button id="stage-open-voice-chat-btn" type="button" class="btn-secondary small-btn" title="Abrir chat de texto deste canal de voz">💬 Chat da sala</button>
         </div>
         <div id="stage-grid" class="stage-grid"></div>
       </section>
@@ -434,6 +455,10 @@
       <section id="forum-view" class="forum-view hidden" aria-label="Postagens do fórum">
         <div class="forum-toolbar">
           <input type="text" id="forum-filter" placeholder="Buscar postagens…" data-i18n-placeholder="forum.search" autocomplete="off" />
+          <select id="forum-sort" class="settings-select forum-sort-select" aria-label="Ordenar postagens" title="Ordenar postagens">
+            <option value="activity">Atividade recente</option>
+            <option value="created">Data de criação</option>
+          </select>
           <button type="button" id="forum-new-post-btn" class="btn-primary small-btn" data-i18n="forum.newPost">+ Nova postagem</button>
         </div>
         <div id="forum-tag-filter" class="forum-tag-filter hidden" aria-label="Filtrar por tag"></div>
@@ -456,7 +481,10 @@
         <!-- Barra de Resposta (Reply) -->
         <div id="reply-preview-bar" class="reply-preview-bar hidden">
           <span id="reply-preview-text">Respondendo a ...</span>
-          <button type="button" id="cancel-reply-btn" class="icon-btn" title="Cancelar resposta">✕</button>
+          <span class="reply-preview-actions">
+            <button type="button" id="reply-mention-toggle" class="reply-mention-toggle is-on" aria-pressed="true">@ ATIVADO</button>
+            <button type="button" id="cancel-reply-btn" class="icon-btn" title="Cancelar resposta">✕</button>
+          </span>
         </div>
 
         <!-- Preview de Imagem -->
@@ -487,6 +515,10 @@
             aria-controls="composer-autocomplete"
           ></textarea>
           <button type="button" id="poll-create-btn" class="attach-btn" title="Criar enquete">📊</button>
+          <div class="emoji-picker-anchor gif-picker-anchor">
+            <button type="button" id="gif-picker-btn" class="attach-btn gif-btn" title="GIFs" aria-label="GIFs" aria-haspopup="dialog" aria-expanded="false">GIF</button>
+            <div id="gif-popover" class="emoji-popover gif-popover hidden" role="dialog" aria-label="GIFs"></div>
+          </div>
           <div class="emoji-picker-anchor">
             <button type="button" id="emoji-picker-btn" class="attach-btn emoji-btn" title="Inserir Emoji">
               <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
@@ -541,62 +573,100 @@
   <!-- Modal Discord Full-Screen: Configurações de Usuário & Voz -->
   <div id="settings-modal" class="modal-backdrop settings-fullscreen hidden">
     <div class="settings-shell">
-      <nav class="settings-nav">
+      <nav class="settings-nav" aria-label="Categorias de configurações">
         <button type="button" id="settings-nav-profile-card" class="settings-user-card" title="Editar Perfil">
           <div id="settings-nav-avatar" class="avatar">?</div>
           <div class="settings-user-card-meta">
             <strong id="settings-nav-username">Usuário</strong>
-            <span>Editar Perfil ✏️</span>
+            <span>Editar Perfil</span>
           </div>
         </button>
 
         <div class="settings-search-box">
           <svg data-ui-icon="search" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-          <input type="text" id="settings-search-input" placeholder="Buscar" autocomplete="off" />
+          <input type="text" id="settings-search-input" placeholder="Buscar configurações" autocomplete="off" aria-label="Buscar configurações" />
         </div>
+        <div id="settings-search-results" class="settings-search-results hidden" role="listbox" aria-label="Resultados da busca"></div>
 
-        <button type="button" class="settings-nav-item active" data-settings-tab="account" data-nav-label="Conta Minha Conta Informações Senha Segurança Status Família">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-          <span data-i18n="settings.account">Conta</span>
+        <div class="settings-nav-category">CONTA</div>
+        <button type="button" class="settings-nav-item active" data-settings-tab="account" data-nav-label="Minha Conta Informações Nome E-mail ID Status">
+          <span data-i18n="settings.account">Minha Conta</span>
         </button>
-        <div class="settings-subnav" id="settings-account-subnav">
-          <button type="button" class="settings-subnav-item active" data-account-sub="info">Informações da conta</button>
-          <button type="button" class="settings-subnav-item" data-account-sub="security">Senha e segurança</button>
-          <button type="button" class="settings-subnav-item" data-account-sub="status">Status da conta</button>
-          <button type="button" class="settings-subnav-item" data-account-sub="family">Foco e segurança</button>
-        </div>
+        <button type="button" class="settings-nav-item" data-settings-tab="profile" data-nav-label="Perfis Perfil Global Servidor Avatar Banner Bio Cosméticos Moldura Decoração">
+          <span>Perfis</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="security" data-nav-label="Segurança Senha Recuperação 2FA Excluir conta">
+          <span>Segurança</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="devices" data-nav-label="Dispositivos Sessões ativas Encerrar sessões">
+          <span>Dispositivos</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="connections" data-nav-label="Conexões GitHub Steam Twitch YouTube Spotify Links sociais">
+          <span>Conexões</span>
+        </button>
 
-        <button type="button" class="settings-nav-item" data-settings-tab="privacy" data-nav-label="Dados e privacidade">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
-          <span data-i18n="settings.privacy">Dados e privacidade</span>
+        <div class="settings-nav-sep"></div>
+        <div class="settings-nav-category">PRIVACIDADE E SOCIAL</div>
+        <button type="button" class="settings-nav-item" data-settings-tab="privacy" data-nav-label="Dados e privacidade Visibilidade perfil Exportar Cache Limpeza Selos">
+          <span data-i18n="settings.privacy">Dados e Privacidade</span>
         </button>
-        <button type="button" class="settings-nav-item" data-settings-tab="notifications" data-nav-label="Notificações">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4a2 2 0 0 0 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+        <button type="button" class="settings-nav-item" data-settings-tab="social" data-nav-label="Conteúdo e social DMs Pedidos de amizade Modo foco Links previews">
+          <span>Conteúdo e Social</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="requests" data-nav-label="Solicitações de mensagem Desconhecidos DMs">
+          <span>Solicitações de Mensagem</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="blocked" data-nav-label="Usuários bloqueados Desbloquear">
+          <span>Usuários Bloqueados</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="activity" data-nav-label="Atividade e presença Status online Digitando Tempo ativo">
+          <span>Atividade e Presença</span>
+        </button>
+
+        <div class="settings-nav-sep"></div>
+        <div class="settings-nav-category">CONFIGURAÇÕES DO APP</div>
+        <button type="button" class="settings-nav-item" data-settings-tab="voice" data-nav-label="Voz e vídeo Microfone Alto-falante Câmera Tela Push-to-Talk DSP">
+          <span data-i18n="settings.voice">Voz e Vídeo</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="notifications" data-nav-label="Notificações Sons Volume Desktop Alerta Badge">
           <span data-i18n="settings.notifications">Notificações</span>
         </button>
-
-        <div class="settings-nav-sep"></div>
-        <div class="settings-nav-category">Experiência</div>
-
-        <button type="button" class="settings-nav-item" data-settings-tab="voice" data-nav-label="Voz e vídeo Microfone Áudio">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
-          <span data-i18n="settings.voice">Voz e vídeo</span>
-        </button>
-        <button type="button" class="settings-nav-item" data-settings-tab="appearance" data-nav-label="Aparência Tema Cores Mensagens">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+        <button type="button" class="settings-nav-item" data-settings-tab="appearance" data-nav-label="Aparência Tema Cores Zoom Fonte Densidade Sidebar Streamer">
           <span data-i18n="settings.appearance">Aparência</span>
         </button>
-        <button type="button" class="settings-nav-item" data-settings-tab="shortcuts" data-nav-label="Atalhos Teclado">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/></svg>
+        <button type="button" class="settings-nav-item" data-settings-tab="accessibility" data-nav-label="Acessibilidade Movimento GIFs Cosméticos Saturação Contraste Cargos TTS Foco">
+          <span>Acessibilidade</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="chat" data-nav-label="Chat e mensagens Formatação Emoticons Embeds Anexos Enter Agrupamento Horário Ortografia">
+          <span>Chat e Mensagens</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="language" data-nav-label="Idioma Português English Data Hora Formato regional">
+          <span data-i18n="settings.language">Idioma</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="shortcuts" data-nav-label="Atalhos Teclado Push-to-Talk Microfone">
           <span data-i18n="settings.shortcuts">Atalhos</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="windows" data-nav-label="Configurações do Windows Inicialização Minimizar Bandeja Desktop">
+          <span>Configurações do Windows</span>
         </button>
 
         <div class="settings-nav-sep"></div>
-        <button type="button" class="settings-nav-item" data-settings-tab="updates" data-nav-label="Atualizações Versão Verificar atualizações">
-          <span aria-hidden="true">↻</span><span data-i18n="settings.updates">Atualizações</span>
+        <div class="settings-nav-category">SANCORD</div>
+        <button type="button" class="settings-nav-item" data-settings-tab="updates" data-nav-label="Atualizações Versão Changelog Verificar">
+          <span data-i18n="settings.updates">Atualizações</span>
         </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="advanced" data-nav-label="Avançado Modo desenvolvedor Rede WebSocket Cache Logs Restaurar">
+          <span>Avançado</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="diagnostics" data-nav-label="Diagnóstico Saúde Ping Relatório Áudio Cache">
+          <span>Diagnóstico</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-tab="about" data-nav-label="Sobre Versão Créditos Licenças Open source GitHub">
+          <span>Sobre</span>
+        </button>
+
+        <div class="settings-nav-sep"></div>
         <button type="button" id="settings-logout-btn" class="settings-nav-item danger">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
           <span data-i18n="settings.logout">Sair da Conta</span>
         </button>
       </nav>
@@ -604,24 +674,22 @@
       <div class="settings-main-col">
         <header class="settings-topbar">
           <span id="settings-topbar-title">Minha Conta</span>
-          <button type="button" id="close-settings-btn" class="settings-close-btn" title="Fechar (ESC)">✕</button>
+          <div class="settings-close-wrap">
+            <button type="button" id="close-settings-btn" class="settings-close-btn" title="Fechar (ESC)" aria-label="Fechar configurações">✕</button>
+            <span class="settings-esc-hint" aria-hidden="true">ESC</span>
+          </div>
         </header>
 
-        <div class="settings-content">
-          <div id="settings-tab-updates" class="settings-panel hidden">
-            <h2>Atualizações do Sancord</h2>
-            <p>Versão instalada: <strong data-update-current>…</strong></p>
-            <p data-update-status role="status" aria-live="polite">Verifique se há uma nova versão disponível.</p>
-            <button type="button" class="btn-primary" id="check-updates-btn">Verificar atualizações</button>
-            <button type="button" class="btn-primary hidden" id="settings-update-action">Atualizar agora</button>
-            <progress class="sancord-update-progress hidden" data-update-progress max="100" value="0" aria-label="Progresso do download"></progress>
-            <pre class="sancord-update-notes" data-update-notes></pre>
-          </div>
-          <!-- Aba 1: Minha Conta (Informações da conta, Senha e segurança, Status da conta, Foco e segurança) -->
+        <div class="settings-content" id="settings-content-scroll">
+          <!-- PÁGINA: Minha Conta -->
           <div id="settings-tab-account" class="settings-panel">
-            <!-- Sub-aba 1: Informações da conta -->
-            <div id="account-sub-info" class="account-sub-panel">
-              <h2>Minha Conta</h2>
+            <h2>Minha Conta</h2>
+
+            <section class="settings-section" data-search-item="Perfil resumido nome de exibição usuário e-mail senha conta">
+              <div class="settings-section-head">
+                <h3>Resumo da conta</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
               <div class="account-hero-card">
                 <div id="account-hero-banner" class="account-hero-banner"></div>
                 <div class="account-hero-top">
@@ -634,11 +702,19 @@
                       <div id="account-hero-sub" class="account-hero-sub">@usuario • Online</div>
                     </div>
                   </div>
-                  <button type="button" id="account-goto-edit-profile-btn" class="btn-primary small-btn">Editar Perfil do Usuário</button>
+                  <button type="button" id="account-goto-edit-profile-btn" class="btn-primary small-btn">Editar Perfil</button>
                 </div>
 
                 <div class="account-fields-box">
-                  <div class="account-field-row">
+                  <div class="account-field-row" data-search-item="Nome de exibição apelido global">
+                    <div>
+                      <div class="account-field-label">NOME DE EXIBIÇÃO</div>
+                      <div id="account-info-display-name" class="account-field-val">—</div>
+                    </div>
+                    <button type="button" id="account-edit-display-name-btn" class="btn-secondary small-btn">Editar</button>
+                  </div>
+
+                  <div class="account-field-row" data-search-item="Nome de usuário username trocar nick">
                     <div>
                       <div class="account-field-label">NOME DE USUÁRIO</div>
                       <div id="account-info-username" class="account-field-val">Usuário</div>
@@ -651,83 +727,45 @@
                     <button type="button" id="account-rename-cancel-btn" class="btn-secondary small-btn">Cancelar</button>
                   </form>
 
-                  <div class="account-field-row">
+                  <div class="account-field-row" data-search-item="E-mail da conta endereço email">
                     <div>
                       <div class="account-field-label">E-MAIL DA CONTA (OPCIONAL)</div>
                       <div id="account-info-email" class="account-field-val">Não cadastrado</div>
                     </div>
-                    <button type="button" id="account-edit-email-btn" class="btn-secondary small-btn">Editar</button>
+                    <div style="display:flex;gap:6px;">
+                      <button type="button" id="account-reveal-email-btn" class="btn-secondary small-btn hidden">Revelar</button>
+                      <button type="button" id="account-edit-email-btn" class="btn-secondary small-btn">Editar</button>
+                    </div>
                   </div>
 
-                  <div class="account-field-row">
+                  <div class="account-field-row" data-search-item="Alterar senha credenciais">
                     <div>
-                      <div class="account-field-label">ID DA CONTA SANCORD</div>
+                      <div class="account-field-label">SENHA</div>
+                      <div class="account-field-val">Protegida com hash Argon2id</div>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                      <button type="button" id="account-quick-pw-btn" class="btn-secondary small-btn">Alterar senha</button>
+                      <button type="button" id="account-goto-security-btn" class="btn-secondary small-btn">Segurança</button>
+                    </div>
+                  </div>
+
+                  <div class="account-field-row hidden" id="account-id-row" data-search-item="ID da conta Sancord identificador desenvolvedor">
+                    <div>
+                      <div class="account-field-label">ID DA CONTA SANCORD (MODO DESENVOLVEDOR)</div>
                       <div id="account-info-id" class="account-field-val monospace-val">—</div>
                     </div>
                     <button type="button" id="account-copy-id-btn" class="btn-secondary small-btn">Copiar ID</button>
                   </div>
-
-                  <div class="account-field-row">
-                    <div>
-                      <div class="account-field-label">SERVIDOR CONECTADO</div>
-                      <div id="account-info-origin" class="account-field-val">Local + WebSocket P2P Seguro</div>
-                    </div>
-                  </div>
                 </div>
                 <div id="account-rename-feedback" class="add-friend-feedback hidden"></div>
               </div>
-            </div>
+            </section>
 
-            <!-- Sub-aba 2: Senha e segurança -->
-            <div id="account-sub-security" class="account-sub-panel hidden">
-              <h2>Senha e segurança</h2>
-              <div class="profile-editor-card">
-                <div class="security-badge-row">
-                  <span class="security-pill ok">🔒 Senha guardada com Argon2id</span>
-                  <span class="security-pill">📞 Chamadas criptografadas entre participantes</span>
-                </div>
-                <p class="settings-hint-text" style="margin-bottom: 14px;">
-                  Sua senha nunca é guardada em texto: o servidor só tem um hash Argon2id dela.
-                  Voz, vídeo e tela são criptografados entre os participantes (DTLS-SRTP), mesmo
-                  quando passam por um servidor de retransmissão.
-                  As mensagens viajam até o servidor deste Sancord (com HTTPS quando a conexão é pelo
-                  endereço público) e ficam guardadas lá, onde podem ser lidas — elas não têm
-                  criptografia de ponta a ponta.
-                </p>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                  <button type="button" id="open-change-pw-modal-btn" class="btn-primary small-btn">Mudar senha</button>
-                  <button type="button" id="generate-recovery-code-btn" class="btn-secondary small-btn">🔑 Gerar código de recuperação</button>
-                </div>
+            <section class="settings-section" data-search-item="Status da conta restrições castigos servidores amigos favoritas">
+              <div class="settings-section-head">
+                <h3>Status da conta</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
               </div>
-
-              <div class="profile-editor-card" style="margin-top: 14px;">
-                <div class="srv-roles-header" style="margin-bottom: 10px;">
-                  <div>
-                    <div class="cust-label" style="margin-bottom: 2px;">Sessões e dispositivos conectados</div>
-                    <div class="settings-hint-text">Gerencie os dispositivos com sessão ativa na sua conta.</div>
-                  </div>
-                  <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                    <button type="button" id="refresh-sessions-btn" class="btn-secondary small-btn">↻ Atualizar</button>
-                    <button type="button" id="revoke-other-sessions-btn" class="btn-secondary small-btn danger-text">Encerrar outras sessões</button>
-                  </div>
-                </div>
-                <div id="account-sessions-list" class="srv-manage-list" aria-live="polite"></div>
-              </div>
-
-              <div class="profile-editor-card" style="margin-top: 14px; border-color: rgba(242, 63, 67, 0.35);">
-                <div class="cust-label" style="color: var(--danger);">Excluir conta</div>
-                <p class="settings-hint-text" style="margin-bottom: 10px;">
-                  Exclui permanentemente sua conta, sessões, amizades e preferências deste servidor Sancord. Caso você seja dono de algum servidor, transfira a posse ou exclua-o primeiro.
-                </p>
-                <div>
-                  <button type="button" id="delete-own-account-btn" class="btn-secondary small-btn danger-text">🗑️ Excluir minha conta</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Sub-aba 3: Status da conta -->
-            <div id="account-sub-status" class="account-sub-panel hidden">
-              <h2>Status da conta</h2>
               <div class="account-standing-card" id="account-standing-card">
                 <div class="standing-icon" id="account-standing-icon">✓</div>
                 <div>
@@ -749,42 +787,163 @@
                   <strong id="stat-starred-count">0</strong>
                 </div>
               </div>
-            </div>
-
-            <!-- Sub-aba 4: Foco e segurança -->
-            <div id="account-sub-family" class="account-sub-panel hidden">
-              <h2>Foco e segurança</h2>
-              <p class="settings-hint-text" style="margin-bottom: 14px;">Controles deste aparelho para conversas privadas e links externos.</p>
-              <div class="dsp-toggles-list">
-                <label class="dsp-toggle-row">
-                  <div>
-                    <div class="dsp-title">Modo Foco (silenciar conversas de quem não é amigo)</div>
-                    <div class="dsp-sub">Mensagens privadas de quem não é seu amigo chegam normalmente e contam como não lidas, mas sem som nem notificação.</div>
-                  </div>
-                  <input type="checkbox" id="family-focus-mode" />
-                </label>
-                <label class="dsp-toggle-row">
-                  <div>
-                    <div class="dsp-title">Proteção de Links Externos</div>
-                    <div class="dsp-sub">Pede confirmação antes de abrir um link de mensagem para um site em que você ainda não confiou.</div>
-                  </div>
-                  <input type="checkbox" id="family-link-guard" checked />
-                </label>
-                <div class="profile-editor-card">
-                  <div class="account-field-row" style="padding: 0; border: none;">
-                    <div>
-                      <div class="account-field-label">TEMPO ATIVO NESTA SESSÃO</div>
-                      <div id="session-uptime-display" class="account-field-val">0 min ativo</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            </section>
           </div>
 
-          <!-- Aba: Personalizar / Editar Perfil (acessível pelo topo Editar Perfil ✏️) -->
+          <!-- PÁGINA: Segurança -->
+          <div id="settings-tab-security" class="settings-panel hidden">
+            <h2>Segurança</h2>
+
+            <section class="settings-section" data-search-item="Senha alterar senha Argon2id criptografia chamadas">
+              <div class="settings-section-head">
+                <h3>Senha e criptografia</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
+              <div class="security-badge-row" style="margin-bottom:10px;">
+                <span class="security-pill ok">🔒 Senha guardada com Argon2id</span>
+                <span class="security-pill">📞 Chamadas DTLS-SRTP entre participantes</span>
+              </div>
+              <p class="settings-section-desc">
+                Sua senha nunca é armazenada em texto puro: o servidor guarda apenas um hash Argon2id. Voz, vídeo e compartilhamento de tela são criptografados entre os participantes (DTLS-SRTP). Mensagens trafegam com HTTPS no endereço público e ficam armazenadas no banco do host conectado.
+              </p>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Alterar senha da conta</div>
+                  <div class="settings-row-desc">Exige a senha atual para confirmar a troca.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="open-change-pw-modal-btn" class="btn-primary small-btn">Alterar senha</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Recuperação de senha código único 2FA autenticação duas etapas">
+              <div class="settings-section-head">
+                <h3>Recuperação e verificação adicional</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Código de recuperação de uso único</div>
+                  <div class="settings-row-desc">Gera um código <code>SANC-XXXX-XXXX-XXXX</code> armazenado com hash Argon2id para recuperar sua conta na tela de login.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="generate-recovery-code-btn" class="btn-secondary small-btn">Gerar código</button>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Autenticador (TOTP) e Passkey</div>
+                  <div class="settings-row-desc">Indisponível nesta versão do servidor. Nenhuma simulação é exibida — use uma senha forte e código de recuperação.</div>
+                </div>
+                <div class="settings-row-control">
+                  <span class="settings-scope-badge">Planejado</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Sessões outros dispositivos sair desconectar">
+              <div class="settings-section-head">
+                <h3>Sessões ativas</h3>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Gerenciar dispositivos conectados</div>
+                  <div class="settings-row-desc">Revise ou encerre imediatamente outras sessões abertas na sua conta.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="security-goto-devices-btn" class="btn-secondary small-btn">Ver dispositivos</button>
+                  <button type="button" id="revoke-other-sessions-btn" class="btn-secondary small-btn danger-text">Sair de outros dispositivos</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Excluir conta apagar permanentemente">
+              <div class="settings-section-head">
+                <h3 style="color:var(--danger);">Zona de perigo</h3>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Excluir minha conta</div>
+                  <div class="settings-row-desc">Remove permanentemente conta, sessões, amizades e preferências. Transfira ou exclua servidores dos quais é dono antes.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="delete-own-account-btn" class="btn-secondary small-btn danger-text">Excluir minha conta</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Dispositivos -->
+          <div id="settings-tab-devices" class="settings-panel hidden">
+            <h2>Dispositivos</h2>
+
+            <section class="settings-section" data-search-item="Dispositivos sessões ativas este dispositivo encerrar">
+              <div class="settings-section-head">
+                <h3>Sessões conhecidas</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
+              <p class="settings-section-desc">
+                Lista real das sessões autenticadas no servidor Sancord. A sessão atual aparece marcada como <strong>Este dispositivo</strong> e não é encerrada pelo botão de revogação remota.
+              </p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                <button type="button" id="refresh-sessions-btn" class="btn-secondary small-btn">↻ Atualizar lista</button>
+                <button type="button" id="devices-revoke-others-btn" class="btn-secondary small-btn danger-text">Sair de todos os outros dispositivos</button>
+              </div>
+              <div id="account-sessions-list" class="srv-manage-list" aria-live="polite"></div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Conexões -->
+          <div id="settings-tab-connections" class="settings-panel hidden">
+            <h2>Conexões</h2>
+
+            <section class="settings-section" data-search-item="Conexões GitHub verificado Steam Twitch YouTube Spotify X Instagram Xbox PlayStation links perfil">
+              <div class="settings-section-head">
+                <h3>Contas e links no perfil</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
+              <p class="settings-section-desc">
+                Adicione até 8 links ao seu perfil (GitHub, Steam, Twitch, YouTube, Spotify, X, Instagram, Xbox, PlayStation, TikTok, LinkedIn, Reddit ou site). Perfis pessoais do GitHub podem ser verificados por código temporário na bio pública; os demais são exibidos como links manuais.
+              </p>
+              <ul id="profile-own-links" class="profile-own-links"></ul>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;">
+                <button type="button" id="add-profile-link" class="btn-primary small-btn" disabled>Adicionar conexão</button>
+              </div>
+              <p id="connections-sharing-feedback" class="settings-hint-text" role="status"></p>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Perfis (Global + Perfis por Servidor) -->
           <div id="settings-tab-profile" class="settings-panel settings-profile-panel hidden">
-            <div class="profile-customizer-grid">
+            <h2>Perfis</h2>
+            <div class="settings-pill-tabs" role="tablist" aria-label="Tipo de perfil">
+              <button type="button" class="settings-pill-tab active" data-profile-subtab="global" role="tab" aria-selected="true">Perfil global</button>
+              <button type="button" class="settings-pill-tab" data-profile-subtab="server" role="tab" aria-selected="false">Perfis por servidor</button>
+            </div>
+
+            <div id="profile-subtab-server" class="hidden" data-search-item="Perfil por servidor avatar banner bio cosméticos apelido servidor">
+              <section class="settings-section">
+                <div class="settings-section-head">
+                  <h3>Personalização por servidor</h3>
+                  <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+                </div>
+                <p class="settings-section-desc">
+                  Escolha um servidor para visualizar e personalizar seu apelido, avatar, banner, bio, decoração, moldura, efeito, placa, estilo de nome e tema apenas naquele servidor.
+                </p>
+                <div class="settings-field" style="max-width:380px;">
+                  <label for="settings-server-profile-select">SELECIONAR SERVIDOR</label>
+                  <select id="settings-server-profile-select" class="settings-select"></select>
+                </div>
+                <div id="settings-server-profile-summary" class="profile-editor-card" style="margin-top:12px;"></div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+                  <button type="button" id="settings-server-profile-edit-btn" class="btn-primary small-btn">Editar perfil deste servidor</button>
+                  <button type="button" id="settings-server-profile-nick-btn" class="btn-secondary small-btn">Alterar apelido neste servidor</button>
+                </div>
+              </section>
+            </div>
+
+            <div id="profile-subtab-global" class="profile-customizer-grid">
               <!-- Coluna Esquerda: Todos os Controles Visuais estilo Discord -->
               <div class="profile-customizer-controls">
                 <div class="settings-grid-2">
@@ -854,8 +1013,9 @@
                         <div id="settings-avatar-preview" class="avatar large-avatar editable-avatar">?</div>
                       </div>
                       <span class="cust-square-caption">Foto / GIF</span>
+                      <span id="settings-remove-avatar-btn" class="cust-avatar-remove hidden" role="button" tabindex="0" title="Remover avatar (volta às iniciais)">✕</span>
                     </button>
-                    <button type="button" id="open-decoration-picker-btn" class="cust-square-card" title="Escolher Moldura / Decoração">
+                    <button type="button" id="open-decoration-picker-btn" class="cust-square-card" title="Escolher decoração do avatar">
                       <div class="cust-square-visual">
                         <div id="settings-deco-preview-wrap" class="avatar-deco-wrap large-deco">
                           <div id="settings-deco-preview-avatar" class="avatar large-avatar">?</div>
@@ -870,14 +1030,13 @@
                 <div class="cust-block">
                   <div class="cust-label-row">
                     <span>Estilo do nome exibido</span>
-                    <span class="cust-novo-badge">NOVO</span>
                   </div>
-                  <div class="cust-sub-hint">Escolha a fonte e a cor do seu nome</div>
+                  <div class="cust-sub-hint">Escolha o estilo e as cores do seu nome.</div>
                   <div class="name-style-showcase-box">
                     <span id="settings-name-showcase" class="styled-name">Usuário</span>
                   </div>
                   <div class="name-style-controls-row">
-                    <select id="settings-name-style-select" class="settings-select" style="flex: 1;">
+                    <select id="settings-name-style-select" class="settings-select" aria-label="Estilo do nome" style="flex: 1;">
                       <option value="default">Fonte Padrão Limpa</option>
                       <option value="gta">GTA Vice Cursiva</option>
                       <option value="neon">Neon Cyberpunk Nítido</option>
@@ -892,15 +1051,51 @@
                       <option value="royal">Ouro Imperial</option>
                     </select>
                     <label class="name-color-pill" title="Cor do Nome">
-                      <input type="color" id="settings-name-color-input" value="#ff2e7e" />
+                      <input type="color" id="settings-name-color-input" aria-label="Primeira cor do nome" value="#ff2e7e" />
                       <span>Cor</span>
                     </label>
                   </div>
+                  <div id="settings-name-gradient-controls" class="name-style-controls-row hidden">
+                    <label class="name-color-pill">
+                      <input type="color" id="settings-name-color-secondary" value="#42beae" />
+                      <span>Segunda cor</span>
+                    </label>
+                    <select id="settings-name-gradient-direction" class="settings-select" aria-label="Direção do gradiente do nome">
+                      <option value="horizontal">Horizontal</option>
+                      <option value="vertical">Vertical</option>
+                      <option value="diagonal">Diagonal</option>
+                      <option value="radial">Radial</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Tema do perfil (Perfil P1): sólido ou gradiente, direção e destaque -->
+                <div class="cust-block">
+                  <div class="cust-label">Tema do perfil</div>
+                  <div class="theme-controls-row">
+                    <div class="theme-mode-toggle" role="radiogroup" aria-label="Tipo do tema">
+                      <label><input type="radio" name="theme-mode" value="solid" /> Sólido</label>
+                      <label><input type="radio" name="theme-mode" value="gradient" checked /> Gradiente</label>
+                    </div>
+                    <div id="theme-direction-field" class="theme-direction-field">
+                      <select id="settings-theme-direction" class="settings-select" aria-label="Direção do gradiente">
+                        <option value="vertical">Vertical</option>
+                        <option value="horizontal">Horizontal</option>
+                        <option value="diagonal">Diagonal</option>
+                        <option value="radial">Radial</option>
+                      </select>
+                    </div>
+                    <label class="name-color-pill" title="Cor de destaque (detalhes do cartão)">
+                      <input type="color" id="settings-theme-highlight" value="#8f7dff" />
+                      <span>Destaque</span>
+                    </label>
+                  </div>
+                  <div class="cust-sub-hint">O contraste do texto do cartão se ajusta sozinho às cores escolhidas.</div>
                 </div>
 
                 <!-- Tema e faixa (2 cores + Banner Imagem/GIF) -->
                 <div class="cust-block">
-                  <div class="cust-label">Tema e faixa (Banner)</div>
+                  <div class="cust-label">Cores e banner</div>
                   <div class="cust-two-squares">
                     <div class="cust-theme-card" id="cust-theme-preview-box">
                       <label class="theme-swatch-btn" title="Cor Primária do Tema">
@@ -929,34 +1124,134 @@
                       </div>
                       <span class="cust-square-caption" id="settings-effect-label">Efeito: Nenhum</span>
                     </button>
-                    <button type="button" id="open-deco-quick-btn" class="cust-square-card effect-card-btn" title="Explorar Molduras Animadas">
+                    <button type="button" id="open-deco-quick-btn" class="cust-square-card effect-card-btn" title="Escolher moldura do cartão de perfil">
                       <div class="effect-card-silhouette bordered">
                         <span class="cust-plus-circle">+</span>
                       </div>
-                      <span class="cust-square-caption">Molduras</span>
+                      <span class="cust-square-caption" id="settings-frame-label">Moldura</span>
                     </button>
                   </div>
                 </div>
 
                 <!-- Bio / Sobre mim -->
                 <div class="settings-field">
-                  <label for="settings-bio-input">SOBRE MIM (BIO)</label>
-                  <textarea id="settings-bio-input" maxlength="200" rows="3" placeholder="Conte algo sobre você para os seus amigos..."></textarea>
+                  <div class="slider-label-row">
+                    <label for="settings-bio-input">SOBRE MIM (BIO)</label>
+                    <span id="settings-bio-counter" class="bio-counter" aria-live="polite">0 / 300</span>
+                  </div>
+                  <textarea id="settings-bio-input" maxlength="300" rows="4" placeholder="Conte algo sobre você. Aceita **negrito**, *itálico*, links e emoji."></textarea>
                 </div>
+                <section class="profile-collection-settings" aria-labelledby="collection-title">
+                  <h3 id="collection-title">Minha Coleção</h3>
+                  <button id="open-profile-collection" type="button" class="btn-secondary small-btn" aria-controls="profile-collection-panel" aria-expanded="false">Abrir coleção</button>
+                  <div id="profile-collection-panel" class="hidden">
+                    <p id="collection-status" class="settings-hint-text" role="status"></p>
+                    <div class="collection-controls">
+                      <label class="sr-only" for="collection-category">Categoria</label>
+                      <select id="collection-category" class="settings-select">
+                        <option value="all">Todos</option>
+                        <option value="avatar_decoration">Decorações</option>
+                        <option value="profile_frame">Molduras</option>
+                        <option value="profile_effect">Efeitos</option>
+                        <option value="nameplate">Placas de nome</option>
+                        <option value="name_style">Estilos de nome</option>
+                      </select>
+                      <label class="sr-only" for="collection-set">Coleção</label>
+                      <select id="collection-set" class="settings-select"><option value="all">Todas as coleções</option></select>
+                      <label class="collection-favorites-filter"><input type="checkbox" id="collection-favorites" /> Favoritos</label>
+                    </div>
+                    <div id="collection-items" class="collection-items" aria-label="Itens da coleção" tabindex="0"></div>
+                    <div class="collection-actions">
+                      <button id="collection-seen-all" type="button" class="btn-secondary small-btn">Marcar todos como vistos</button>
+                      <button id="collection-random" type="button" class="btn-secondary small-btn">Surpreenda-me</button>
+                    </div>
+                    <div id="collection-preview" class="hidden">
+                      <h4 id="collection-preview-title" tabindex="-1"></h4>
+                      <div id="collection-preview-card" class="profile-card preview-mode">
+                        <div id="collection-effect-layer" class="profile-effect-layer" aria-hidden="true"></div>
+                        <div id="collection-preview-banner" class="profile-card-banner"></div>
+                        <div class="profile-card-body">
+                          <div id="collection-preview-deco" class="profile-card-avatar-wrap">
+                            <div id="collection-preview-avatar" class="avatar large-avatar"></div>
+                          </div>
+                          <div class="profile-nameplate-wrap">
+                            <strong id="collection-preview-name"></strong>
+                          </div>
+                        </div>
+                      </div>
+                      <p id="collection-preview-items" class="settings-hint-text"></p>
+                      <div class="collection-actions">
+                        <button type="button" class="btn-secondary small-btn" data-replay-profile-effect="collection-effect-layer" disabled>Reproduzir efeito</button>
+                        <button id="collection-use-look" type="button" class="btn-primary small-btn"></button>
+                        <button id="collection-dismiss-look" type="button" class="btn-secondary small-btn">Fechar prévia</button>
+                      </div>
+                    </div>
+                    <div class="collection-presets">
+                      <h4>Presets de perfil</h4>
+                      <p class="settings-hint-text">Salve as cores e os cosméticos que estão no editor para reutilizá-los.</p>
+                      <ul id="collection-presets"></ul>
+                      <button id="collection-save-preset" type="button" class="btn-secondary small-btn">Salvar visual como preset</button>
+                    </div>
+                  </div>
+                </section>
+                <section class="profile-board-settings" aria-labelledby="board-settings-title">
+                  <h3 id="board-settings-title">Mural do perfil</h3>
+                  <button id="open-board-editor" type="button" class="btn-secondary small-btn" aria-controls="board-editor" aria-expanded="false">Editar mural</button>
+                  <div id="board-editor" class="hidden">
+                    <p id="board-editor-status" class="settings-hint-text" role="status"></p>
+                    <div id="board-editor-controls" class="hidden">
+                      <label for="board-audience">Quem pode ver o mural</label>
+                      <select id="board-audience" class="settings-select">
+                        <option value="everyone">Todos</option>
+                        <option value="shared_spaces">Amigos e pessoas com servidor em comum</option>
+                        <option value="friends">Somente amigos</option>
+                      </select>
+                      <ol id="board-editor-widgets" aria-label="Ordem dos widgets"></ol>
+                      <div class="profile-board-actions">
+                        <label class="sr-only" for="board-widget-kind">Tipo de widget</label>
+                        <select id="board-widget-kind" class="settings-select">
+                          <option value="favorite_game">Jogo favorito</option>
+                          <option value="playing">Jogando agora</option>
+                          <option value="want_to_play">Quero jogar</option>
+                          <option value="about">Sobre mim</option>
+                          <option value="link">Link</option>
+                          <option value="achievements">Conquistas</option>
+                          <option value="custom">Bloco personalizado</option>
+                        </select>
+                        <button id="board-add-widget" type="button" class="btn-secondary small-btn">Adicionar</button>
+                      </div>
+                    </div>
+                    <div class="profile-board-actions">
+                      <button id="board-save" type="button" class="btn-primary small-btn" disabled>Salvar mural</button>
+                      <button id="board-reload" type="button" class="btn-secondary small-btn">Recarregar mural</button>
+                    </div>
+                  </div>
+                </section>
               </div>
 
               <!-- Coluna Direita: Prévia Ao Vivo estilo Discord -->
               <div class="profile-customizer-preview-col">
                 <div class="cust-preview-heading">PRÉVIA</div>
+                <div class="profile-context-tabs" role="tablist" aria-label="Onde ver a prévia">
+                  <button type="button" class="active" data-profile-context="popout" role="tab">Perfil completo</button>
+                  <button type="button" data-profile-context="compact" role="tab">Cartão rápido</button>
+                  <button type="button" data-profile-context="chat" role="tab">Chat</button>
+                  <button type="button" data-profile-context="members" role="tab">Membros</button>
+                  <button type="button" data-profile-context="dm" role="tab">DM</button>
+                  <button type="button" data-profile-context="panel" role="tab">Painel inferior</button>
+                </div>
+                <div id="profile-context-preview" class="profile-context-preview hidden" aria-live="polite"></div>
+                <button type="button" class="btn-secondary small-btn profile-effect-replay" data-replay-profile-effect="preview-effect-layer" disabled>Reproduzir efeito</button>
                 <div id="live-profile-preview-card" class="profile-card preview-mode">
-                  <div id="preview-effect-layer" class="profile-effect-layer"></div>
+                  <div id="preview-effect-layer" class="profile-effect-layer" aria-hidden="true"></div>
                   <div id="preview-card-banner" class="profile-card-banner"></div>
                   <div class="profile-card-body">
                     <div class="profile-card-avatar-wrap" id="preview-deco-wrap">
                       <div id="preview-card-avatar" class="avatar large-avatar">?</div>
                       <span id="preview-card-status-dot" class="status-badge online"></span>
                     </div>
-                    <h3 id="preview-card-name" class="styled-name">Usuário</h3>
+                    <div class="profile-nameplate-wrap"><h3 id="preview-card-name" class="styled-name">Usuário</h3></div>
+                    <div id="preview-card-badges" class="profile-badges hidden" aria-label="Badges"></div>
                     <div id="preview-card-custom-status" class="profile-card-custom-status">Online</div>
                     <div class="profile-card-section">
                       <label>SOBRE MIM</label>
@@ -977,177 +1272,342 @@
             </div>
           </div>
 
-          <!-- Aba 2: Voz e Vídeo (Idêntica à referência Discord) -->
+          <!-- PÁGINA: Voz e Vídeo -->
           <div id="settings-tab-voice" class="settings-panel hidden">
             <h2>Voz e vídeo</h2>
 
-            <div class="settings-grid-2">
-              <div class="settings-field">
-                <label for="camera-device-select">Câmera</label>
-                <select id="camera-device-select" class="settings-select"><option value="">Padrão do Sistema</option></select>
+            <section class="settings-section" data-search-item="Dispositivo de entrada microfone volume teste medidor">
+              <div class="settings-section-head">
+                <h3>Dispositivo de entrada e saída</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
               </div>
-              <div class="settings-field">
-                <label for="camera-quality-select">Qualidade da câmera</label>
-                <select id="camera-quality-select" class="settings-select">
-                  <option value="480">480p · 30 FPS</option>
-                  <option value="720" selected>720p · 30 FPS</option>
-                  <option value="1080">1080p · 30 FPS</option>
-                </select>
+              <div class="settings-grid-2">
+                <div class="settings-field">
+                  <label for="mic-device-select">Microfone</label>
+                  <select id="mic-device-select" class="settings-select"></select>
+                </div>
+                <div class="settings-field">
+                  <label for="speaker-device-select">Alto-falante</label>
+                  <select id="speaker-device-select" class="settings-select"></select>
+                </div>
               </div>
-            </div>
-            <p class="settings-hint-text">A câmera só é ligada pelo botão de vídeo da chamada. Alterações valem ao ligá-la novamente; a qualidade efetiva depende do dispositivo e da conexão.</p>
-            <div class="settings-divider"></div>
 
-            <div class="settings-grid-2">
-              <div class="settings-field">
-                <label for="mic-device-select">Microfone</label>
-                <select id="mic-device-select" class="settings-select"></select>
+              <div class="settings-grid-2">
+                <div class="settings-field">
+                  <div class="slider-label-row">
+                    <label for="mic-gain-slider">Volume de entrada</label>
+                    <span id="mic-gain-value">100%</span>
+                  </div>
+                  <input type="range" id="mic-gain-slider" min="0" max="200" step="5" value="100" class="settings-range" />
+                </div>
+                <div class="settings-field">
+                  <div class="slider-label-row">
+                    <label for="master-speaker-slider">Volume de saída</label>
+                    <span id="master-speaker-value">100%</span>
+                  </div>
+                  <input type="range" id="master-speaker-slider" min="0" max="200" step="5" value="100" class="settings-range" />
+                </div>
               </div>
-              <div class="settings-field">
-                <label for="speaker-device-select">Alto-falante</label>
-                <select id="speaker-device-select" class="settings-select"></select>
-              </div>
-            </div>
 
-            <div class="settings-grid-2">
+              <div class="mic-test-discord-row">
+                <button type="button" id="mic-test-btn" class="btn-primary mic-test-cta">Teste do microfone</button>
+                <button type="button" id="speaker-test-btn" class="btn-secondary small-btn">Testar som de saída</button>
+                <div id="mic-bars-meter" class="mic-bars-meter" aria-hidden="true"></div>
+              </div>
+              <p class="settings-hint-text">O teste reproduz sua voz localmente e mostra o nível em tempo real sem enviar áudio pela rede.</p>
+            </section>
+
+            <section class="settings-section" data-search-item="Modo de entrada atividade de voz push-to-talk apertar para falar atraso soltar sensibilidade noise gate">
+              <div class="settings-section-head">
+                <h3>Modo de entrada e sensibilidade</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-field">
+                <label>PERFIL DE ENTRADA</label>
+                <div class="voice-profiles-list">
+                  <label class="voice-profile-option">
+                    <input type="radio" name="voice-profile" value="isolation" checked />
+                    <div>
+                      <div class="vp-title">Isolamento de Voz</div>
+                      <div class="vp-sub">Equaliza o ruído com passa-alta, compressor e supressor inteligente.</div>
+                    </div>
+                  </label>
+                  <label class="voice-profile-option">
+                    <input type="radio" name="voice-profile" value="studio" />
+                    <div>
+                      <div class="vp-title">Estúdio (Sem Filtro)</div>
+                      <div class="vp-sub">Áudio puro e sem cortes extras, ideal para condensadores ou música.</div>
+                    </div>
+                  </label>
+                  <label class="voice-profile-option">
+                    <input type="radio" name="voice-profile" value="custom" />
+                    <div>
+                      <div class="vp-title">Personalizado</div>
+                      <div class="vp-sub">Configure manualmente os filtros DSP, limiar em dB e modo de entrada.</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label>MODO DE ENTRADA</label>
+                <div class="radio-row">
+                  <label class="radio-card">
+                    <input type="radio" name="input-mode" value="vad" checked />
+                    <span>Atividade de voz (VAD)</span>
+                  </label>
+                  <label class="radio-card">
+                    <input type="radio" name="input-mode" value="ptt" />
+                    <span>Apertar para falar (Push-to-Talk)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div id="ptt-key-row" class="settings-field hidden">
+                <label>ATALHO DO PUSH-TO-TALK</label>
+                <div class="ptt-bind-row">
+                  <span id="ptt-key-display" class="ptt-key-badge">Space</span>
+                  <button type="button" id="ptt-record-btn" class="btn-secondary small-btn">Alterar tecla</button>
+                </div>
+                <div class="settings-field" style="margin-top:10px;">
+                  <div class="slider-label-row">
+                    <label for="ptt-release-delay-slider">Atraso ao soltar Push-to-Talk</label>
+                    <span id="ptt-release-delay-value">120 ms</span>
+                  </div>
+                  <input type="range" id="ptt-release-delay-slider" min="0" max="1000" step="20" value="120" class="settings-range" />
+                </div>
+              </div>
+
               <div class="settings-field">
                 <div class="slider-label-row">
-                  <label for="mic-gain-slider">Volume do Microfone</label>
-                  <span id="mic-gain-value">100%</span>
+                  <label for="gate-threshold-slider">Sensibilidade de entrada (Noise Gate)</label>
+                  <span id="gate-threshold-value">-52 dB</span>
                 </div>
-                <input type="range" id="mic-gain-slider" min="0" max="200" step="5" value="100" class="settings-range" />
-              </div>
-              <div class="settings-field">
-                <div class="slider-label-row">
-                  <label for="master-speaker-slider">Volume do Alto-falante</label>
-                  <span id="master-speaker-value">100%</span>
+                <input type="range" id="gate-threshold-slider" min="-80" max="-15" step="1" value="-52" class="settings-range" />
+                <div class="mic-meter-track" style="margin-top: 8px;">
+                  <div id="mic-meter-fill" class="mic-meter-fill"></div>
+                  <div id="mic-meter-threshold" class="mic-meter-threshold"></div>
                 </div>
-                <input type="range" id="master-speaker-slider" min="0" max="200" step="5" value="100" class="settings-range" />
               </div>
-            </div>
+            </section>
 
-            <!-- Teste do microfone estilo barras verticais Discord -->
-            <div class="mic-test-discord-row">
-              <button type="button" id="mic-test-btn" class="btn-primary mic-test-cta">Teste do microfone</button>
-              <div id="mic-bars-meter" class="mic-bars-meter" aria-hidden="true"></div>
-            </div>
-            <p class="settings-hint-text">Ajuste o ganho ou selecione seu dispositivo caso sua voz esteja baixa ou estourando.</p>
-
-            <div class="settings-divider"></div>
-
-            <h3>Perfil de entrada</h3>
-            <div class="voice-profiles-list">
-              <label class="voice-profile-option">
-                <input type="radio" name="voice-profile" value="isolation" checked />
-                <div>
-                  <div class="vp-title">Isolamento de Voz</div>
-                  <div class="vp-sub">Só a sua linda voz: o Sancord equaliza o ruído com passa-alta, compressor e supressor inteligente.</div>
-                </div>
-              </label>
-              <label class="voice-profile-option">
-                <input type="radio" name="voice-profile" value="studio" />
-                <div>
-                  <div class="vp-title">Estúdio (Sem Filtro)</div>
-                  <div class="vp-sub">Áudio puro e sem cortes extras, ideal para microfones condensadores ou música.</div>
-                </div>
-              </label>
-              <label class="voice-profile-option">
-                <input type="radio" name="voice-profile" value="custom" />
-                <div>
-                  <div class="vp-title">Personalizado</div>
-                  <div class="vp-sub">Configure manualmente os filtros DSP, limiar em dB e modo de entrada abaixo.</div>
-                </div>
-              </label>
-            </div>
-
-            <div class="settings-divider"></div>
-
-            <div class="settings-field">
-              <label>MODO DE ENTRADA</label>
-              <div class="radio-row">
-                <label class="radio-card">
-                  <input type="radio" name="input-mode" value="vad" checked />
-                  <span>Detecção de Voz</span>
-                </label>
-                <label class="radio-card">
-                  <input type="radio" name="input-mode" value="ptt" />
-                  <span>Push-to-Talk (Aperte para Falar)</span>
-                </label>
+            <section class="settings-section" data-search-item="Processamento de voz supressão de ruído cancelamento de eco passa-alta compressor opus">
+              <div class="settings-section-head">
+                <h3>Processamento de voz (DSP &amp; WebRTC)</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
               </div>
-            </div>
-
-            <div id="ptt-key-row" class="settings-field hidden">
-              <label>ATALHO DO PUSH-TO-TALK</label>
-              <div class="ptt-bind-row">
-                <span id="ptt-key-display" class="ptt-key-badge">Space</span>
-                <button type="button" id="ptt-record-btn" class="btn-secondary small-btn">Alterar Tecla</button>
-              </div>
-            </div>
-
-            <div class="settings-field">
-              <div class="slider-label-row">
-                <label>SENSIBILIDADE DE ENTRADA (NOISE GATE)</label>
-                <span id="gate-threshold-value">-52 dB</span>
-              </div>
-              <input type="range" id="gate-threshold-slider" min="-80" max="-15" step="1" value="-52" class="settings-range" />
-              <div class="mic-meter-track" style="margin-top: 8px;">
-                <div id="mic-meter-fill" class="mic-meter-fill"></div>
-                <div id="mic-meter-threshold" class="mic-meter-threshold"></div>
-              </div>
-            </div>
-
-            <div class="settings-divider"></div>
-
-            <h3>Filtros Avançados (DSP &amp; WebRTC)</h3>
-            <div class="dsp-toggles-list">
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Supressor de Ruído Inteligente + Noise Gate</div>
-                  <div class="dsp-sub">Corta ruído de ventilador, chiado de fundo e teclado leve quando você não está falando.</div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Supressão de ruído inteligente + Noise Gate</div>
+                  <div class="settings-row-desc">Corta ruído de ventilador, chiado de fundo e teclado leve quando você não está falando.</div>
                 </div>
                 <input type="checkbox" id="dsp-noise-gate" checked />
-              </label>
-
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Filtro Passa-Alta (85 Hz)</div>
-                  <div class="dsp-sub">Remove batidas na mesa e graves abafados antes de enviar para a call.</div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Filtro Passa-Alta (85 Hz)</div>
+                  <div class="settings-row-desc">Remove batidas na mesa e graves abafados antes de enviar para a chamada.</div>
                 </div>
                 <input type="checkbox" id="dsp-highpass" checked />
-              </label>
-
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Compressor Dinâmico de Voz</div>
-                  <div class="dsp-sub">Evita que sua voz estoure quando você fala alto e deixa a fala baixa mais clara.</div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Compressor dinâmico de voz</div>
+                  <div class="settings-row-desc">Evita que sua voz estoure ao falar alto e deixa falas baixas mais nítidas.</div>
                 </div>
                 <input type="checkbox" id="dsp-compressor" checked />
-              </label>
-
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Cancelamento de Eco (AEC) &amp; AGC Hardware</div>
-                  <div class="dsp-sub">Impede que o som dos amigos retorne pelo seu microfone.</div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Cancelamento de eco (AEC) e controle automático de ganho</div>
+                  <div class="settings-row-desc">Impede que o som dos participantes retorne pelo seu microfone.</div>
                 </div>
                 <input type="checkbox" id="dsp-aec" checked />
-              </label>
-
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Áudio Opus Alta Definição (128 kbps Stereo + FEC)</div>
-                  <div class="dsp-sub">Qualidade máxima de voz na transmissão WebRTC mesmo com oscilação de rede.</div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Áudio Opus Alta Definição (128 kbps Stereo + FEC)</div>
+                  <div class="settings-row-desc">Mantém alta fidelidade e correção de perda de pacotes na chamada (respeitando o bitrate do canal).</div>
                 </div>
                 <input type="checkbox" id="dsp-opus-hd" checked />
-              </label>
-            </div>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Câmera webcam testar vídeo qualidade resolução">
+              <div class="settings-section-head">
+                <h3>Câmera</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-grid-2">
+                <div class="settings-field">
+                  <label for="camera-device-select">Dispositivo de vídeo</label>
+                  <select id="camera-device-select" class="settings-select"><option value="">Padrão do Sistema</option></select>
+                </div>
+                <div class="settings-field">
+                  <label for="camera-quality-select">Qualidade da câmera</label>
+                  <select id="camera-quality-select" class="settings-select">
+                    <option value="480">480p · 30 FPS</option>
+                    <option value="720" selected>720p · 30 FPS</option>
+                    <option value="1080">1080p · 30 FPS</option>
+                  </select>
+                </div>
+              </div>
+              <p class="settings-hint-text">A câmera nunca é aberta automaticamente ao abrir esta página — somente ao clicar em Testar câmera ou ligar vídeo na chamada.</p>
+              <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+                <button type="button" id="camera-test-btn" class="btn-secondary small-btn">Testar câmera</button>
+                <span id="camera-test-status" class="settings-hint-text"></span>
+              </div>
+              <div id="settings-camera-preview-wrap" class="settings-camera-preview-wrap hidden">
+                <video id="settings-camera-preview-video" autoplay muted playsinline></video>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Compartilhamento de tela resolução FPS áudio padrão">
+              <div class="settings-section-head">
+                <h3>Compartilhamento de tela</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-grid-2">
+                <div class="settings-field">
+                  <label for="screen-default-quality">Qualidade padrão da transmissão</label>
+                  <select id="screen-default-quality" class="settings-select">
+                    <option value="720">720p HD</option>
+                    <option value="1080" selected>1080p Full HD</option>
+                    <option value="1440">1440p 2K</option>
+                    <option value="2160">4K UHD</option>
+                  </select>
+                </div>
+                <div class="settings-field">
+                  <label for="screen-default-fps">Taxa de quadros padrão (FPS)</label>
+                  <select id="screen-default-fps" class="settings-select">
+                    <option value="15">15 FPS (economia)</option>
+                    <option value="30" selected>30 FPS (equilibrado)</option>
+                    <option value="60">60 FPS (fluido)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Compartilhar áudio do sistema por padrão</div>
+                  <div class="settings-row-desc">Marca a opção de áudio do sistema automaticamente ao abrir o seletor de tela.</div>
+                </div>
+                <input type="checkbox" id="screen-default-audio" checked />
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Diagnóstico de voz redefinir configurações de voz">
+              <div class="settings-section-head">
+                <h3>Diagnóstico e redefinição de voz</h3>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Redefinir configurações de voz e áudio</div>
+                  <div class="settings-row-desc">Restaura dispositivos, ganho, modo de entrada e filtros DSP para o padrão do Sancord.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="voice-goto-diagnostics-btn" class="btn-secondary small-btn">Abrir diagnóstico</button>
+                  <button type="button" id="voice-reset-btn" class="btn-secondary small-btn">Redefinir voz</button>
+                </div>
+              </div>
+            </section>
           </div>
 
-          <!-- Aba 3: Dados e Privacidade (Rica & Funcional) -->
+          <!-- PÁGINA: Dados e Privacidade -->
           <div id="settings-tab-privacy" class="settings-panel hidden">
             <h2>Dados e privacidade</h2>
 
-            <div class="profile-editor-card" style="margin-bottom: 16px;">
-              <div class="cust-label">Mensagens diretas e amizade (aplicado no servidor)</div>
+            <section class="settings-section profile-sharing-settings" aria-labelledby="profile-sharing-title" data-search-item="Privacidade do perfil visibilidade bio pronomes banner status mural conexões">
+              <div class="settings-section-head">
+                <h3 id="profile-sharing-title">Privacidade do perfil</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
+              <p class="settings-section-desc">Nome e avatar identificam você nos servidores e nas DMs. A visibilidade geral limita todos os campos opcionais abaixo e é aplicada diretamente no servidor.</p>
+              <form id="profile-privacy-form" class="hidden">
+                <div id="profile-privacy-fields" class="profile-privacy-fields"></div>
+                <button type="submit" class="btn-primary small-btn">Salvar privacidade</button>
+              </form>
+              <p id="profile-sharing-feedback" class="settings-hint-text" role="status"></p>
+            </section>
+
+            <section id="badge-admin-panel" class="settings-section hidden" aria-label="Administração de selos">
+              <div class="settings-section-head">
+                <h3>Administração de selos (operador)</h3>
+                <span class="settings-scope-badge synced">Servidor</span>
+              </div>
+              <p class="settings-section-desc">Conceda ou remova selos oficiais e de conquista. As alterações são salvas atomicamente em <code>badges.json</code> e aplicadas imediatamente.</p>
+              <div class="settings-field">
+                <label for="badge-admin-user">CONTA</label>
+                <select id="badge-admin-user" class="settings-select"></select>
+              </div>
+              <div id="badge-admin-list" class="badge-admin-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px 12px;margin:10px 0 12px;"></div>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="badge-admin-save" class="btn-primary small-btn">Salvar selos</button>
+                <span id="badge-admin-feedback" class="settings-hint-text" role="status"></span>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Uso dos dados telemetria privacidade diagnóstico">
+              <div class="settings-section-head">
+                <h3>Como seus dados são usados</h3>
+              </div>
+              <p class="settings-section-desc">
+                O Sancord <strong>não coleta telemetria de uso, perfil comportamental nem rastreamento de terceiros</strong>. Suas mensagens, servidores, amizades e preferências sincronizadas ficam armazenados exclusivamente no host Sancord ao qual você se conecta.
+              </p>
+            </section>
+
+            <section class="settings-section" data-search-item="Exportar preferências JSON dados armazenamento local cache limpeza notas">
+              <div class="settings-section-head">
+                <h3>Seus dados e armazenamento neste dispositivo</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Exportar preferências locais</div>
+                  <div class="settings-row-desc">Baixa um arquivo JSON com suas preferências de áudio, tema, acessibilidade, chat e atalhos.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="export-settings-btn" class="btn-secondary small-btn">Exportar JSON</button>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Cache de imagens e mídia em memória</div>
+                  <div class="settings-row-desc" id="local-storage-media-stats">Calculando…</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="clear-media-cache-btn" class="btn-secondary small-btn">Limpar cache</button>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Notas de perfil e mensagens favoritas</div>
+                  <div class="settings-row-desc" id="local-storage-notes-stats">Gerencie suas anotações pessoais e itens favoritados.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="clear-local-notes-btn" class="btn-secondary small-btn">Limpar notas e favoritas</button>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Preferências locais do dispositivo</div>
+                  <div class="settings-row-desc" id="local-storage-prefs-stats">Restaura áudio, tema, acessibilidade e opções locais sem apagar sua conta.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="reset-local-audio-btn" class="btn-secondary small-btn">Restaurar padrões</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Conteúdo e Social -->
+          <div id="settings-tab-social" class="settings-panel hidden">
+            <h2>Conteúdo e social</h2>
+
+            <section class="settings-section" data-search-item="Mensagens diretas DMs quem pode enviar pedidos de amizade">
+              <div class="settings-section-head">
+                <h3>Mensagens diretas e pedidos de amizade</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
               <div class="settings-field">
                 <label for="privacy-dm-policy">QUEM PODE TE ENVIAR MENSAGEM DIRETA</label>
                 <select id="privacy-dm-policy" class="settings-select">
@@ -1164,192 +1624,349 @@
                   <option value="none">Ninguém</option>
                 </select>
               </div>
-              <div id="privacy-feedback" class="settings-hint-text"></div>
-              <div class="cust-label" style="margin-top: 12px;">Usuários bloqueados</div>
-              <ul id="privacy-blocked-list" class="friends-items-list"></ul>
-            </div>
+              <div id="privacy-feedback" class="settings-hint-text" role="status"></div>
+            </section>
 
-            <div class="dsp-toggles-list" style="margin-bottom: 16px;">
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Exibir status "Está digitando..." no chat</div>
-                  <div class="dsp-sub">Permite que membros saibam quando você está escrevendo em tempo real.</div>
+            <section class="settings-section" data-search-item="Modo foco silenciar desconhecidos links externos embeds previews proteção">
+              <div class="settings-section-head">
+                <h3>Foco e segurança de links</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Modo Foco (silenciar conversas de quem não é amigo)</div>
+                  <div class="settings-row-desc">Mensagens privadas de desconhecidos continuam chegando, mas sem som nem alerta desktop.</div>
                 </div>
-                <input type="checkbox" id="privacy-typing-indicator" checked />
-              </label>
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Pré-visualizar imagens e anexos automaticamente</div>
-                  <div class="dsp-sub">Carrega miniaturas de imagens coladas no chat instantaneamente.</div>
+                <input type="checkbox" id="family-focus-mode" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Pré-visualizar imagens, anexos e links automaticamente</div>
+                  <div class="settings-row-desc">Exibe miniaturas e cartões de prévia obtidos pelo servidor do Sancord, sem expor seu IP aos sites externos.</div>
                 </div>
                 <input type="checkbox" id="privacy-auto-embeds" checked />
-              </label>
-            </div>
-
-            <div class="profile-editor-card">
-              <div class="cust-label">Armazenamento Local &amp; Ferramentas</div>
-              <p class="settings-hint-text">Suas DMs, amizades, servidores, cargos e contas ficam salvos localmente no host Sancord. Notas pessoais de perfil e favoritos ficam salvos no seu navegador/app.</p>
-              <div class="privacy-actions-row">
-                <button type="button" id="export-settings-btn" class="btn-secondary small-btn">📦 Exportar Preferências (JSON)</button>
-                <button type="button" id="clear-local-notes-btn" class="btn-secondary small-btn">🧹 Limpar Notas &amp; Favoritas</button>
-                <button type="button" id="reset-local-audio-btn" class="btn-secondary small-btn">🎙️ Restaurar Áudio &amp; Tema</button>
               </div>
-            </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Proteção de links externos</div>
+                  <div class="settings-row-desc">Pede confirmação antes de abrir um link de mensagem para um domínio em que você ainda não confiou.</div>
+                </div>
+                <input type="checkbox" id="family-link-guard" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Domínios confiáveis salvos</div>
+                  <div class="settings-row-desc" id="trusted-domains-summary">Nenhum domínio adicionado ainda.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="clear-trusted-domains-btn" class="btn-secondary small-btn">Limpar domínios</button>
+                </div>
+              </div>
+            </section>
           </div>
 
-          <!-- Aba 4: Notificações -->
+          <!-- PÁGINA: Solicitações de Mensagem -->
+          <div id="settings-tab-requests" class="settings-panel hidden">
+            <h2>Solicitações de mensagem</h2>
+
+            <section class="settings-section" data-search-item="Solicitações de mensagem desconhecidos filtrar DMs aceitar ignorar">
+              <div class="settings-section-head">
+                <h3>Mensagens de desconhecidos</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
+              <p class="settings-section-desc">Define o destino de novas mensagens diretas enviadas por pessoas que ainda não estão na sua lista de amigos.</p>
+              <div class="voice-profiles-list" id="requests-policy-radios">
+                <label class="voice-profile-option">
+                  <input type="radio" name="settings-dm-request-mode" value="requests" />
+                  <div>
+                    <div class="vp-title">Enviar para Solicitações de mensagem</div>
+                    <div class="vp-sub">Você revisa e escolhe aceitar ou ignorar antes de abrir a conversa normalmente.</div>
+                  </div>
+                </label>
+                <label class="voice-profile-option">
+                  <input type="radio" name="settings-dm-request-mode" value="everyone" />
+                  <div>
+                    <div class="vp-title">Permitir diretamente na caixa de entrada</div>
+                    <div class="vp-sub">Qualquer conta pode iniciar uma DM com você imediatamente.</div>
+                  </div>
+                </label>
+                <label class="voice-profile-option">
+                  <input type="radio" name="settings-dm-request-mode" value="friends" />
+                  <div>
+                    <div class="vp-title">Bloquear mensagens de quem não é amigo</div>
+                    <div class="vp-sub">Somente amigos confirmados podem enviar novas mensagens diretas.</div>
+                  </div>
+                </label>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <div class="settings-section-head">
+                <h3>Solicitações pendentes</h3>
+              </div>
+              <ul id="settings-message-requests-list" class="friends-items-list"></ul>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Usuários Bloqueados -->
+          <div id="settings-tab-blocked" class="settings-panel hidden">
+            <h2>Usuários bloqueados</h2>
+
+            <section class="settings-section" data-search-item="Usuários bloqueados buscar desbloquear">
+              <div class="settings-section-head">
+                <h3>Lista de bloqueios</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
+              <p class="settings-section-desc">Pessoas bloqueadas não podem enviar mensagens diretas, pedidos de amizade nem visualizar seu mural ou detalhes privados.</p>
+              <div class="settings-field" style="max-width:340px;">
+                <label for="blocked-users-search">BUSCAR BLOQUEADOS</label>
+                <input type="text" id="blocked-users-search" placeholder="Filtrar por nome de usuário…" autocomplete="off" />
+              </div>
+              <ul id="privacy-blocked-list" class="friends-items-list"></ul>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Atividade e Presença -->
+          <div id="settings-tab-activity" class="settings-panel hidden">
+            <h2>Atividade e presença</h2>
+
+            <section class="settings-section" data-search-item="Status online presença invisível ausente não perturbe atividade perfil digitando">
+              <div class="settings-section-head">
+                <h3>Presença e compartilhamento</h3>
+                <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Status online atual</div>
+                  <div class="settings-row-desc">Define como sua disponibilidade aparece para amigos e membros de servidores.</div>
+                </div>
+                <div class="settings-row-control">
+                  <select id="activity-status-select" class="settings-select" style="width:180px;">
+                    <option value="online">🟢 Online</option>
+                    <option value="idle">🌙 Ausente</option>
+                    <option value="dnd">⛔ Não perturbe</option>
+                    <option value="invisible">⚫ Invisível</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Quem pode ver sua atividade no perfil</div>
+                  <div class="settings-row-desc">Controla quem enxerga em qual canal de voz ou transmissão você está no seu cartão de perfil.</div>
+                </div>
+                <div class="settings-row-control">
+                  <select id="activity-audience-select" class="settings-select" style="width:220px;">
+                    <option value="everyone">Todos</option>
+                    <option value="shared_spaces">Amigos e servidores em comum</option>
+                    <option value="friends">Somente amigos</option>
+                    <option value="only_me">Somente eu</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Exibir status "Está digitando…" no chat</div>
+                  <div class="settings-row-desc">Permite que outras pessoas vejam quando você está escrevendo uma mensagem.</div>
+                </div>
+                <input type="checkbox" id="privacy-typing-indicator" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Tempo ativo nesta sessão</div>
+                  <div class="settings-row-desc" id="session-uptime-display">0 min ativo</div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Notificações -->
           <div id="settings-tab-notifications" class="settings-panel hidden">
             <h2>Notificações</h2>
 
-            <div class="dsp-toggles-list" style="margin-bottom: 16px;">
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Som de novas mensagens &amp; DMs</div>
-                  <div class="dsp-sub">Tocar alerta sonoro quando alguém enviar mensagem ou mencionar você.</div>
-                </div>
-                <input type="checkbox" id="notif-sound-messages" checked />
-              </label>
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Sons de entrada e saída na call</div>
-                  <div class="dsp-sub">Tocar o efeito clássico quando amigos entram ou saem do canal de voz.</div>
-                </div>
-                <input type="checkbox" id="notif-sound-voice" checked />
-              </label>
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Notificações Desktop para menções e DMs</div>
-                  <div class="dsp-sub">Exibe alerta do sistema quando você estiver em outra aba ou minimizado.</div>
+            <section class="settings-section" data-search-item="Notificações desktop mostrar conteúdo foco badge contador título">
+              <div class="settings-section-head">
+                <h3>Notificações desktop e indicador</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Ativar notificações desktop</div>
+                  <div class="settings-row-desc">Exibe alertas nativos do sistema para menções e mensagens diretas.</div>
                 </div>
                 <input type="checkbox" id="notif-desktop-alerts" />
-              </label>
-            </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Mostrar conteúdo da mensagem na notificação</div>
+                  <div class="settings-row-desc">Quando desligado, exibe apenas o remetente sem revelar o texto da mensagem.</div>
+                </div>
+                <input type="checkbox" id="notif-show-preview" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Notificar mesmo quando o Sancord estiver em foco</div>
+                  <div class="settings-row-desc">Envia alerta do sistema para mensagens em outros canais mesmo com a janela ativa.</div>
+                </div>
+                <input type="checkbox" id="notif-when-focused" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Mostrar contador de não lidas na barra de título</div>
+                  <div class="settings-row-desc">Exibe o número de menções e DMs pendentes no título da janela desktop.</div>
+                </div>
+                <input type="checkbox" id="notif-title-badge" checked />
+              </div>
+            </section>
 
-            <div class="profile-editor-card">
-              <div class="settings-field" style="margin-bottom: 6px;">
+            <section class="settings-section" data-search-item="Volume dos sons efeitos sonoros interface testar som">
+              <div class="settings-section-head">
+                <h3>Volume dos sons</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-field">
                 <div class="slider-label-row">
-                  <label for="notif-ui-volume-slider">VOLUME DOS EFEITOS SONOROS DA INTERFACE</label>
+                  <label for="notif-ui-volume-slider">Volume das notificações e efeitos</label>
                   <span id="notif-ui-volume-value">100%</span>
                 </div>
                 <input type="range" id="notif-ui-volume-slider" min="0" max="150" step="5" value="100" class="settings-range" />
               </div>
-              <div>
-                <button type="button" id="notif-test-sound-btn" class="btn-primary small-btn">🔊 Testar Som do Sancord</button>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                <button type="button" id="notif-test-sound-btn" class="btn-primary small-btn">Testar som do Sancord</button>
               </div>
-            </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Sons mensagem menção chamada entrou saiu voz mute deafen stream pedido amizade">
+              <div class="settings-section-head">
+                <h3>Sons individuais</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Sons de novas mensagens e DMs (geral)</div>
+                  <div class="settings-row-desc">Interruptor geral para alertas sonoros de mensagens e menções.</div>
+                </div>
+                <input type="checkbox" id="notif-sound-messages" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Sons de chamada e canal de voz (geral)</div>
+                  <div class="settings-row-desc">Interruptor geral para entrada, saída, mute e transmissões.</div>
+                </div>
+                <input type="checkbox" id="notif-sound-voice" checked />
+              </div>
+              <div id="settings-sounds-matrix"></div>
+            </section>
           </div>
 
-          <!-- Aba 5: Aparência (Temas Discord + Temas Coloridos + Recursos Exclusivos Sancord) -->
+          <!-- PÁGINA: Aparência -->
           <div id="settings-tab-appearance" class="settings-panel hidden">
             <h2>Aparência</h2>
 
-            <div class="dsp-toggles-list">
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Mesmo tema do dispositivo</div>
-                  <div class="dsp-sub">Iguale ao modo (claro ou escuro) configurado no Windows / navegador.</div>
+            <section class="settings-section" data-search-item="Tema claro cinza escuro midnight automático sistema operacional">
+              <div class="settings-section-head">
+                <h3>Tema</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Seguir tema do sistema operacional</div>
+                  <div class="settings-row-desc">Alterna automaticamente entre claro e escuro conforme o Windows ou navegador.</div>
                 </div>
                 <input type="checkbox" id="appearance-auto-device" />
-              </label>
-            </div>
+              </div>
 
-            <div class="appearance-section-label" data-i18n="settings.language">Idioma</div>
-            <div class="settings-field" style="margin-bottom: 20px;">
-              <select id="settings-language" class="settings-select" aria-label="Idioma">
-                <option value="pt-BR">Português (Brasil)</option>
-                <option value="en">English (preview)</option>
-              </select>
-              <div class="settings-hint-text" data-i18n="settings.language.hint">O inglês ainda está em preparação: textos sem tradução aparecem em português.</div>
-            </div>
+              <div class="appearance-section-label" style="margin-top:14px;">Temas padrão</div>
+              <div class="appearance-theme-swatches" id="appearance-theme-swatches">
+                <button type="button" class="theme-swatch-tile swatch-light" data-app-theme="light" title="Claro">
+                  <span class="theme-swatch-check">✓</span>
+                </button>
+                <button type="button" class="theme-swatch-tile swatch-ash" data-app-theme="ash" title="Ash (Cinza)">
+                  <span class="theme-swatch-check">✓</span>
+                </button>
+                <button type="button" class="theme-swatch-tile swatch-dark active" data-app-theme="dark" title="Escuro">
+                  <span class="theme-swatch-check">✓</span>
+                </button>
+                <button type="button" class="theme-swatch-tile swatch-oled" data-app-theme="oled" title="Midnight / Onyx">
+                  <span class="theme-swatch-check">✓</span>
+                </button>
+                <button type="button" class="theme-swatch-tile swatch-auto" data-app-theme="auto" title="Automático (Sistema)">
+                  <span class="theme-swatch-check">✓</span>
+                </button>
+              </div>
+            </section>
 
-            <div class="appearance-section-label">Temas padrão</div>
-            <div class="appearance-theme-swatches" id="appearance-theme-swatches">
-              <button type="button" class="theme-swatch-tile swatch-light" data-app-theme="light" title="Claro">
-                <span class="theme-swatch-check">✓</span>
-              </button>
-              <button type="button" class="theme-swatch-tile swatch-ash" data-app-theme="ash" title="Ash (Cinza)">
-                <span class="theme-swatch-check">✓</span>
-              </button>
-              <button type="button" class="theme-swatch-tile swatch-dark active" data-app-theme="dark" title="Escuro">
-                <span class="theme-swatch-check">✓</span>
-              </button>
-              <button type="button" class="theme-swatch-tile swatch-oled" data-app-theme="oled" title="Onyx (AMOLED)">
-                <span class="theme-swatch-check">✓</span>
-              </button>
-              <button type="button" class="theme-swatch-tile swatch-auto" data-app-theme="auto" title="Automático (Sistema)">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 6v3l4-4-4-4v3c-4.42 0-8 3.58-8 8 0 1.57.46 3.03 1.24 4.26L6.7 14.8c-.45-.83-.7-1.79-.7-2.8 0-3.31 2.69-6 6-6zm6.76 1.74L17.3 9.2c.44.84.7 1.79.7 2.8 0 3.31-2.69 6-6 6v-3l-4 4 4 4v-3c4.42 0 8-3.58 8-8 0-1.57-.46-3.03-1.24-4.26z"/>
-                </svg>
-                <span class="theme-swatch-check">✓</span>
-              </button>
-            </div>
-
-            <div class="appearance-custom-banner">
-              <div class="appearance-custom-left">
-                <div class="appearance-mini-app-icon"><span>Sancord</span></div>
-                <div class="appearance-custom-text">
-                  <strong>Deixe o Sancord do seu jeitinho</strong>
-                  <p>Personalize gradientes de atmosfera, vidro translúcido e partículas exclusivas do Sancord — tudo liberado grátis.</p>
+            <section class="settings-section" data-search-item="Cor de destaque accent paleta temas coloridos atmosfera vidro partículas bordas">
+              <div class="settings-section-head">
+                <h3>Cor de destaque e atmosferas Sancord</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Cor de destaque personalizada</div>
+                  <div class="settings-row-desc">Aplica uma cor principal sob medida em botões, links e seleções.</div>
+                </div>
+                <div class="settings-row-control">
+                  <input type="color" id="appearance-custom-accent-color" value="#5865f2" aria-label="Escolher cor de destaque" />
+                  <button type="button" id="appearance-reset-accent-color" class="btn-secondary small-btn">Padrão</button>
                 </div>
               </div>
-              <button type="button" id="toggle-accent-palette-btn" class="btn-primary small-btn">Experimentar</button>
-            </div>
 
-            <div id="appearance-accent-section">
-              <div class="appearance-section-label">
-                Tema de cor especial <span class="accent-swatch-badge">EXCLUSIVO SANCORD</span>
+              <div class="appearance-custom-banner" style="margin-top:12px;">
+                <div class="appearance-custom-left">
+                  <div class="appearance-mini-app-icon"><span>Sancord</span></div>
+                  <div class="appearance-custom-text">
+                    <strong>Atmosferas livres do Sancord</strong>
+                    <p>Personalize gradientes de atmosfera, vidro translúcido e partículas exclusivas sem restrições.</p>
+                  </div>
+                </div>
+                <button type="button" id="toggle-accent-palette-btn" class="btn-primary small-btn">Paletas</button>
               </div>
-              <div class="appearance-accent-swatches">
-                <button type="button" class="accent-swatch-tile active" data-accent-theme="none" title="Padrão Blurple" style="background: linear-gradient(135deg, #5865f2, #2b2d31);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="gta" title="Pôr do Sol GTA" style="background: linear-gradient(135deg, #a855f7, #f97316);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="sancord-aurora" title="Aurora Sancord" style="background: linear-gradient(135deg, #00f5d4, #5865f2, #ff00a0);"></button>
+
+              <div id="appearance-accent-section">
+                <div class="appearance-section-label">
+                  Tema de cor especial <span class="accent-swatch-badge">EXCLUSIVO SANCORD</span>
+                </div>
+                <div class="appearance-accent-swatches">
+                  <button type="button" class="accent-swatch-tile active" data-accent-theme="none" title="Padrão Blurple" style="background: linear-gradient(135deg, #5865f2, #2b2d31);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="gta" title="Pôr do Sol GTA" style="background: linear-gradient(135deg, #a855f7, #f97316);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="sancord-aurora" title="Aurora Sancord" style="background: linear-gradient(135deg, #00f5d4, #5865f2, #ff00a0);"></button>
+                </div>
+
+                <div class="appearance-section-label">
+                  Temas coloridos <span class="accent-swatch-badge">18 PALETAS LIVRES</span>
+                </div>
+                <div class="colorful-themes-grid" id="appearance-accent-swatches">
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="mint" title="Menta Suave" style="background: linear-gradient(135deg, #a7f3d0, #34d399);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="peach" title="Pêssego Quente" style="background: linear-gradient(135deg, #fed7aa, #fb923c);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="lavender" title="Lavanda Glacial" style="background: linear-gradient(135deg, #c7d2fe, #818cf8);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="citrus" title="Lima Solar" style="background: linear-gradient(135deg, #ecfccb, #84cc16);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="sakura" title="Flor de Cerejeira" style="background: linear-gradient(135deg, #fbcfe8, #f472b6);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="sky" title="Céu Ártico" style="background: linear-gradient(135deg, #bae6fd, #38bdf8);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="dusk" title="Crepúsculo Violeta" style="background: linear-gradient(135deg, #6366f1, #d97706);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="prism" title="Chroma Prism" style="background: linear-gradient(135deg, #3b82f6, #ec4899, #8b5cf6);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="moss" title="Musgo Dourado" style="background: linear-gradient(135deg, #4d7c0f, #ca8a04);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="crimson" title="Rubi Noturno" style="background: linear-gradient(135deg, #991b1b, #09090b);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="abyss" title="Abismo Cósmico" style="background: linear-gradient(135deg, #312e81, #09090b);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="mocha" title="Bronze Escuro" style="background: linear-gradient(135deg, #78350f, #1c1917);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="slate" title="Fumaça Sideral" style="background: linear-gradient(135deg, #64748b, #0f172a);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="emerald" title="Floresta Esmeralda" style="background: linear-gradient(135deg, #10b981, #064e3b);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="ocean" title="Azul Abissal" style="background: linear-gradient(135deg, #0ea5e9, #1e3a8a);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="rose" title="Neon Tóquio" style="background: linear-gradient(135deg, #f43f5e, #701a75);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="cyber" title="Matrix Cyber" style="background: linear-gradient(135deg, #06b6d4, #10b981);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="gold" title="Ouro Imperial" style="background: linear-gradient(135deg, #f59e0b, #451a03);"></button>
+                </div>
               </div>
 
-              <div class="appearance-section-label">
-                Temas coloridos <span class="accent-swatch-badge">18 PALETAS LIVRES</span>
-              </div>
-              <p class="cust-sub-hint" style="margin-bottom: 10px;">Aplica atmosfera de cor completa nas barras laterais, destaques e profundidade da interface.</p>
-              <div class="colorful-themes-grid" id="appearance-accent-swatches">
-                <button type="button" class="accent-swatch-tile" data-accent-theme="mint" title="Menta Suave" style="background: linear-gradient(135deg, #a7f3d0, #34d399);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="peach" title="Pêssego Quente" style="background: linear-gradient(135deg, #fed7aa, #fb923c);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="lavender" title="Lavanda Glacial" style="background: linear-gradient(135deg, #c7d2fe, #818cf8);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="citrus" title="Lima Solar" style="background: linear-gradient(135deg, #ecfccb, #84cc16);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="sakura" title="Flor de Cerejeira" style="background: linear-gradient(135deg, #fbcfe8, #f472b6);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="sky" title="Céu Ártico" style="background: linear-gradient(135deg, #bae6fd, #38bdf8);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="dusk" title="Crepúsculo Violeta" style="background: linear-gradient(135deg, #6366f1, #d97706);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="prism" title="Chroma Prism" style="background: linear-gradient(135deg, #3b82f6, #ec4899, #8b5cf6);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="moss" title="Musgo Dourado" style="background: linear-gradient(135deg, #4d7c0f, #ca8a04);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="crimson" title="Rubi Noturno" style="background: linear-gradient(135deg, #991b1b, #09090b);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="abyss" title="Abismo Cósmico" style="background: linear-gradient(135deg, #312e81, #09090b);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="mocha" title="Bronze Escuro" style="background: linear-gradient(135deg, #78350f, #1c1917);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="slate" title="Fumaça Sideral" style="background: linear-gradient(135deg, #64748b, #0f172a);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="emerald" title="Floresta Esmeralda" style="background: linear-gradient(135deg, #10b981, #064e3b);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="ocean" title="Azul Abissal" style="background: linear-gradient(135deg, #0ea5e9, #1e3a8a);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="rose" title="Neon Tóquio" style="background: linear-gradient(135deg, #f43f5e, #701a75);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="cyber" title="Matrix Cyber" style="background: linear-gradient(135deg, #06b6d4, #10b981);"></button>
-                <button type="button" class="accent-swatch-tile" data-accent-theme="gold" title="Ouro Imperial" style="background: linear-gradient(135deg, #f59e0b, #451a03);"></button>
-              </div>
-            </div>
-
-            <div class="settings-divider"></div>
-
-            <!-- RECURSOS EXCLUSIVOS SANCORD -->
-            <div class="appearance-section-label">
-              Atmosfera &amp; Efeitos Exclusivos <span class="accent-swatch-badge">ÚNICO DO SANCORD</span>
-            </div>
-
-            <div class="profile-editor-card" style="margin-bottom: 14px;">
-              <div class="settings-field" style="margin-bottom: 4px;">
+              <div class="settings-field" style="margin-top:14px;">
                 <div class="slider-label-row">
-                  <label for="appearance-glass-slider">INTENSIDADE DA ATMOSFERA &amp; VIDRO TRANSLÚCIDO</label>
+                  <label for="appearance-glass-slider">Intensidade da atmosfera e vidro translúcido</label>
                   <span id="appearance-glass-value">60%</span>
                 </div>
                 <input type="range" id="appearance-glass-slider" min="0" max="100" step="5" value="60" class="settings-range" />
               </div>
-
-              <div class="settings-grid-2" style="margin-bottom: 0;">
-                <div class="settings-field" style="margin-bottom: 0;">
-                  <label for="appearance-ambient-fx-select">PARTÍCULAS AMBIENTE NO FUNDO</label>
+              <div class="settings-grid-2">
+                <div class="settings-field">
+                  <label for="appearance-ambient-fx-select">Partículas ambiente</label>
                   <select id="appearance-ambient-fx-select" class="settings-select">
                     <option value="none">Desligado (Foco Limpo)</option>
                     <option value="stars">✨ Poeira Estelar Sutil</option>
@@ -1358,99 +1975,610 @@
                     <option value="petals">🌸 Pétalas Sakura</option>
                   </select>
                 </div>
-                <div class="settings-field" style="margin-bottom: 0;">
-                  <label for="appearance-radius-select">ESTILO DE BORDAS E CANTOS</label>
+                <div class="settings-field">
+                  <label for="appearance-radius-select">Estilo de bordas e cantos</label>
                   <select id="appearance-radius-select" class="settings-select">
-                    <option value="discord">Padrão Discord (Equilibrado)</option>
+                    <option value="discord">Equilibrado (Padrão)</option>
                     <option value="pill">Ultra Arredondado (Suave)</option>
-                    <option value="sharp">Gamer Afiado (Minimal)</option>
+                    <option value="sharp">Reto (Minimal)</option>
                   </select>
                 </div>
               </div>
-            </div>
-
-            <div class="dsp-toggles-list" style="margin-bottom: 14px;">
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Brilho dinâmico nos avatares durante a Call</div>
-                  <div class="dsp-sub">Destaca quem está falando com halo colorido e onda de pulso suave.</div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Brilho dinâmico nos avatares durante a chamada</div>
+                  <div class="settings-row-desc">Destaca quem está falando com halo colorido suave.</div>
                 </div>
                 <input type="checkbox" id="appearance-voice-glow" checked />
-              </label>
-            </div>
+              </div>
+            </section>
 
-            <div class="settings-divider"></div>
+            <section class="settings-section" data-search-item="Zoom escala fonte tamanho texto densidade confortável compacto espaçamento grupos avatares timestamps sidebar streamer">
+              <div class="settings-section-head">
+                <h3>Escala, fonte e exibição do chat</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Zoom da interface</div>
+                  <div class="settings-row-desc">Ajusta a escala geral de texto e componentes do aplicativo.</div>
+                </div>
+                <div class="settings-row-control">
+                  <select id="appearance-zoom-select" class="settings-select" style="width:120px;">
+                    <option value="90">90%</option>
+                    <option value="100" selected>100%</option>
+                    <option value="110">110%</option>
+                    <option value="125">125%</option>
+                  </select>
+                </div>
+              </div>
 
-            <div class="appearance-section-label">Mensagens</div>
-            <div class="density-cards-grid">
-              <button type="button" class="density-choice-card active" data-msg-density="cozy">
-                <strong>Confortável</strong>
-                <span>Visual moderno com espaçamento amplo e avatares destacados.</span>
-              </button>
-              <button type="button" class="density-choice-card" data-msg-density="compact">
-                <strong>Compacto</strong>
-                <span>Mostra mais mensagens por vez na tela reduzindo margens.</span>
-              </button>
-            </div>
+              <div class="settings-field" style="margin-top:12px;">
+                <div class="slider-label-row">
+                  <label for="appearance-font-slider">Tamanho da fonte do chat</label>
+                  <span id="appearance-font-value">14px</span>
+                </div>
+                <input type="range" id="appearance-font-slider" min="12" max="20" step="1" value="14" class="settings-range" />
+                <div class="font-scale-preview-box">
+                  <div id="appearance-font-preview" class="message-text" style="margin: 0;">Prévia do chat: bora abrir uma call no Sancord hoje? 🎮</div>
+                </div>
+              </div>
 
-            <div class="dsp-toggles-list" style="margin-bottom: 14px;">
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Modo de Mensagens Compacto</div>
-                  <div class="dsp-sub">Atalho rápido para alternar o espaçamento entre mensagens.</div>
+              <div class="settings-field">
+                <div class="slider-label-row">
+                  <label for="appearance-group-gap-slider">Espaço entre grupos de mensagens</label>
+                  <span id="appearance-group-gap-value">14px</span>
+                </div>
+                <input type="range" id="appearance-group-gap-slider" min="4" max="28" step="2" value="14" class="settings-range" />
+              </div>
+
+              <div class="density-cards-grid" style="margin-top:12px;">
+                <button type="button" class="density-choice-card active" data-msg-density="cozy">
+                  <strong>Confortável</strong>
+                  <span>Espaçamento amplo com avatares destacados.</span>
+                </button>
+                <button type="button" class="density-choice-card" data-msg-density="compact">
+                  <strong>Compacto</strong>
+                  <span>Mais mensagens por tela com margens reduzidas.</span>
+                </button>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Modo de mensagens compacto</div>
+                  <div class="settings-row-desc">Alterna rapidamente o espaçamento das mensagens.</div>
                 </div>
                 <input type="checkbox" id="appearance-compact-mode" />
-              </label>
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Reduzir animações</div>
-                  <div class="dsp-sub">Desliga transições e animações da interface (também segue a opção do Windows).</div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Mostrar avatares no chat</div>
+                  <div class="settings-row-desc">Exibe a imagem de perfil ao lado de cada grupo de mensagens.</div>
                 </div>
-                <input type="checkbox" id="appearance-reduce-motion" />
-              </label>
-            </div>
-
-            <div class="settings-field">
-              <div class="slider-label-row">
-                <label for="appearance-font-slider">TAMANHO DA FONTE DO CHAT</label>
-                <span id="appearance-font-value">14px</span>
+                <input type="checkbox" id="appearance-show-avatars" checked />
               </div>
-              <input type="range" id="appearance-font-slider" min="12" max="20" step="1" value="14" class="settings-range" />
-              <div class="font-scale-preview-box">
-                <div id="appearance-font-preview" class="message-text" style="margin: 0;">Prévia do chat: bora abrir uma call no Sancord hoje? 🎮</div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Mostrar horários das mensagens</div>
+                  <div class="settings-row-desc">Exibe o horário ao lado do nome do autor.</div>
+                </div>
+                <input type="checkbox" id="appearance-show-timestamps" checked />
               </div>
-            </div>
-
-            <div class="settings-divider"></div>
-
-            <div class="appearance-section-label">Modo Streamer</div>
-            <div class="dsp-toggles-list">
-              <label class="dsp-toggle-row">
-                <div>
-                  <div class="dsp-title">Ativar Modo Streamer</div>
-                  <div class="dsp-sub">Oculta o botão de link de convite na barra e silencia sons de mensagens durante lives.</div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Sidebar compacta</div>
+                  <div class="settings-row-desc">Reduz a largura da coluna de canais para dar mais área ao chat.</div>
+                </div>
+                <input type="checkbox" id="appearance-compact-sidebar" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Modo Streamer</div>
+                  <div class="settings-row-desc">Oculta o botão de convite na barra e silencia sons de mensagens durante transmissões.</div>
                 </div>
                 <input type="checkbox" id="appearance-streamer-mode" />
-              </label>
-            </div>
+              </div>
+            </section>
           </div>
 
-          <!-- Aba 6: Atalhos -->
+          <!-- PÁGINA: Acessibilidade -->
+          <div id="settings-tab-accessibility" class="settings-panel hidden">
+            <h2>Acessibilidade</h2>
+
+            <section class="settings-section" data-search-item="Reduzir movimento animações GIFs avatares banners decorações molduras efeitos placas estilos de nome">
+              <div class="settings-section-head">
+                <h3>Movimento, GIFs e cosméticos</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Reduzir movimento</div>
+                  <div class="settings-row-desc">Desativa transições e animações da interface (respeita também a configuração do Windows).</div>
+                </div>
+                <input type="checkbox" id="appearance-reduce-motion" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Reprodução automática de GIFs, avatares e banners</div>
+                  <div class="settings-row-desc">O Sancord limita GIFs simultâneos e pausa em segundo plano.</div>
+                </div>
+                <div class="settings-row-control">
+                  <select id="appearance-profile-animations" class="settings-select" style="width:200px;">
+                    <option value="always">Sempre</option>
+                    <option value="hover">Apenas no hover</option>
+                    <option value="never">Nunca</option>
+                  </select>
+                </div>
+              </div>
+              <fieldset class="profile-accessibility" style="margin-top:12px;">
+                <legend>Exibição de cosméticos de perfil</legend>
+                <label><input type="checkbox" class="native-checkbox" id="appearance-show-profile-decorations" /> Decorações de avatar</label>
+                <label><input type="checkbox" class="native-checkbox" id="appearance-show-profile-frames" /> Molduras</label>
+                <label><input type="checkbox" class="native-checkbox" id="appearance-show-profile-effects" /> Efeitos de perfil</label>
+                <label><input type="checkbox" class="native-checkbox" id="appearance-show-profile-nameplates" /> Placas de nome</label>
+                <label><input type="checkbox" class="native-checkbox" id="appearance-show-name-styles" /> Estilos de nome</label>
+                <label><input type="checkbox" class="native-checkbox" id="appearance-show-profile-animations" /> Animações de perfil</label>
+              </fieldset>
+            </section>
+
+            <section class="settings-section" data-search-item="Saturação cores alto contraste cargos foco teclado">
+              <div class="settings-section-head">
+                <h3>Cores, contraste e foco</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-field">
+                <div class="slider-label-row">
+                  <label for="accessibility-saturation-slider">Saturação das cores da interface</label>
+                  <span id="accessibility-saturation-value">100%</span>
+                </div>
+                <input type="range" id="accessibility-saturation-slider" min="0" max="100" step="5" value="100" class="settings-range" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Modo alto contraste</div>
+                  <div class="settings-row-desc">Reforça bordas, divisores e contraste dos textos secundários.</div>
+                </div>
+                <input type="checkbox" id="accessibility-high-contrast" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Exibição de cores dos cargos</div>
+                  <div class="settings-row-desc">Escolha como as cores de cargos aparecem no chat e na lista de membros.</div>
+                </div>
+                <div class="settings-row-control">
+                  <select id="accessibility-role-colors" class="settings-select" style="width:220px;">
+                    <option value="name">Colorir nome inteiro</option>
+                    <option value="dot">Mostrar indicador colorido</option>
+                    <option value="none">Não mostrar cores de cargo</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Foco reforçado para navegação por teclado</div>
+                  <div class="settings-row-desc">Destaca com borda mais espessa o elemento focado ao usar Tab e Shift+Tab.</div>
+                </div>
+                <input type="checkbox" id="accessibility-enhanced-focus" />
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Texto para fala TTS voz síntese velocidade volume">
+              <div class="settings-section-head">
+                <h3>Texto para fala (TTS)</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Habilitar leitura de novas mensagens (TTS)</div>
+                  <div class="settings-row-desc">Lê em voz alta novas mensagens do canal ativo usando a síntese de voz do sistema.</div>
+                </div>
+                <input type="checkbox" id="accessibility-tts-enabled" />
+              </div>
+              <div class="settings-grid-2" style="margin-top:8px;">
+                <div class="settings-field">
+                  <div class="slider-label-row">
+                    <label for="accessibility-tts-rate">Velocidade da fala</label>
+                    <span id="accessibility-tts-rate-value">1.0x</span>
+                  </div>
+                  <input type="range" id="accessibility-tts-rate" min="0.6" max="2.0" step="0.1" value="1.0" class="settings-range" />
+                </div>
+                <div class="settings-field">
+                  <div class="slider-label-row">
+                    <label for="accessibility-tts-volume">Volume da fala</label>
+                    <span id="accessibility-tts-volume-value">100%</span>
+                  </div>
+                  <input type="range" id="accessibility-tts-volume" min="10" max="100" step="5" value="100" class="settings-range" />
+                </div>
+              </div>
+              <button type="button" id="accessibility-tts-test-btn" class="btn-secondary small-btn">Testar leitura (TTS)</button>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Chat e Mensagens -->
+          <div id="settings-tab-chat" class="settings-panel hidden">
+            <h2>Chat e mensagens</h2>
+
+            <section class="settings-section" data-search-item="Formatação emoticons emoji embeds anexos vídeos áudio inline">
+              <div class="settings-section-head">
+                <h3>Formatação, embeds e mídia</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Transformar emoticons em emoji ao enviar</div>
+                  <div class="settings-row-desc">Converte sequências como <code>:)</code>, <code>:D</code>, <code>:(</code> e <code>&lt;3</code> em emojis.</div>
+                </div>
+                <input type="checkbox" id="chat-convert-emoticons" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Mostrar embeds e prévia de links</div>
+                  <div class="settings-row-desc">Controla a exibição de cartões de prévia e imagens de links no chat.</div>
+                </div>
+                <input type="checkbox" id="chat-auto-embeds" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Pré-visualizar imagens anexadas inline</div>
+                  <div class="settings-row-desc">Quando desligado, exibe apenas o link para abrir a imagem manualmente.</div>
+                </div>
+                <input type="checkbox" id="chat-inline-images" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Reproduzir vídeos anexados automaticamente (sem som)</div>
+                  <div class="settings-row-desc">Desligado por padrão para economizar bateria e CPU.</div>
+                </div>
+                <input type="checkbox" id="chat-autoplay-video" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Ativar corretor ortográfico no campo de mensagem</div>
+                  <div class="settings-row-desc">Usa o corretor nativo do WebView2 / navegador ao digitar.</div>
+                </div>
+                <input type="checkbox" id="chat-spellcheck" checked />
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Enter enviar mensagem Ctrl+Enter Shift+Enter agrupamento intervalo horário 24h 12h">
+              <div class="settings-section-head">
+                <h3>Comportamento de envio, agrupamento e horários</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Enter envia mensagem</div>
+                  <div class="settings-row-desc">Quando desligado, <strong>Ctrl + Enter</strong> envia e <strong>Enter</strong> insere quebra de linha.</div>
+                </div>
+                <input type="checkbox" id="chat-enter-sends" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Agrupar mensagens consecutivas do mesmo autor</div>
+                  <div class="settings-row-desc">Deixa conversas rápidas mais limpas ocultando cabeçalhos repetidos.</div>
+                </div>
+                <input type="checkbox" id="chat-group-messages" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Intervalo máximo de agrupamento</div>
+                  <div class="settings-row-desc">Tempo limite entre mensagens para mantê-las no mesmo bloco.</div>
+                </div>
+                <div class="settings-row-control">
+                  <select id="chat-group-window" class="settings-select" style="width:150px;">
+                    <option value="5">5 minutos</option>
+                    <option value="7" selected>7 minutos</option>
+                    <option value="10">10 minutos</option>
+                    <option value="15">15 minutos</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Formato dos horários no chat</div>
+                  <div class="settings-row-desc">Aplica imediatamente em todas as mensagens visíveis.</div>
+                </div>
+                <div class="settings-row-control">
+                  <select id="chat-time-format" class="settings-select" style="width:150px;">
+                    <option value="auto">Automático</option>
+                    <option value="24h" selected>24 horas</option>
+                    <option value="12h">12 horas (AM/PM)</option>
+                  </select>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Idioma -->
+          <div id="settings-tab-language" class="settings-panel hidden">
+            <h2 data-i18n="settings.language">Idioma</h2>
+
+            <section class="settings-section" data-search-item="Idioma português inglês regional data hora">
+              <div class="settings-section-head">
+                <h3>Idioma do aplicativo</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-field" style="max-width:340px;">
+                <label for="settings-language">IDIOMA DA INTERFACE</label>
+                <select id="settings-language" class="settings-select" aria-label="Idioma">
+                  <option value="pt-BR">Português (Brasil)</option>
+                  <option value="en">English (preview)</option>
+                </select>
+                <div class="settings-hint-text" data-i18n="settings.language.hint">O inglês ainda está em preparação: textos sem tradução aparecem em português.</div>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Formato regional data hora DD/MM/AAAA 24h 12h">
+              <div class="settings-section-head">
+                <h3>Formato regional</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-grid-2">
+                <div class="settings-field">
+                  <label for="regional-date-format">Formato de data</label>
+                  <select id="regional-date-format" class="settings-select">
+                    <option value="pt-BR">DD/MM/AAAA (Brasil)</option>
+                    <option value="en-US">MM/DD/AAAA (EUA)</option>
+                    <option value="iso">AAAA-MM-DD (ISO)</option>
+                  </select>
+                </div>
+                <div class="settings-field">
+                  <label for="regional-time-format">Formato de hora</label>
+                  <select id="regional-time-format" class="settings-select">
+                    <option value="24h">24 horas</option>
+                    <option value="12h">12 horas (AM/PM)</option>
+                    <option value="auto">Automático</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-hint-text" id="regional-format-preview">Prévia: —</div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Atalhos -->
           <div id="settings-tab-shortcuts" class="settings-panel hidden">
-            <h2>Atalhos de Teclado</h2>
-            <p class="settings-hint-text" style="margin-bottom: 14px;">Use os atalhos nativos do Sancord para controlar sua call e chat instantaneamente.</p>
-            <div class="shortcuts-table">
-              <div class="shortcut-row"><span>Silenciar / Ativar Microfone</span><kbd>Ctrl + Shift + M</kbd></div>
-              <div class="shortcut-row"><span>Ensurdecer / Reativar Áudio da Call</span><kbd>Ctrl + Shift + D</kbd></div>
-              <div class="shortcut-row"><span>Colar print ou imagem direto no chat</span><kbd>Ctrl + V</kbd></div>
-              <div class="shortcut-row"><span>Abrir menu de opções da mensagem</span><kbd>Botão Direito</kbd></div>
-              <div class="shortcut-row"><span>Cancelar edição de mensagem ou fechar modais</span><kbd>ESC</kbd></div>
-              <div class="shortcut-row"><span>Falar usando Push-to-Talk (configurável em Voz)</span><kbd id="shortcuts-ptt-badge">Space</kbd></div>
-              <div id="shortcuts-extra-rows"></div>
-            </div>
-            <div style="margin-top: 14px;">
-              <button type="button" id="shortcuts-goto-voice-btn" class="btn-secondary small-btn">🎙️ Personalizar Push-to-Talk em Voz e Vídeo</button>
-            </div>
+            <h2>Atalhos de teclado</h2>
+
+            <section class="settings-section" data-search-item="Atalhos personalizados conflito microfone ensurdecer busca rápida configurações emoji anexar editar">
+              <div class="settings-section-head">
+                <h3>Gerenciador de atalhos personalizáveis</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <p class="settings-section-desc">Clique em um atalho para gravar uma nova combinação. Conflitos entre ações são detectados automaticamente.</p>
+              <div id="settings-custom-shortcuts-list"></div>
+              <div id="settings-shortcut-conflict" class="settings-shortcut-conflict hidden" role="alert"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+                <button type="button" id="shortcuts-reset-defaults-btn" class="btn-secondary small-btn">Restaurar atalhos padrão</button>
+                <button type="button" id="shortcuts-goto-voice-btn" class="btn-secondary small-btn">Personalizar Push-to-Talk em Voz e Vídeo</button>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Atalhos gerais navegação ESC Ctrl+K Ctrl+F colar print">
+              <div class="settings-section-head">
+                <h3>Referência de atalhos do aplicativo</h3>
+              </div>
+              <div class="shortcuts-table">
+                <div class="shortcut-row"><span>Abrir busca rápida de canais e DMs</span><kbd>Ctrl + K</kbd></div>
+                <div class="shortcut-row"><span>Silenciar / Ativar microfone</span><kbd id="shortcut-ref-mute">Ctrl + Shift + M</kbd></div>
+                <div class="shortcut-row"><span>Ensurdecer / Reativar áudio da chamada</span><kbd id="shortcut-ref-deafen">Ctrl + Shift + D</kbd></div>
+                <div class="shortcut-row"><span>Colar print ou imagem direto no chat</span><kbd>Ctrl + V</kbd></div>
+                <div class="shortcut-row"><span>Abrir menu de opções da mensagem</span><kbd>Botão Direito</kbd></div>
+                <div class="shortcut-row"><span>Cancelar edição ou fechar janelas</span><kbd>ESC</kbd></div>
+                <div class="shortcut-row"><span>Falar usando Push-to-Talk</span><kbd id="shortcuts-ptt-badge">Space</kbd></div>
+                <div id="shortcuts-extra-rows"></div>
+              </div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Configurações do Windows -->
+          <div id="settings-tab-windows" class="settings-panel hidden">
+            <h2>Configurações do Windows</h2>
+
+            <section class="settings-section" data-search-item="Windows inicialização iniciar minimizado fechar bandeja pasta dados">
+              <div class="settings-section-head">
+                <h3>Integração com Windows Desktop</h3>
+                <span class="settings-scope-badge" id="windows-env-badge">Sancord Desktop</span>
+              </div>
+              <p class="settings-section-desc" id="windows-env-note">
+                Controla o comportamento nativo do executável Sancord no Windows.
+              </p>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Abrir Sancord ao iniciar o Windows</div>
+                  <div class="settings-row-desc">Registra o Sancord Desktop na inicialização do usuário atual (<code>HKCU\...\Run</code>).</div>
+                </div>
+                <input type="checkbox" id="windows-autostart-toggle" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Iniciar minimizado</div>
+                  <div class="settings-row-desc">Quando aberto automaticamente com o Windows, inicia minimizado na barra de tarefas.</div>
+                </div>
+                <input type="checkbox" id="windows-start-minimized-toggle" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Minimizar ao clicar no botão fechar (✕)</div>
+                  <div class="settings-row-desc">Mantém o Sancord em execução na barra de tarefas em vez de encerrar o processo.</div>
+                </div>
+                <input type="checkbox" id="windows-minimize-on-close-toggle" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Notificações nativas do Windows</div>
+                  <div class="settings-row-desc">Sincronizado com o interruptor de notificações desktop.</div>
+                </div>
+                <input type="checkbox" id="windows-native-notif-toggle" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Pasta de dados do cliente Windows</div>
+                  <div class="settings-row-desc" id="windows-data-dir-label">Disponível no aplicativo desktop instalado.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="windows-open-data-dir-btn" class="btn-secondary small-btn">Abrir pasta</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Atualizações -->
+          <div id="settings-tab-updates" class="settings-panel hidden">
+            <h2>Atualizações</h2>
+
+            <section class="settings-section" data-search-item="Atualizações versão canal estável verificar download changelog">
+              <div class="settings-section-head">
+                <h3>Versão instalada e verificação</h3>
+                <span class="settings-scope-badge">Canal Estável</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Sancord Desktop <strong data-update-current>v0.2.3</strong></div>
+                  <div class="settings-row-desc" data-update-status role="status" aria-live="polite">Verifique se há uma nova versão disponível.</div>
+                  <div class="settings-hint-text" id="updates-last-checked">Última verificação: ainda não executada nesta sessão</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" class="btn-primary small-btn" id="check-updates-btn">Verificar atualizações</button>
+                  <button type="button" class="btn-primary small-btn hidden" id="settings-update-action">Atualizar agora</button>
+                </div>
+              </div>
+              <progress class="sancord-update-progress hidden" data-update-progress max="100" value="0" aria-label="Progresso do download"></progress>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Verificar atualizações automaticamente ao abrir</div>
+                  <div class="settings-row-desc">A instalação continua dependendo da sua confirmação explícita e verificação Ed25519 + SHA-256.</div>
+                </div>
+                <input type="checkbox" id="updates-auto-check-toggle" checked />
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <div class="settings-section-head">
+                <h3>Notas da versão</h3>
+              </div>
+              <pre class="sancord-update-notes" data-update-notes></pre>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Avançado -->
+          <div id="settings-tab-advanced" class="settings-panel hidden">
+            <h2>Avançado</h2>
+
+            <section class="settings-section" data-search-item="Modo desenvolvedor copiar IDs rede websocket latência P2P">
+              <div class="settings-section-head">
+                <h3>Modo desenvolvedor</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Ativar Modo Desenvolvedor</div>
+                  <div class="settings-row-desc">Exibe IDs internos em Minha Conta, habilita telemetria técnica de rede abaixo e permite copiar IDs técnicos.</div>
+                </div>
+                <input type="checkbox" id="advanced-developer-mode" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Nível de registro local de diagnóstico</div>
+                  <div class="settings-row-desc">Define o nível de detalhe guardado no buffer de diagnóstico da sessão.</div>
+                </div>
+                <div class="settings-row-control">
+                  <select id="advanced-log-level" class="settings-select" style="width:150px;">
+                    <option value="normal" selected>Normal</option>
+                    <option value="debug">Debug</option>
+                    <option value="verbose">Verbose</option>
+                  </select>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Rede status servidor conectado ping transporte WebSocket">
+              <div class="settings-section-head">
+                <h3>Rede e conexão</h3>
+              </div>
+              <div id="advanced-network-summary" class="settings-diag-list"></div>
+              <div id="advanced-dev-telemetry" class="hidden" style="margin-top:12px;">
+                <div class="appearance-section-label">Rede avançada (Modo Desenvolvedor)</div>
+                <div id="advanced-dev-network-list" class="settings-diag-list"></div>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Cache pasta de dados restaurar configurações aplicativo">
+              <div class="settings-section-head">
+                <h3>Manutenção e restauração</h3>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Diretório de dados e cache desktop</div>
+                  <div class="settings-row-desc" id="advanced-data-dir-desc">Abra a pasta de dados locais do cliente Sancord Desktop.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="advanced-open-data-dir-btn" class="btn-secondary small-btn">Abrir pasta</button>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Restaurar configurações do aplicativo</div>
+                  <div class="settings-row-desc">Volta todas as preferências locais (áudio, aparência, chat, acessibilidade e atalhos) ao padrão. Sua conta não é afetada.</div>
+                </div>
+                <div class="settings-row-control">
+                  <button type="button" id="advanced-reset-app-btn" class="btn-secondary small-btn danger-text">Restaurar configurações</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Diagnóstico -->
+          <div id="settings-tab-diagnostics" class="settings-panel hidden">
+            <h2>Diagnóstico</h2>
+
+            <section class="settings-section" data-search-item="Diagnóstico executar relatório sanitizado websocket microfone áudio cache updater">
+              <div class="settings-section-head">
+                <h3>Verificação do ambiente</h3>
+                <span class="settings-scope-badge">Exclusivo Sancord</span>
+              </div>
+              <p class="settings-section-desc">
+                Executa verificações reais de conectividade WebSocket, armazenamento local, dispositivos de áudio detectados, cache de mídia, permissões e atualizador. O relatório copiado remove automaticamente tokens, senhas e credenciais.
+              </p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" id="diagnostics-run-btn" class="btn-primary small-btn">Executar diagnóstico</button>
+                <button type="button" id="diagnostics-copy-btn" class="btn-secondary small-btn">Copiar relatório sanitizado</button>
+              </div>
+              <div id="diagnostics-results-list" class="settings-diag-list" aria-live="polite"></div>
+            </section>
+          </div>
+
+          <!-- PÁGINA: Sobre -->
+          <div id="settings-tab-about" class="settings-panel hidden">
+            <h2>Sobre o Sancord</h2>
+
+            <section class="settings-section" data-search-item="Sobre Sancord versão arquitetura créditos github licenças open source">
+              <div class="settings-about-hero">
+                <img src="/logo.png" alt="Sancord" />
+                <div>
+                  <strong style="font-size:18px;color:var(--text-primary);">Sancord Desktop</strong>
+                  <div class="settings-hint-text" id="about-version-line">Versão 0.2.3 • Canal Estável</div>
+                  <div class="settings-hint-text" id="about-runtime-line">Rust (Axum + Tokio + SQLite + Wry/WebView2) • WebRTC P2P</div>
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Repositório e código-fonte</div>
+                  <div class="settings-row-desc">Acompanhe novidades, lançamentos assinados e reporte problemas no GitHub.</div>
+                </div>
+                <div class="settings-row-control">
+                  <a href="https://github.com/gabrielsanderx/Sancord" target="_blank" rel="noopener noreferrer" class="btn-secondary small-btn">GitHub</a>
+                  <a href="https://github.com/gabrielsanderx/Sancord/issues" target="_blank" rel="noopener noreferrer" class="btn-secondary small-btn">Reportar problema</a>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <div class="settings-section-head">
+                <h3>Tecnologias e licenças open source</h3>
+              </div>
+              <p class="settings-section-desc">Principais bibliotecas open source reais utilizadas na compilação do Sancord (verificadas em <code>Cargo.toml</code>).</p>
+              <div id="about-licenses-list" class="settings-licenses-list"></div>
+            </section>
           </div>
         </div>
       </div>
@@ -1460,7 +2588,7 @@
   <!-- Modal Completo de Perfil em 2 Colunas (Estilo Discord) -->
   <div id="profile-popover-modal" class="modal-backdrop hidden">
     <div id="profile-popover-card" class="profile-card profile-modal-2col">
-      <div id="profile-card-effect-layer" class="profile-effect-layer"></div>
+      <div id="profile-card-effect-layer" class="profile-effect-layer" aria-hidden="true"></div>
 
       <!-- Coluna Esquerda: Banner, Avatar, Ações, Membro desde, Bio, Nota, Volume -->
       <div class="profile-modal-left">
@@ -1470,7 +2598,8 @@
             <div id="profile-card-avatar" class="avatar large-avatar">?</div>
             <span id="profile-card-status-dot" class="status-badge online"></span>
           </div>
-          <h3 id="profile-card-name" class="styled-name">Usuário</h3>
+          <div class="profile-nameplate-wrap"><h3 id="profile-card-name" class="styled-name">Usuário</h3></div>
+          <div id="profile-card-badges" class="profile-badges hidden" aria-label="Badges"></div>
           <div class="profile-card-handle-row">
             <span id="profile-card-handle" class="profile-card-handle">@usuario</span>
             <span id="profile-card-custom-status" class="profile-card-custom-status"></span>
@@ -1527,6 +2656,10 @@
               <label>SOBRE MIM</label>
               <p id="profile-card-bio">Sem descrição ainda.</p>
             </div>
+            <div id="profile-card-links-wrap" class="profile-info-block hidden">
+              <label>CONEXÕES</label>
+              <ul id="profile-card-links" class="profile-public-links"></ul>
+            </div>
             <div id="profile-card-roles-wrap" class="profile-info-block hidden">
               <label>CARGOS NO SERVIDOR</label>
               <div id="profile-card-roles-list" class="profile-roles-chips"></div>
@@ -1548,11 +2681,12 @@
         <div class="profile-modal-right-top">
           <div class="profile-modal-tabs">
             <button type="button" class="profile-tab-btn active" data-profile-tab="activity">Atividade</button>
+            <button type="button" class="profile-tab-btn" data-profile-tab="board">Mural</button>
             <button type="button" class="profile-tab-btn" data-profile-tab="mutual-friends">
-              <span id="profile-mutual-friends-label">0 amigos em comum</span>
+              <span id="profile-mutual-friends-label">Amigos em comum</span>
             </button>
             <button type="button" class="profile-tab-btn" data-profile-tab="mutual-servers">
-              <span id="profile-mutual-servers-label">1 servidor em comum</span>
+              <span id="profile-mutual-servers-label">Servidores em comum</span>
             </button>
           </div>
           <button type="button" id="close-profile-card-btn" class="profile-modal-x" title="Fechar">✕</button>
@@ -1562,6 +2696,9 @@
           <div id="profile-tab-activity">
             <div class="profile-right-section-title">Atividade atual</div>
             <div id="profile-activity-card-list"></div>
+          </div>
+          <div id="profile-tab-board" class="hidden">
+            <div id="profile-board-widgets" class="profile-board-widgets" aria-live="polite"></div>
           </div>
           <div id="profile-tab-mutual-friends" class="hidden">
             <div class="profile-right-section-title">Amigos e membros em comum</div>
@@ -1574,6 +2711,17 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <div id="compact-profile-modal" class="modal-backdrop hidden">
+    <section class="modal-card compact-profile-dialog profile-card" role="dialog" aria-labelledby="compact-profile-title" aria-modal="true">
+      <div id="compact-profile-content"></div>
+      <div class="compact-profile-actions">
+        <button type="button" id="compact-full-profile" class="btn-primary small-btn">Ver perfil completo</button>
+        <button type="button" id="compact-message-profile" class="btn-secondary small-btn">Mensagem</button>
+        <button type="button" id="compact-close-profile" class="btn-secondary small-btn">Fechar</button>
+      </div>
+    </section>
   </div>
 
   <!-- Modal Discord-Style: Compartilhar Tela / Escolher Janela ou Monitor -->
@@ -1735,6 +2883,11 @@
         <h2 id="effect-picker-title">Efeito de Perfil</h2>
         <button type="button" id="close-effect-picker-btn" class="avatar-crop-x" title="Fechar">✕</button>
       </div>
+      <div id="effect-picker-preview" class="effect-picker-preview hidden">
+        <div class="effect-picker-sample" aria-hidden="true"><div id="picker-effect-layer" class="profile-effect-layer"></div></div>
+        <button type="button" class="btn-secondary small-btn" data-replay-profile-effect="picker-effect-layer" disabled>Reproduzir efeito</button>
+      </div>
+      <div id="nameplate-picker-preview" class="nameplate-picker-preview hidden" aria-label="Prévia da placa"></div>
       <div id="effect-grid" class="effect-options-grid"></div>
       <div class="modal-actions-row">
         <button type="button" id="close-effect-done-btn" class="btn-primary">Concluir</button>
@@ -1946,49 +3099,77 @@
     </div>
   </div>
 
-  <!-- Modal Convidar Amigos para Servidor (Link + Código + Enviar DM 1 clique) -->
-  <div id="invite-server-modal" class="modal-backdrop hidden">
-    <div class="modal-card compact-modal" style="max-width: 460px;">
-      <div class="avatar-crop-header">
-        <h2 id="invite-modal-title">Convidar amigos</h2>
-        <button type="button" id="close-invite-modal-btn" class="avatar-crop-x" title="Fechar">✕</button>
-      </div>
-      <p class="picker-sub">Compartilhe este link ou convide amigos diretamente pelas Mensagens Diretas.</p>
-
-      <div class="settings-field" style="margin-top: 10px;">
-        <label>LINK DE CONVITE DO SERVIDOR</label>
-        <div class="invite-copy-row">
-          <input type="text" id="invite-modal-link-input" readonly />
-          <button type="button" id="invite-modal-copy-link-btn" class="btn-primary small-btn">Copiar Link</button>
+  <!-- Modal Convidar Amigos para Servidor (2 páginas: Lista/Link e Configurações) -->
+  <div id="invite-server-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="invite-modal-title">
+    <div class="modal-card compact-modal invite-modal-card">
+      <!-- Página 1: Lista de Amigos + Link de Convite -->
+      <div id="invite-modal-page-main">
+        <div class="avatar-crop-header invite-modal-header">
+          <div>
+            <h2 id="invite-modal-title">Convidar amigos</h2>
+            <span id="invite-modal-channel-pill" class="invite-channel-pill hidden"></span>
+          </div>
+          <button type="button" id="close-invite-modal-btn" class="avatar-crop-x" title="Fechar" aria-label="Fechar modal de convite">✕</button>
         </div>
-      </div>
 
-      <div class="invite-code-bar">
-        <span>Código: <strong id="invite-modal-code-badge">SANCORD</strong></span>
-        <div>
-          <button type="button" id="invite-modal-copy-code-btn" class="btn-secondary small-btn">Copiar Código</button>
-          <button type="button" id="invite-modal-regen-btn" class="btn-secondary small-btn hidden" title="Trocar o convite padrão (o antigo para de funcionar)">↻ Novo</button>
+        <div id="invite-modal-paused-banner" class="invite-paused-banner hidden">
+          <span>Os convites deste servidor estão temporariamente pausados.</span>
         </div>
-      </div>
-      <div id="invite-modal-expiry-note" class="invite-expiry-note">Convite padrão: não expira e não tem limite de usos.</div>
 
-      <details class="invite-options" id="invite-modal-options">
-        <summary>Criar convite personalizado</summary>
-        <div class="settings-grid-2" style="margin-top: 10px;">
+        <div class="invite-search-wrap">
+          <input type="search" id="invite-friend-search" class="invite-search-input" placeholder="Buscar amigos" autocomplete="off" aria-label="Buscar amigos para convidar" />
+        </div>
+
+        <div id="invite-modal-friends-list" class="invite-friends-list" aria-live="polite"></div>
+
+        <div class="invite-modal-divider"></div>
+
+        <div class="settings-field invite-link-section">
+          <label for="invite-modal-link-input">LINK DE CONVITE</label>
+          <div class="invite-copy-row">
+            <input type="text" id="invite-modal-link-input" readonly aria-label="Link de convite" />
+            <button type="button" id="invite-modal-copy-link-btn" class="btn-primary small-btn">Copiar</button>
+          </div>
+        </div>
+
+        <div class="invite-modal-footer-meta">
+          <div id="invite-modal-expiry-note" class="invite-expiry-note">Seu link de convite expira em 7 dias.</div>
+          <div class="invite-footer-links">
+            <button type="button" id="invite-modal-edit-link-btn" class="invite-inline-link-btn">Editar link de convite</button>
+            <span class="invite-code-chip">Código: <strong id="invite-modal-code-badge">SANCORD</strong></span>
+            <button type="button" id="invite-modal-copy-code-btn" class="invite-inline-link-btn">Copiar código</button>
+            <button type="button" id="invite-modal-regen-btn" class="invite-inline-link-btn hidden" title="Trocar o convite padrão (o antigo para de funcionar)">↻ Trocar padrão</button>
+          </div>
+        </div>
+        <div id="invite-modal-feedback" class="add-friend-feedback hidden"></div>
+      </div>
+
+      <!-- Página 2: Configurações do Convite -->
+      <div id="invite-modal-page-settings" class="hidden">
+        <div class="avatar-crop-header invite-modal-header">
+          <div class="invite-settings-head-left">
+            <button type="button" id="invite-modal-back-btn" class="btn-secondary small-btn" aria-label="Voltar">←</button>
+            <h2>Configurações do convite</h2>
+          </div>
+          <button type="button" id="close-invite-settings-btn" class="avatar-crop-x" title="Fechar" aria-label="Fechar modal de convite">✕</button>
+        </div>
+
+        <div class="invite-settings-body">
           <div class="settings-field">
-            <label for="invite-modal-expiry">EXPIRA EM</label>
+            <label for="invite-modal-expiry">EXPIRAR DEPOIS DE</label>
             <select id="invite-modal-expiry">
               <option value="1800">30 minutos</option>
               <option value="3600">1 hora</option>
               <option value="21600">6 horas</option>
               <option value="43200">12 horas</option>
-              <option value="86400" selected>1 dia</option>
-              <option value="604800">7 dias</option>
+              <option value="86400">1 dia</option>
+              <option value="604800" selected>7 dias</option>
               <option value="0">Nunca</option>
             </select>
           </div>
+
           <div class="settings-field">
-            <label for="invite-modal-max-uses">MÁXIMO DE USOS</label>
+            <label for="invite-modal-max-uses">NÚMERO MÁXIMO DE USOS</label>
             <select id="invite-modal-max-uses">
               <option value="0" selected>Sem limite</option>
               <option value="1">1 uso</option>
@@ -1999,13 +3180,77 @@
               <option value="100">100 usos</option>
             </select>
           </div>
-        </div>
-        <button type="button" id="invite-modal-create-btn" class="btn-primary small-btn">Gerar link</button>
-      </details>
 
-      <div class="appearance-section-label" style="margin-top: 12px;">Enviar convite para um amigo</div>
-      <div id="invite-modal-friends-list" class="invite-friends-list"></div>
-      <div id="invite-modal-feedback" class="add-friend-feedback hidden"></div>
+          <div class="settings-field">
+            <label for="invite-modal-channel">CANAL DE DESTINO</label>
+            <select id="invite-modal-channel">
+              <option value="">Canal padrão do servidor</option>
+            </select>
+          </div>
+
+          <label class="dsp-toggle-row invite-temp-toggle">
+            <div>
+              <div class="dsp-title">Associação temporária</div>
+              <div class="dsp-sub">Concede acesso temporário: o membro é removido ao desconectar se não receber nenhum cargo.</div>
+            </div>
+            <input type="checkbox" id="invite-modal-temporary" />
+          </label>
+        </div>
+
+        <div class="modal-actions-row">
+          <button type="button" id="invite-modal-cancel-settings-btn" class="btn-secondary">Cancelar</button>
+          <button type="button" id="invite-modal-create-btn" class="btn-primary">Gerar novo link</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Prévia do Convite (antes de confirmar entrada) -->
+  <div id="invite-preview-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="invite-preview-name">
+    <div class="modal-card compact-modal invite-preview-modal-card">
+      <button type="button" id="close-invite-preview-btn" class="avatar-crop-x invite-preview-close-btn" title="Fechar" aria-label="Fechar prévia do convite">✕</button>
+
+      <div id="invite-preview-loading" class="invite-preview-state">
+        <div class="pinned-empty">Carregando prévia do convite...</div>
+      </div>
+
+      <div id="invite-preview-error" class="invite-preview-state hidden">
+        <h3 id="invite-preview-error-title">Convite inválido</h3>
+        <p id="invite-preview-error-msg" class="settings-hint-text">Este convite não existe ou não é mais válido.</p>
+        <div class="modal-actions-row">
+          <button type="button" id="invite-preview-error-close-btn" class="btn-secondary">Fechar</button>
+        </div>
+      </div>
+
+      <div id="invite-preview-content" class="hidden">
+        <div id="invite-preview-banner" class="invite-preview-banner"></div>
+        <div class="invite-preview-body">
+          <div id="invite-preview-icon" class="avatar invite-preview-avatar">S</div>
+          <div id="invite-preview-inviter" class="invite-preview-inviter">Você foi convidado para entrar em</div>
+          <h2 id="invite-preview-name" class="invite-preview-name">Servidor</h2>
+          <p id="invite-preview-desc" class="invite-preview-desc hidden"></p>
+          <div id="invite-preview-counts" class="invite-preview-counts"></div>
+          <div id="invite-preview-badges" class="invite-preview-badges hidden"></div>
+
+          <div id="invite-preview-already" class="invite-already-banner hidden">
+            Você já participa deste servidor.
+          </div>
+
+          <div id="invite-preview-rules-wrap" class="invite-rules-box hidden">
+            <div class="invite-rules-title">Regras do servidor</div>
+            <div id="invite-preview-rules-text" class="invite-rules-text"></div>
+            <label class="invite-rules-check-row">
+              <input type="checkbox" id="invite-preview-rules-check" />
+              <span>Li e concordo com as regras deste servidor</span>
+            </label>
+          </div>
+
+          <div class="modal-actions-row invite-preview-actions">
+            <button type="button" id="invite-preview-cancel-btn" class="btn-secondary">Cancelar</button>
+            <button type="button" id="invite-preview-join-btn" class="btn-primary">Entrar no servidor</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2026,6 +3271,7 @@
         <button type="button" class="settings-nav-item" data-srv-tab="channels">📁 <span data-i18n="server.channels">Canais</span></button>
         <button type="button" class="settings-nav-item" data-srv-tab="members">👥 <span data-i18n="server.members">Membros &amp; Moderação</span></button>
         <button type="button" class="settings-nav-item" data-srv-tab="invites">🔗 <span data-i18n="server.invites">Convites</span></button>
+        <button type="button" class="settings-nav-item" data-srv-tab="emojis">😀 <span>Emojis</span></button>
         <button type="button" class="settings-nav-item" data-srv-tab="automod">🛡️ <span data-i18n="server.automod">AutoMod</span></button>
         <button type="button" class="settings-nav-item" data-srv-tab="audit">📜 <span data-i18n="server.audit">Registro de auditoria</span></button>
         <button type="button" class="settings-nav-item" data-srv-tab="integrations">🔌 <span data-i18n="server.integrations">Integrações</span></button>
@@ -2078,6 +3324,11 @@
             <div class="settings-field">
               <label for="srv-edit-desc-input">DESCRIÇÃO DO SERVIDOR</label>
               <textarea id="srv-edit-desc-input" rows="3" maxlength="180" placeholder="Conte aos novos membros sobre o que é este servidor..."></textarea>
+            </div>
+
+            <div class="settings-field">
+              <label for="srv-edit-rules-input">REGRAS DE ENTRADA (OPCIONAL)</label>
+              <textarea id="srv-edit-rules-input" rows="3" maxlength="1000" placeholder="Ex.: Respeite os membros, evite spam... Quando preenchido, novos membros precisam aceitar antes de entrar por convite."></textarea>
             </div>
 
             <div id="srv-edit-feedback" class="add-friend-feedback hidden"></div>
@@ -2182,6 +3433,7 @@
                     <label class="dsp-toggle-row"><div><div class="dsp-title">🛡️ Gerenciar Cargos</div><div class="dsp-sub">Criar, editar e atribuir cargos abaixo da sua hierarquia.</div></div><input type="checkbox" data-role-perm="manage_roles" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">📁 Gerenciar Canais</div><div class="dsp-sub">Criar, renomear e excluir canais de texto e voz.</div></div><input type="checkbox" data-role-perm="manage_channels" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">🎟️ Criar Convites</div><div class="dsp-sub">Ver código e convidar outros usuários para este servidor.</div></div><input type="checkbox" data-role-perm="create_invites" /></label>
+                    <label class="dsp-toggle-row"><div><div class="dsp-title">🔗 Gerenciar Convites</div><div class="dsp-sub">Visualizar todos os convites ativos, revogar links de outros membros e pausar entradas.</div></div><input type="checkbox" data-role-perm="manage_invites" /></label>
                   </div>
 
                   <div class="role-perms-group-title">MODERAÇÃO DE MEMBROS E MENSAGENS</div>
@@ -2189,6 +3441,9 @@
                     <label class="dsp-toggle-row"><div><div class="dsp-title">👢 Expulsar Membros</div><div class="dsp-sub">Remover membros de cargos inferiores do servidor.</div></div><input type="checkbox" data-role-perm="kick_members" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">🔨 Banir Membros</div><div class="dsp-sub">Banir membros permanentemente de voltar ao servidor.</div></div><input type="checkbox" data-role-perm="ban_members" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">⏱️ Aplicar castigo</div><div class="dsp-sub">Impede por um tempo que membros de cargos inferiores enviem mensagens, reajam e usem a voz.</div></div><input type="checkbox" data-role-perm="moderate_members" /></label>
+                    <label class="dsp-toggle-row"><div><div class="dsp-title">🏷️ Gerenciar apelidos</div><div class="dsp-sub">Mudar ou remover o apelido de membros de cargos inferiores neste servidor.</div></div><input type="checkbox" data-role-perm="manage_nicknames" /></label>
+                    <label class="dsp-toggle-row"><div><div class="dsp-title">😀 Gerenciar expressões</div><div class="dsp-sub">Enviar, renomear e excluir os emojis do servidor.</div></div><input type="checkbox" data-role-perm="manage_expressions" /></label>
+                    <label class="dsp-toggle-row"><div><div class="dsp-title">✏️ Mudar o próprio apelido</div><div class="dsp-sub">Permite que cada membro escolha como aparece neste servidor.</div></div><input type="checkbox" data-role-perm="change_nickname" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">🧹 Gerenciar Mensagens</div><div class="dsp-sub">Excluir ou fixar mensagens de qualquer membro no servidor.</div></div><input type="checkbox" data-role-perm="manage_messages" /></label>
                     <label class="dsp-toggle-row"><div><div class="dsp-title">📢 Mencionar @everyone e Cargos</div><div class="dsp-sub">Destacar todos os membros online em mensagens.</div></div><input type="checkbox" data-role-perm="mention_everyone" /></label>
                   </div>
@@ -2255,10 +3510,29 @@
 
           <!-- Aba 5: Convites -->
           <div id="srv-tab-invites" class="settings-panel hidden">
-            <h2>Convites do Servidor</h2>
+            <div class="srv-roles-header">
+              <div>
+                <h2>Convites do Servidor</h2>
+                <p class="settings-hint-text">Gerencie todos os links ativos, acompanhe usos, pause novas entradas ou revogue acessos instantaneamente.</p>
+              </div>
+              <div class="invite-mgmt-toolbar">
+                <button type="button" id="srv-invites-create-btn" class="btn-primary small-btn">+ Criar convite</button>
+                <button type="button" id="srv-invites-pause-btn" class="btn-secondary small-btn">Pausar convites</button>
+                <button type="button" id="srv-invites-refresh-btn" class="btn-secondary small-btn">↻ Atualizar</button>
+              </div>
+            </div>
+
+            <div id="srv-invites-paused-banner" class="invite-paused-banner hidden">
+              <div>
+                <strong>Convites pausados</strong>
+                <span>Novos usuários não podem entrar por nenhum link de convite até você retomar.</span>
+              </div>
+              <button type="button" id="srv-invites-resume-btn" class="btn-primary small-btn">Retomar convites</button>
+            </div>
+
             <div class="profile-editor-card">
               <div class="settings-field">
-                <label>CÓDIGO DO CONVITE ATUAL</label>
+                <label>CONVITE PADRÃO DO SERVIDOR</label>
                 <div class="invite-copy-row">
                   <input type="text" id="srv-invite-code-display" readonly />
                   <button type="button" id="srv-regen-invite-btn" class="btn-secondary small-btn">↻ Gerar Novo Código</button>
@@ -2271,12 +3545,19 @@
                   <button type="button" id="srv-copy-invite-btn2" class="btn-primary small-btn">Copiar Link</button>
                 </div>
               </div>
+              <div class="settings-field" id="srv-custom-slug-section">
+                <label for="srv-custom-slug-input">LINK PERSONALIZADO DO SERVIDOR (OPCIONAL)</label>
+                <div class="invite-copy-row">
+                  <input type="text" id="srv-custom-slug-input" maxlength="32" placeholder="minha-comunidade" autocomplete="off" />
+                  <button type="button" id="srv-custom-slug-save-btn" class="btn-primary small-btn">Salvar</button>
+                  <button type="button" id="srv-custom-slug-copy-btn" class="btn-secondary small-btn hidden">Copiar</button>
+                  <button type="button" id="srv-custom-slug-clear-btn" class="btn-secondary small-btn hidden">Remover</button>
+                </div>
+                <div id="srv-custom-slug-preview" class="settings-hint-text">3 a 32 caracteres: letras sem acento, números e hífen (-).</div>
+              </div>
             </div>
 
-            <div class="srv-roles-header" style="margin-top: 20px;">
-              <div class="appearance-section-label" style="margin: 0;">Convites ativos</div>
-              <button type="button" id="srv-invites-refresh-btn" class="btn-secondary small-btn">↻ Atualizar</button>
-            </div>
+            <div class="appearance-section-label" style="margin-top: 20px;">Convites ativos</div>
             <div id="srv-invites-list" class="srv-manage-list" aria-live="polite">
               <div class="pinned-empty">Carregando convites...</div>
             </div>
@@ -2321,6 +3602,18 @@
               <div id="automod-feedback" class="settings-hint-text"></div>
               <button type="button" id="automod-save-btn" class="btn-primary small-btn">Salvar AutoMod</button>
             </div>
+          </div>
+
+          <!-- Etapa C5: emojis próprios do servidor -->
+          <div id="srv-tab-emojis" class="settings-panel hidden">
+            <h2>Emojis</h2>
+            <p class="settings-hint-text">Até 50 emojis por servidor. PNG, JPG, GIF ou WebP de até 256 KB; o nome usa de 2 a 32 letras, números ou _. Quem é membro usa com <code>:nome:</code> em qualquer servidor ou conversa.</p>
+            <div class="srv-roles-header emoji-settings-head">
+              <button type="button" id="emoji-upload-btn" class="btn-primary">Enviar emoji</button>
+              <span id="emoji-count" class="settings-hint-text"></span>
+            </div>
+            <input type="file" id="emoji-file-input" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" />
+            <div id="emoji-list" class="srv-manage-list emoji-manage-list" aria-live="polite"></div>
           </div>
 
           <div id="srv-tab-integrations" class="settings-panel hidden">
@@ -2438,26 +3731,33 @@
   <!-- Traduções (Fase 9): carregado primeiro, define t() e applyI18n(). -->
   <script src="/js/i18n.js?v=1"></script>
   <script src="/js/icons.js?v=1"></script>
-  <script src="/js/ui-kit.js?v=18"></script>
+  <script src="/js/ui-kit.js?v=20"></script>
   <script src="/js/transport.js?v=19"></script>
-  <script src="/js/servers.js?v=18"></script>
-  <script src="/js/permissions.js?v=18"></script>
-  <script src="/app.js?v=18"></script>
+  <script src="/js/servers.js?v=23"></script>
+  <script src="/js/invites.js?v=1"></script>
+  <script src="/js/permissions.js?v=19"></script>
+  <script src="/app.js?v=32"></script>
   <!-- Chat (mensagens, composer, anexos, não lidas): depende dos elementos do app.js. -->
-  <script src="/js/chat.js?v=17"></script>
+  <script src="/js/chat.js?v=25"></script>
   <!-- Social (Fase 5): bloqueio, solicitações, grupos, privacidade e perfil completo. -->
-  <script src="/js/social.js?v=2"></script>
+  <script src="/js/social.js?v=8"></script>
   <!-- Voz (Fase 6): volume/silêncio por pessoa, moderação, toque e retomada de chamada. -->
   <script src="/js/voice.js?v=1"></script>
   <!-- Avançados (Fase 8): busca no histórico, AutoMod e auditoria. -->
-  <script src="/js/advanced.js?v=1"></script>
+  <script src="/js/advanced.js?v=3"></script>
   <script src="/js/integrations.js?v=1"></script>
   <!-- Enquetes e eventos (Fase 8). -->
   <script src="/js/community.js?v=1"></script>
   <!-- Threads e fóruns (Fase 8). -->
-  <script src="/js/threads.js?v=1"></script>
+  <script src="/js/threads.js?v=3"></script>
   <!-- Polimento (Fase 9): notificações por canal, navegação rápida, atalhos e acessibilidade. -->
-  <script src="/js/polish.js?v=1"></script>
+  <script src="/js/polish.js?v=3"></script>
+  <script src="/js/profile-motion.js?v=1"></script>
+  <script src="/js/profile.js?v=8"></script>
+  <script src="/js/profile-board.js?v=1"></script>
+  <script src="/js/profile-collection.js?v=1"></script>
+  <script src="/js/profile-sharing.js?v=1"></script>
+  <script src="/js/settings-center.js?v=1"></script>
   <script src="/js/updater.js?v=1"></script>
 </body>
 </html>

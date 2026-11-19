@@ -10,7 +10,10 @@ const SancordIcons = (() => {
     'headphones-off': '<path d="M4 10a8 8 0 0 1 13-5M20 9v5M3 3l18 18"/><rect x="3" y="12" width="5" height="9" rx="2"/><path d="M16 16v3a2 2 0 0 0 2 2h1"/>',
     settings: '<path d="m9 3-1 3-3 1 1 4-2 2 2 4 4-1 2 3 4-1 1-4 3-1-1-4-3-1-1-3z"/><circle cx="12" cy="11" r="3"/>',
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 6 0 0 1 16 0v2"/>',
+    'user-plus': '<circle cx="9" cy="8" r="3.5"/><path d="M2 20v-1.5a7 5 0 0 1 14 0V20M19 8v6M16 11h6"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M2 21v-3a7 5 0 0 1 14 0v3M17 5a3 3 0 0 1 0 6M19 14q3 1 3 5v2"/>',
+    pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+    play: '<path d="M6 4l14 8-14 8z"/>',
     chat: '<path d="M4 4h16v12H9l-5 4zM8 8h8M8 12h5"/>',
     forum: '<path d="M3 3h14v11H8l-5 4zM9 18h8l4 3V9h-2"/>',
     announcement: '<path d="m3 10 16-6v16L3 14zM7 15l2 6h4l-2-5M22 9v6"/>',
@@ -75,7 +78,7 @@ const SancordIcons = (() => {
   const ids = { 'open-settings-btn':'settings','attach-image-btn':'plus','poll-create-btn':'poll','emoji-picker-btn':'smile','cancel-reply-btn':'close','remove-image-btn':'close','open-events-btn':'calendar','pinned-msgs-btn':'pin','toggle-members-btn':'users','open-server-settings-btn':'settings','copy-invite-btn':'users','leave-server-btn':'logout','open-add-server-btn':'plus','dm-call-btn':'phone','dm-video-call-btn':'camera','toggle-stage-btn':'screen','toggle-camera-btn':'camera','share-screen-btn':'screen','disconnect-voice-btn':'disconnect','mic-quick-chevron':'chevron','spk-quick-chevron':'chevron','server-menu-btn':'chevron','tb-close':'close' };
   Object.assign(ids, {'close-settings-btn':'close','settings-logout-btn':'logout','close-profile-card-btn':'close','open-friends-tab-btn':'users','open-starred-tab-btn':'star','check-updates-btn':'download','quick-switcher-close':'close','events-close-btn':'close'});
   Object.assign(ids, {'open-discover-servers-btn':'globe','quick-krisp-btn':'noise','leave-voice-btn':'disconnect','avatar-rotate-btn':'rotate'});
-  const tabs = {account:'user',profile:'user',privacy:'shield',voice:'headphones',notifications:'bell',appearance:'palette',advanced:'settings',updates:'download',connections:'link',shortcuts:'settings'};
+  const tabs = {account:'user',profile:'edit',security:'lock',devices:'screen',connections:'link',privacy:'shield',social:'users',requests:'chat',blocked:'ban',activity:'signal',voice:'headphones',notifications:'bell',appearance:'palette',accessibility:'eye',chat:'chat',language:'globe',shortcuts:'settings',windows:'screen',updates:'download',advanced:'settings',diagnostics:'signal',about:'globe'};
   const actions = {dm:'chat',call:'phone',more:'more',reply:'reply',edit:'edit',react:'smile',accept:'check',reject:'close',remove:'close'};
   const contextActions = {'react-more':'smile',reply:'reply','create-thread':'thread',forward:'arrow','copy-text':'copy',pin:'pin',star:'star','mark-unread':'eye','copy-link':'link',edit:'edit',delete:'trash'};
   const classes = { 'send-btn':'arrow','add-channel-btn':'plus','channel-edit-btn':'settings','pw-eye-btn':'eye','swatch-auto':'moon' };

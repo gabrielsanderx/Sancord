@@ -54,6 +54,8 @@ fn group_system_message(st: &mut ServerState, group_id: &str, content: String) {
         mentions: MessageMentions::default(),
         poll: None,
         author_kind: crate::models::AuthorKind::System,
+        embeds: Vec::new(),
+        forward: None,
     };
     st.insert_message(msg.clone());
     st.send_to_dm_participants(group_id, ServerMessage::NewChatMessage { message: msg });
@@ -116,6 +118,7 @@ pub(crate) async fn handle(user_id: &str, msg: ClientMessage, state: &SharedStat
             st.save_friends();
             st.enforce_voice_access();
             st.feedback(user_id, true, "block_user", "Usuário bloqueado.");
+            crate::profile_sharing::refresh_relationship(&st, &me, &target);
             sync_all(&st, &[me, target]);
         }
 
@@ -124,6 +127,7 @@ pub(crate) async fn handle(user_id: &str, msg: ClientMessage, state: &SharedStat
             FriendsStore::remove_from(&mut st.friends_store.blocked, &me, &target);
             st.save_friends();
             st.feedback(user_id, true, "unblock_user", "Usuário desbloqueado.");
+            crate::profile_sharing::refresh_relationship(&st, &me, &target);
             sync_all(&st, &[me, target]);
         }
 
@@ -334,10 +338,11 @@ pub(crate) async fn handle(user_id: &str, msg: ClientMessage, state: &SharedStat
             } else {
                 "none"
             };
-            let (mutual_servers, mutual_friends) = if target == me {
+            let scope = crate::profile_sharing::access(&st, &me, &target);
+            let (mutual_servers, mutual_friends) = if target == me || !scope.details {
                 (Vec::new(), Vec::new())
             } else {
-                let servers = st
+                let servers: Vec<_> = st
                     .servers
                     .iter()
                     .filter(|s| s.id != "sancord" && s.is_member(&me) && s.is_member(&target))
@@ -361,15 +366,26 @@ pub(crate) async fn handle(user_id: &str, msg: ClientMessage, state: &SharedStat
                 (servers, friends)
             };
             // Só revela a data de entrada num servidor do qual quem pergunta também é membro.
-            let joined_server_at = server_id.as_deref().and_then(|sid| {
+            let joined_server_at = server_id.as_deref().filter(|_| scope.details).and_then(|sid| {
                 st.find_server(sid)
                     .filter(|s| s.is_member(&me) && s.is_member(&target))
                     .and_then(|s| s.member_joined_at.get(&target).copied())
             });
+            let badges: Vec<_> = user.profile.badges.iter().filter(|badge| {
+                scope.badges || crate::cosmetics::badge(badge).is_some_and(|def| def.category == "trust")
+            }).cloned().collect();
+            let board = scope.board.then(|| crate::profile_board::view(&st, &me, &target, !mutual_servers.is_empty(), &badges)).flatten();
+            let links = crate::profile_sharing::public_links(&st, &target, scope);
             st.send_to(
                 user_id,
                 ServerMessage::UserProfile {
                     user,
+                    details_visible: scope.details,
+                    activity_visible: scope.activity,
+                    bio_visible: scope.bio,
+                    banner_visible: scope.banner,
+                    links,
+                    board,
                     relationship: relationship.to_string(),
                     mutual_servers,
                     mutual_friends,

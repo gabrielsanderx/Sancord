@@ -15,6 +15,10 @@ const AUDIT_LABELS = {
   member_ban: "baniu",
   member_unban: "desbaniu",
   member_roles: "alterou os cargos de",
+  member_nick: "alterou o apelido de",
+  emoji_create: "adicionou um emoji",
+  emoji_update: "renomeou um emoji",
+  emoji_delete: "excluiu um emoji",
   role_create: "criou o cargo",
   role_update: "editou o cargo",
   role_delete: "excluiu o cargo",
@@ -57,6 +61,8 @@ function onServerSettingsTabOpened(tab) {
   } else if (tab === "audit") {
     fillAuditFilter();
     loadAuditLog(true);
+  } else if (tab === "emojis") {
+    renderEmojiSettings(srv);
   }
 }
 
@@ -327,7 +333,7 @@ function onSearchResults({ request_id, hits, has_more }) {
     head.append(author, when);
     const body = document.createElement("div");
     body.className = "search-hit-body";
-    const text = m.content || (m.attachments?.length ? `📎 ${m.attachments.map((a) => a.filename).join(", ")}` : m.image_url ? "📷 Imagem" : "");
+    const text = decodeCustomEmojis(m.content) || (m.attachments?.length ? `📎 ${m.attachments.map((a) => a.filename).join(", ")}` : m.image_url ? "📷 Imagem" : "");
     body.textContent = text.length > 220 ? `${text.slice(0, 220)}…` : text;
     row.append(where, head, body);
     row.addEventListener("click", () => {
@@ -577,6 +583,277 @@ function memberModerationMenuItems(srv, target, displayName) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Etapa C4: menu completo do usuário (lista de membros) e apelido por servidor.
+// O servidor decide tudo; aqui só escondemos o que certamente seria recusado.
+// ---------------------------------------------------------------------------
+function memberTopPosition(srv, name) {
+  return Math.max(0, ...getUserServerRoles(srv, name).map((r) => r.position || 0));
+}
+
+/** Pode mudar o apelido de `target`? (o próprio: change_nickname; outros: manage_nicknames + hierarquia) */
+function canChangeNickname(srv, target) {
+  const me = state.selfUser?.username?.toLowerCase();
+  const who = String(target || "").toLowerCase();
+  if (!srv || srv.id === "sancord" || !me || !who || !(srv.members || []).includes(who)) return false;
+  if (isServerOwner(srv, me)) return true;
+  const mine = getServerPermissionsFor(srv, me);
+  if (who === me) {
+    if (memberTimeoutUntil(srv, me)) return false;
+    return mine.change_nickname !== false || Boolean(mine.manage_nicknames);
+  }
+  if (!mine.manage_nicknames || isServerOwner(srv, who)) return false;
+  return memberTopPosition(srv, who) < memberTopPosition(srv, me);
+}
+
+/** Pode editar os cargos de `target`? Espelha `authorize_assignment` do servidor. */
+function canEditMemberRoles(srv, target) {
+  const me = state.selfUser?.username?.toLowerCase();
+  const who = String(target || "").toLowerCase();
+  if (!srv || srv.id === "sancord" || !me || !who || !(srv.members || []).includes(who)) return false;
+  if (isServerOwner(srv, me)) return true;
+  const mine = getServerPermissionsFor(srv, me);
+  if (!mine.manage_roles && !mine.administrator) return false;
+  if (who === me || isServerOwner(srv, who)) return false;
+  return memberTopPosition(srv, who) < memberTopPosition(srv, me);
+}
+
+async function openNicknameDialog(srv, target, username) {
+  const current = memberNickname(srv, target) || "";
+  const self = String(target).toLowerCase() === state.selfUser?.username?.toLowerCase();
+  const values = await SancordUI.formDialog({
+    title: self ? `Seu apelido em ${srv.name}` : `Apelido de ${username} em ${srv.name}`,
+    description: "O apelido só vale neste servidor. Deixe vazio para usar o nome de usuário.",
+    fields: [{ name: "nickname", label: "APELIDO", value: current, maxlength: 32, placeholder: username }],
+    submitLabel: "Salvar",
+    extraAction: current ? { label: "Remover apelido", onSelect: () => sendWs("SetMemberNickname", { server_id: srv.id, target_username: target, nickname: null }) } : null,
+  });
+  if (!values) return;
+  const nickname = values.nickname.trim();
+  if (nickname === current) return;
+  sendWs("SetMemberNickname", { server_id: srv.id, target_username: target, nickname: nickname || null });
+}
+
+async function openMemberRolesDialog(srv, target, displayName) {
+  const me = state.selfUser?.username?.toLowerCase();
+  const owner = isServerOwner(srv, me);
+  const myTop = memberTopPosition(srv, me);
+  const current = srv.member_roles?.[String(target).toLowerCase()] || [];
+  const options = [...(srv.roles || [])]
+    .filter((r) => r.id !== "everyone")
+    .sort((a, b) => (b.position || 0) - (a.position || 0))
+    .map((r) => ({
+      value: r.id,
+      label: `${r.badge_emoji ? `${r.badge_emoji} ` : ""}${r.name}`,
+      disabled: !owner && (r.position || 0) >= myTop,
+      hint: !owner && (r.position || 0) >= myTop ? "Acima do seu cargo mais alto" : "",
+    }));
+  const values = await SancordUI.formDialog({
+    title: `Cargos de ${displayName}`,
+    fields: [{ name: "roles", label: "CARGOS", type: "checklist", value: current, options, emptyText: "Este servidor ainda não tem cargos além de @everyone." }],
+    submitLabel: "Salvar cargos",
+  });
+  if (!values) return;
+  // Caixas desativadas continuam marcadas: cargos superiores não são removidos sem querer.
+  const next = values.roles;
+  const same = next.length === current.length && next.every((id) => current.includes(id));
+  if (!same) sendWs("AssignUserRoles", { server_id: srv.id, target_username: target, role_ids: next });
+}
+
+/** Insere "@nome " no campo de mensagem (mesmo formato do autocompletar). */
+function mentionInComposer(username) {
+  const input = document.getElementById("chat-input");
+  if (!input) return;
+  const sep = input.value && !/\s$/.test(input.value) ? " " : "";
+  input.value = `${input.value}${sep}@${username} `;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.focus();
+}
+
+/**
+ * Menu do usuário na lista de membros: perfil, mensagem, chamar, amizade, mencionar,
+ * apelido, cargos, copiar, bloquear e a moderação (castigo, expulsar, banir, posse).
+ */
+function memberUserMenuItems(srv, u, openProfile) {
+  const me = state.selfUser?.username?.toLowerCase();
+  const lower = String(u.username || "").toLowerCase();
+  const self = lower === me;
+  const nick = memberNickname(srv, lower);
+  const shown = nick || u.display_name || u.username;
+  const rel = typeof getRelationshipWith === "function" ? getRelationshipWith(u.username) : "none";
+  const blocked = state.blockedUsers?.has?.(lower);
+  const inServerChat = state.activeView === "server" && Boolean(state.currentTextChannel);
+  const items = [
+    { header: nick ? `${nick} (@${u.username})` : shown },
+    { label: "Ver perfil", icon: "👤", onSelect: openProfile },
+    !self && !blocked && { label: "Mensagem", icon: "💬", onSelect: () => sendWs("OpenDm", { target_username: u.username }) },
+    !self && !blocked && {
+      label: "Ligar",
+      icon: "📞",
+      onSelect: () => {
+        state.pendingCallPeer = lower;
+        sendWs("OpenDm", { target_username: u.username });
+      },
+    },
+    inServerChat && { label: "Mencionar", icon: "@", onSelect: () => mentionInComposer(u.username) },
+    !self && rel === "none" && !blocked && { label: "Adicionar amigo", icon: "➕", onSelect: () => { sendWs("SendFriendRequest", { target_username: u.username }); showUiToast(`Pedido de amizade enviado para ${u.username}.`); } },
+    !self && rel === "outgoing" && { label: "Pedido de amizade enviado", icon: "⏳", disabled: true },
+    !self && rel === "incoming" && { label: "Aceitar pedido de amizade", icon: "✓", onSelect: () => sendWs("RespondFriendRequest", { from_username: u.username, accept: true }) },
+  ];
+  const manage = [
+    canChangeNickname(srv, lower) && { label: self ? "Editar meu apelido…" : "Mudar apelido…", icon: "🏷️", onSelect: () => openNicknameDialog(srv, lower, u.username) },
+    canEditMemberRoles(srv, lower) && { label: "Cargos…", icon: "🛡️", onSelect: () => openMemberRolesDialog(srv, lower, shown) },
+  ].filter(Boolean);
+  if (manage.length) items.push({ separator: true }, ...manage);
+  items.push(
+    { separator: true },
+    { label: "Copiar nome de usuário", icon: "📋", onSelect: () => copyTextSafe(u.username, "Nome de usuário copiado!") },
+    u.id && { label: "Copiar ID do usuário", icon: "🆔", onSelect: () => copyTextSafe(u.id, "ID do usuário copiado!") },
+    !self && !blocked && typeof confirmBlockUser === "function" && { label: "Bloquear", icon: "🚫", danger: true, onSelect: () => confirmBlockUser(u.username) },
+  );
+  const mod = memberModerationMenuItems(srv, u.username, shown);
+  if (mod.length) items.push({ separator: true }, { header: "Moderação do servidor" }, ...mod);
+  return items.filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// Etapa C5: aba "Emojis" das configurações do servidor. A imagem sobe como anexo
+// (POST /api/attachments) e o servidor valida tipo, tamanho, nome e permissão.
+// ---------------------------------------------------------------------------
+const EMOJI_MAX_BYTES = 256 * 1024;
+const EMOJI_MAX_PER_SERVER = 50;
+
+function canManageEmojis(srv) {
+  const me = state.selfUser?.username;
+  if (!srv || srv.id === "sancord" || !me) return false;
+  if (isServerOwner(srv, me)) return true;
+  const p = getServerPermissionsFor(srv, me);
+  return Boolean(p.administrator || p.manage_expressions);
+}
+
+/** Sugestão de nome a partir do arquivo: "Festa Junina!.png" → "Festa_Junina". */
+function emojiNameFromFile(filename) {
+  const base = String(filename || "").replace(/\.[^.]+$/, "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const name = base.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
+  return name.length >= 2 ? name : "emoji";
+}
+
+function renderEmojiSettings(srv) {
+  const list = document.getElementById("emoji-list");
+  if (!list || !srv) return;
+  const manage = canManageEmojis(srv);
+  const emojis = srv.emojis || [];
+  const count = document.getElementById("emoji-count");
+  if (count) count.textContent = `${emojis.length} de ${EMOJI_MAX_PER_SERVER}`;
+  const upload = document.getElementById("emoji-upload-btn");
+  if (upload) {
+    upload.disabled = !manage || emojis.length >= EMOJI_MAX_PER_SERVER;
+    upload.title = !manage ? "Precisa da permissão Gerenciar expressões." : emojis.length >= EMOJI_MAX_PER_SERVER ? "Limite de 50 emojis atingido." : "";
+  }
+  list.innerHTML = "";
+  if (!emojis.length) {
+    list.innerHTML = SancordUI.emptyHTML({ icon: "smile", title: "Nenhum emoji ainda", description: manage ? "Envie uma imagem para criar o primeiro emoji do servidor." : "Quem gerencia expressões pode enviar emojis." });
+    return;
+  }
+  for (const e of emojis) {
+    const row = document.createElement("div");
+    row.className = "srv-manage-row emoji-row";
+    row.dataset.emojiId = e.id;
+    const img = document.createElement("span");
+    img.className = "emoji-row-img";
+    img.innerHTML = customEmojiHtml(e.name, e.id);
+    const main = document.createElement("div");
+    main.className = "emoji-row-main";
+    const name = document.createElement("strong");
+    name.textContent = `:${e.name}:`;
+    const sub = document.createElement("div");
+    sub.className = "settings-hint-text";
+    sub.textContent = `${e.animated ? "Animado • " : ""}enviado por ${e.creator || "?"}`;
+    main.append(name, sub);
+    row.append(img, main);
+    if (manage) {
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.className = "btn-secondary small-btn";
+      rename.textContent = "Renomear";
+      rename.addEventListener("click", async () => {
+        const values = await SancordUI.formDialog({
+          title: `Renomear :${e.name}:`,
+          fields: [{ name: "name", label: "NOME", value: e.name, maxlength: 32, hint: "2 a 32 letras, números ou _." }],
+          submitLabel: "Salvar",
+        });
+        const next = values?.name?.trim().replace(/^:|:$/g, "");
+        if (next && next !== e.name) sendWs("RenameServerEmoji", { server_id: srv.id, emoji_id: e.id, name: next });
+      });
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "btn-secondary small-btn danger-text";
+      del.textContent = "Excluir";
+      del.addEventListener("click", async () => {
+        const ok = await SancordUI.confirm({
+          title: `Excluir :${e.name}:?`,
+          message: "Ninguém mais poderá usar este emoji. Mensagens antigas continuam mostrando a imagem.",
+          confirmLabel: "Excluir",
+          danger: true,
+        });
+        if (ok) sendWs("DeleteServerEmoji", { server_id: srv.id, emoji_id: e.id });
+      });
+      row.append(rename, del);
+    }
+    list.appendChild(row);
+  }
+}
+
+async function uploadServerEmoji(srv, file) {
+  if (!file) return;
+  if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) {
+    showErrorToast("O emoji precisa ser PNG, JPG, GIF ou WebP.");
+    return;
+  }
+  if (file.size > EMOJI_MAX_BYTES) {
+    showErrorToast("A imagem do emoji pode ter no máximo 256 KB.");
+    return;
+  }
+  const values = await SancordUI.formDialog({
+    title: "Novo emoji",
+    description: `${file.name} • ${Math.ceil(file.size / 1024)} KB`,
+    fields: [{ name: "name", label: "NOME", value: emojiNameFromFile(file.name), maxlength: 32, hint: "Use depois com :nome:. 2 a 32 letras, números ou _." }],
+    submitLabel: "Enviar emoji",
+  });
+  const name = values?.name?.trim().replace(/^:|:$/g, "");
+  if (!name) return;
+  if (!/^[A-Za-z0-9_]{2,32}$/.test(name)) {
+    showErrorToast("O nome do emoji deve ter de 2 a 32 letras, números ou _.");
+    return;
+  }
+  try {
+    const res = await SancordNet.fetch(`/api/attachments?filename=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${getStoredToken() || ""}`, "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) {
+      showErrorToast(data?.message || `Falha no envio (${res.status}).`);
+      return;
+    }
+    sendWs("CreateServerEmoji", { server_id: srv.id, name, attachment_id: data.attachment.id });
+  } catch (_) {
+    showErrorToast("Não foi possível enviar a imagem. Verifique a conexão.");
+  }
+}
+
+document.getElementById("emoji-upload-btn")?.addEventListener("click", () => {
+  document.getElementById("emoji-file-input")?.click();
+});
+document.getElementById("emoji-file-input")?.addEventListener("change", (e) => {
+  const input = e.target;
+  const file = input.files?.[0];
+  input.value = "";
+  const srv = (state.servers || []).find((s) => s.id === editingServerId);
+  if (srv) uploadServerEmoji(srv, file);
+});
 
 /** Castigos ativos da própria pessoa: [{ server, until }], do que termina antes. */
 function selfActiveTimeouts(servers, me, now = Date.now()) {

@@ -22,6 +22,9 @@ pub struct Channel {
     /// Limite de pessoas num canal de voz (0 = sem limite).
     #[serde(default)]
     pub user_limit: u32,
+    /// Taxa de bits de áudio num canal de voz em kbps (0 = padrão 128 kbps; faixa 32..=256).
+    #[serde(default)]
+    pub bitrate_kbps: u32,
     /// Modo lento (canais de texto): intervalo mínimo entre mensagens de cada pessoa.
     /// 0 = desligado; quem gerencia mensagens ou canais não espera.
     #[serde(default)]
@@ -46,6 +49,7 @@ impl Channel {
             permission_overwrites: Vec::new(),
             permissions_synced: true,
             user_limit: 0,
+            bitrate_kbps: 0,
             slowmode_secs: 0,
             forum_tags: Vec::new(),
             effective_permissions: None,
@@ -93,9 +97,12 @@ impl ChannelKind {
         matches!(self, ChannelKind::Text | ChannelKind::Announcement | ChannelKind::Forum)
     }
 
-    /// Aceita mensagens diretamente (fórum só por postagens/threads).
+    /// Aceita mensagens diretamente (texto, anúncios e chat de canais de voz; fórum só por postagens/threads).
     pub fn accepts_messages(&self) -> bool {
-        matches!(self, ChannelKind::Text | ChannelKind::Announcement)
+        matches!(
+            self,
+            ChannelKind::Text | ChannelKind::Announcement | ChannelKind::Voice
+        )
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -144,6 +151,16 @@ pub struct Thread {
     /// Postagem de fórum: ids das tags do canal aplicadas (até 5).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Etapa C6: arquiva sozinha após N minutos sem mensagens (60, 1440, 4320 ou 10080).
+    #[serde(default = "default_auto_archive_minutes")]
+    pub auto_archive_minutes: u32,
+    /// Etapa C6: quem segue a thread (username_lower). Quem cria ou escreve entra sozinho.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<String>,
+}
+
+pub fn default_auto_archive_minutes() -> u32 {
+    1440
 }
 
 /// Categoria de canais dentro de um servidor.
@@ -171,18 +188,43 @@ pub struct Invite {
     pub max_uses: Option<u32>,
     #[serde(default)]
     pub uses: u32,
+    /// Canal de destino vinculado ao convite (opcional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<String>,
+    /// Associação temporária: o membro é removido ao desconectar se não receber nenhum cargo.
+    #[serde(default)]
+    pub temporary: bool,
+    /// Timestamp de revogação (tombstone): impede reutilização do código revogado.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<i64>,
 }
 
 impl Invite {
-    /// Motivo pelo qual o convite não pode mais ser usado, se houver.
-    pub fn invalid_reason(&self, now_ms: i64) -> Option<&'static str> {
+    pub fn is_revoked(&self) -> bool {
+        self.revoked_at.is_some()
+    }
+
+    /// Código de motivo estruturado + mensagem amigável, se o convite não puder mais ser usado.
+    pub fn invalid_status(&self, now_ms: i64) -> Option<(&'static str, &'static str)> {
+        if self.revoked_at.is_some() {
+            return Some(("revoked", "Este convite não é mais válido."));
+        }
         if self.expires_at.is_some_and(|t| now_ms >= t) {
-            return Some("Este convite expirou.");
+            return Some(("expired", "Este convite expirou."));
         }
         if self.max_uses.is_some_and(|m| self.uses >= m) {
-            return Some("Este convite atingiu o limite de usos.");
+            return Some(("max_uses", "Este convite atingiu o limite de usos."));
         }
         None
+    }
+
+    /// Motivo pelo qual o convite não pode mais ser usado, se houver.
+    pub fn invalid_reason(&self, now_ms: i64) -> Option<&'static str> {
+        self.invalid_status(now_ms).map(|(_, msg)| msg)
     }
 }
 
@@ -234,9 +276,39 @@ pub struct UserPrefs {
     /// IDs de mensagens marcadas com estrela (favoritadas) pelo usuário.
     #[serde(default)]
     pub starred_messages: Vec<String>,
+    /// Etapa C3: silêncio por tempo de servidor, categoria, canal, thread ou conversa:
+    /// id -> fim em ms (0 = até reativar). Silenciado = sem som, aviso nem destaque de não lido,
+    /// exceto menções diretas.
+    #[serde(default)]
+    pub mutes: HashMap<String, i64>,
+    /// Etapa C7: GIFs favoritos (IDs de anexos GIF), do mais recente ao mais antigo.
+    #[serde(default)]
+    pub favorite_gifs: Vec<String>,
 }
 
 impl UserPrefs {
+    pub const MAX_FAVORITE_GIFS: usize = 200;
+
+    /// Sem repetição, só IDs de anexo válidos que `is_gif` confirma, no máximo 200.
+    pub fn sanitize_favorite_gifs(ids: Vec<String>, is_gif: impl Fn(&str) -> bool) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        ids.into_iter()
+            .filter(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()) && seen.insert(id.clone()) && is_gif(id))
+            .take(Self::MAX_FAVORITE_GIFS)
+            .collect()
+    }
+
+    pub const MAX_MUTES: usize = 500;
+
+    /// Mantém chaves curtas, fins válidos e ainda no futuro (0 = sem prazo), no máximo 500.
+    pub fn sanitize_mutes(mutes: HashMap<String, i64>, now_ms: i64) -> HashMap<String, i64> {
+        mutes
+            .into_iter()
+            .filter(|(k, v)| !k.is_empty() && k.len() <= 120 && (*v == 0 || *v > now_ms))
+            .take(Self::MAX_MUTES)
+            .collect()
+    }
+
     pub const MAX_NOTIFY_LEVELS: usize = 500;
     pub const MAX_USER_NOTES: usize = 200;
     pub const MAX_IGNORED_USERS: usize = 500;
@@ -392,6 +464,12 @@ pub struct InviteInfo {
     pub invite: Invite,
     pub creator_name: String,
     pub is_default: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creator_avatar: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_kind: Option<ChannelKind>,
 }
 
 /// Posição de um canal após arrastar e soltar.
@@ -445,6 +523,9 @@ pub struct RolePermissions {
     pub stream_video: bool,
     #[serde(default = "default_true")]
     pub create_invites: bool,
+    /// Ver lista completa de convites, revogar convites de outros e pausar/retomar convites.
+    #[serde(default)]
+    pub manage_invites: bool,
     /// Moderação de voz (Fase 6): silenciar, ensurdecer e mover/desconectar membros.
     #[serde(default)]
     pub mute_members: bool,
@@ -458,6 +539,15 @@ pub struct RolePermissions {
     /// Aplicar e remover castigo (timeout) de membros abaixo na hierarquia.
     #[serde(default)]
     pub moderate_members: bool,
+    /// Etapa C4: trocar o próprio apelido no servidor (padrão: sim).
+    #[serde(default = "default_true")]
+    pub change_nickname: bool,
+    /// Etapa C4: trocar o apelido de membros abaixo na hierarquia.
+    #[serde(default)]
+    pub manage_nicknames: bool,
+    /// Etapa C5: enviar, renomear e excluir emojis do servidor.
+    #[serde(default)]
+    pub manage_expressions: bool,
 }
 
 impl Default for RolePermissions {
@@ -478,11 +568,15 @@ impl Default for RolePermissions {
             speak_voice: true,
             stream_video: true,
             create_invites: true,
+            manage_invites: false,
             mute_members: false,
             deafen_members: false,
             move_members: false,
             view_audit_log: false,
             moderate_members: false,
+            change_nickname: true,
+            manage_nicknames: false,
+            manage_expressions: false,
         }
     }
 }
@@ -505,11 +599,15 @@ impl RolePermissions {
             speak_voice: true,
             stream_video: true,
             create_invites: true,
+            manage_invites: true,
             mute_members: true,
             deafen_members: true,
             move_members: true,
             view_audit_log: true,
             moderate_members: true,
+            change_nickname: true,
+            manage_nicknames: true,
+            manage_expressions: true,
         }
     }
 
@@ -531,6 +629,7 @@ impl RolePermissions {
         self.speak_voice |= other.speak_voice;
         self.stream_video |= other.stream_video;
         self.create_invites |= other.create_invites;
+        self.manage_invites |= other.manage_invites;
         self.view_channel |= other.view_channel;
         self.read_history |= other.read_history;
         self.add_reactions |= other.add_reactions;
@@ -540,6 +639,9 @@ impl RolePermissions {
         self.move_members |= other.move_members;
         self.view_audit_log |= other.view_audit_log;
         self.moderate_members |= other.moderate_members;
+        self.change_nickname |= other.change_nickname;
+        self.manage_nicknames |= other.manage_nicknames;
+        self.manage_expressions |= other.manage_expressions;
     }
 }
 
@@ -617,6 +719,121 @@ pub struct GuildServer {
     /// vai para os clientes do servidor, que mostram o aviso e o tempo restante.
     #[serde(default)]
     pub member_timeouts: HashMap<String, i64>,
+    /// Etapa C4: apelido neste servidor (username_lower -> apelido). Persistido em
+    /// `server_members.nickname`; some quando a pessoa sai, é expulsa ou banida.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub member_nicks: HashMap<String, String>,
+    /// Campos que substituem o perfil global apenas neste servidor.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub member_profiles: HashMap<String, ServerMemberProfile>,
+    /// Etapa C5: emojis próprios do servidor (tabela `server_emojis`).
+    #[serde(default)]
+    pub emojis: Vec<ServerEmoji>,
+    /// Quando true, entradas por convite ficam temporariamente pausadas sem apagar os convites.
+    #[serde(default)]
+    pub invites_paused: bool,
+    /// Regras opcionais exibidas na prévia do convite antes de confirmar entrada.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules_text: Option<String>,
+    /// Base arquitetural para slug personalizado de convite (opcional, sem monetização).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_invite_slug: Option<String>,
+    /// Membros em associação temporária (`username_lower`): removidos ao desconectar se não receberem cargo.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub temporary_members: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerMemberProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<ServerProfileImage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub banner: Option<ServerProfileImage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bio: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_decoration: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_frame: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_effect: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nameplate_style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_color_secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_gradient_direction: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_primary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_accent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_highlight: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_direction: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerProfileImage {
+    pub url: String,
+    pub animated: bool,
+}
+
+/// Campos ausentes preservam o override atual. Texto vazio volta a herdar.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ServerProfileChanges {
+    #[serde(default)]
+    pub avatar_attachment_id: Option<String>,
+    #[serde(default)]
+    pub banner_attachment_id: Option<String>,
+    #[serde(default)]
+    pub bio: Option<String>,
+    #[serde(default)]
+    pub avatar_decoration: Option<String>,
+    #[serde(default)]
+    pub profile_frame: Option<String>,
+    #[serde(default)]
+    pub profile_effect: Option<String>,
+    #[serde(default)]
+    pub nameplate_style: Option<String>,
+    #[serde(default)]
+    pub name_style: Option<String>,
+    #[serde(default)]
+    pub name_color: Option<String>,
+    #[serde(default)]
+    pub name_color_secondary: Option<String>,
+    #[serde(default)]
+    pub name_gradient_direction: Option<String>,
+    #[serde(default)]
+    pub theme_primary: Option<String>,
+    #[serde(default)]
+    pub theme_accent: Option<String>,
+    #[serde(default)]
+    pub theme_highlight: Option<String>,
+    #[serde(default)]
+    pub theme_mode: Option<String>,
+    #[serde(default)]
+    pub theme_direction: Option<String>,
+}
+
+/// Etapa C5: emoji do servidor. O `id` é o do anexo com a imagem (32 hex), então
+/// qualquer cliente desenha `<:nome:id>` por `/api/attachments/{id}/…`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ServerEmoji {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub animated: bool,
+    #[serde(default)]
+    pub creator: String,
+    #[serde(default)]
+    pub created_at: i64,
 }
 
 /// Fase 8 — regras automáticas aplicadas no servidor a mensagens de canais do servidor.
@@ -848,6 +1065,8 @@ impl GuildServer {
 #[derive(Debug, Clone, Serialize)]
 pub struct InvitePreviewResponse {
     pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     pub server_id: Option<String>,
     pub name: Option<String>,
     pub description: Option<String>,
@@ -859,6 +1078,24 @@ pub struct InvitePreviewResponse {
     pub online_count: usize,
     pub is_community: bool,
     pub expires_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inviter_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inviter_avatar: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_name: Option<String>,
+    #[serde(default)]
+    pub temporary: bool,
+    #[serde(default)]
+    pub already_member: bool,
+    #[serde(default)]
+    pub invites_paused: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
     pub message: Option<String>,
 }
 
@@ -917,6 +1154,17 @@ pub struct Account {
     /// Hash do código de recuperação de senha (uso único).
     #[serde(default)]
     pub recovery_code_hash: Option<String>,
+    /// Perfil P1: cosméticos possuídos além dos gratuitos (concedidos só pelo servidor).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inventory: Vec<String>,
+    #[serde(default)]
+    pub cosmetic_collection: CosmeticCollection,
+    #[serde(default)]
+    pub profile_board: ProfileBoard,
+    #[serde(default)]
+    pub profile_sharing: ProfileSharing,
+    #[serde(flatten, default)]
+    pub profile: ProfileExtras,
     /// Token legado (texto puro) das versões antigas. Só é lido durante a
     /// migração dos JSON e convertido em sessão com hash; nunca é gravado.
     #[serde(default, skip_serializing)]
@@ -1011,6 +1259,8 @@ pub struct UserInfo {
     pub nameplate_style: Option<String>,
     #[serde(default)]
     pub profile_effect: Option<String>,
+    #[serde(flatten, default)]
+    pub profile: ProfileExtras,
     #[serde(default)]
     pub created_at: Option<String>,
     pub voice_channel_id: Option<String>,
@@ -1037,6 +1287,33 @@ pub struct ReplyRef {
     pub id: String,
     pub author_name: String,
     pub preview: String,
+    /// Etapa C2: a resposta menciona (notifica) o autor original? Padrão: sim.
+    #[serde(default = "default_true")]
+    pub mention: bool,
+}
+
+/// Etapa C2 — pedido de encaminhamento: qual mensagem copiar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForwardRequest {
+    pub channel_id: String,
+    pub message_id: String,
+}
+
+/// Etapa C2 — cópia congelada da mensagem encaminhada (não muda se a original
+/// for editada ou apagada). O autor original não aparece, como em outros mensageiros.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForwardSnapshot {
+    pub source_channel_id: String,
+    pub source_message_id: String,
+    /// "#canal · Servidor", "Mensagem direta" ou "Grupo"
+    pub source_label: String,
+    pub original_created_at: i64,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embeds: Vec<crate::link_preview::LinkEmbed>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1081,6 +1358,12 @@ pub struct ChatMessage {
     /// Mensagens antigas não têm o campo: `author_id == "system"` também conta como sistema.
     #[serde(default, skip_serializing_if = "AuthorKind::is_user")]
     pub author_kind: AuthorKind,
+    /// Etapa C1: prévias de links geradas pelo servidor (nunca aceitas do cliente).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embeds: Vec<crate::link_preview::LinkEmbed>,
+    /// Etapa C2: mensagem encaminhada (cópia congelada da original).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward: Option<ForwardSnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1327,6 +1610,8 @@ pub struct FriendInfo {
     pub nameplate_style: Option<String>,
     #[serde(default)]
     pub profile_effect: Option<String>,
+    #[serde(flatten, default)]
+    pub profile: ProfileExtras,
     #[serde(default)]
     pub created_at: Option<String>,
     pub online: bool,
@@ -1378,6 +1663,10 @@ pub enum ClientMessage {
         #[serde(default)]
         name_color: Option<String>,
         #[serde(default)]
+        name_color_secondary: Option<String>,
+        #[serde(default)]
+        name_gradient_direction: Option<String>,
+        #[serde(default)]
         nameplate_style: Option<String>,
         #[serde(default)]
         profile_effect: Option<String>,
@@ -1391,7 +1680,51 @@ pub enum ClientMessage {
         /// Segundos até o status personalizado sumir (0 = nunca). Só vale junto com `custom_status`.
         #[serde(default)]
         custom_status_expires_in: Option<i64>,
+        /// Perfil P1: destaque (#rrggbb), "solid"/"gradient", direção do gradiente e moldura.
+        #[serde(default)]
+        theme_highlight: Option<String>,
+        #[serde(default)]
+        theme_mode: Option<String>,
+        #[serde(default)]
+        theme_direction: Option<String>,
+        #[serde(default)]
+        profile_frame: Option<String>,
     },
+
+    /// Perfil P1: avatar ou banner a partir de uma imagem enviada em /api/attachments.
+    /// `kind`: "avatar" | "banner"; `attachment_id` ausente = remover (volta ao padrão).
+    SetProfileMedia {
+        kind: String,
+        #[serde(default)]
+        attachment_id: Option<String>,
+    },
+    SetServerProfile {
+        server_id: String,
+        #[serde(flatten)]
+        changes: ServerProfileChanges,
+    },
+    GetProfileBoard,
+    SaveProfileBoard { board: ProfileBoard },
+    GetProfileSharing,
+    SetProfilePrivacy { privacy: ProfilePrivacy },
+    SetProfileLink {
+        id: Option<String>,
+        label: String,
+        url: String,
+        visible: bool,
+        #[serde(default)]
+        platform: Option<String>,
+    },
+    RemoveProfileLink { id: String },
+    StartGitHubProfileVerification { id: String },
+    CheckGitHubProfileVerification { id: String },
+    GetBadgeAdminState,
+    SetUserBadges { target_username: String, badges: Vec<String> },
+    SetCosmeticFavorite { key: String, favorite: bool },
+    MarkCosmeticsSeen { key: Option<String> },
+    SaveProfilePreset { name: String, appearance: ProfileAppearance },
+    DeleteProfilePreset { id: String },
+    EquipProfileLook { choice: ProfileLookChoice },
 
     /// Bloquear usuário (desfaz amizade e pedidos; ele não pode mais te enviar DM nem pedido)
     BlockUser { target_username: String },
@@ -1452,6 +1785,12 @@ pub enum ClientMessage {
         /// Enquete (Fase 8)
         #[serde(default)]
         poll: Option<PollInput>,
+        /// Etapa C2: responder sem mencionar o autor (padrão: menciona).
+        #[serde(default = "default_true")]
+        reply_mention: bool,
+        /// Etapa C2: encaminhar esta mensagem (o texto vira um comentário opcional).
+        #[serde(default)]
+        forward: Option<ForwardRequest>,
     },
 
     /// Votar numa enquete (substitui os votos anteriores; lista vazia retira o voto)
@@ -1482,8 +1821,14 @@ pub enum ClientMessage {
         locked: Option<bool>,
         #[serde(default)]
         tags: Option<Vec<String>>,
+        /// Etapa C6: 60, 1440, 4320 ou 10080 minutos sem mensagens até arquivar.
+        #[serde(default)]
+        auto_archive_minutes: Option<u32>,
     },
     DeleteThread { thread_id: String },
+    /// Etapa C6: seguir (entrar) ou deixar de seguir uma thread.
+    JoinThread { thread_id: String },
+    LeaveThread { thread_id: String },
 
     /// Eventos do servidor (Fase 8)
     ListEvents { server_id: String },
@@ -1591,6 +1936,9 @@ pub enum ClientMessage {
         /// Só canais de voz: 0 = sem limite, máximo 99.
         #[serde(default)]
         user_limit: Option<u32>,
+        /// Só canais de voz: 0 = padrão (128 kbps), faixa 32..=256 kbps.
+        #[serde(default)]
+        bitrate_kbps: Option<u32>,
         /// Só canais de texto: 0 desliga; máximo de 6 horas.
         #[serde(default)]
         slowmode_secs: Option<u32>,
@@ -1638,13 +1986,17 @@ pub enum ClientMessage {
         channels: Vec<ChannelPlacement>,
     },
 
-    /// Criar convite com validade e limite de usos opcionais
+    /// Criar convite com validade, limite de usos, canal e associação temporária opcionais
     CreateInvite {
         server_id: String,
         #[serde(default)]
         max_age_secs: Option<u64>,
         #[serde(default)]
         max_uses: Option<u32>,
+        #[serde(default)]
+        channel_id: Option<String>,
+        #[serde(default)]
+        temporary: bool,
     },
 
     /// Listar convites ativos do servidor (gerenciadores)
@@ -1652,6 +2004,16 @@ pub enum ClientMessage {
 
     /// Revogar um convite
     RevokeInvite { server_id: String, code: String },
+
+    /// Pausar ou retomar temporariamente os convites do servidor (sem apagar links ativos)
+    SetInvitesPaused { server_id: String, paused: bool },
+
+    /// Definir ou remover slug personalizado de convite do servidor (3–32 caracteres [a-z0-9-])
+    SetCustomInviteSlug {
+        server_id: String,
+        #[serde(default)]
+        slug: Option<String>,
+    },
 
     /// Atualizar preferências sincronizadas (barra de servidores, pastas, silenciados, notas, ignorados, favoritos)
     UpdateUserPrefs {
@@ -1671,6 +2033,10 @@ pub enum ClientMessage {
         ignored_users: Option<Vec<String>>,
         #[serde(default)]
         starred_messages: Option<Vec<String>>,
+        #[serde(default)]
+        mutes: Option<HashMap<String, i64>>,
+        #[serde(default)]
+        favorite_gifs: Option<Vec<String>>,
     },
 
     /// Deletar um canal personalizado
@@ -1704,7 +2070,11 @@ pub enum ClientMessage {
     },
 
     /// Entrar em outro servidor usando código ou link de convite
-    JoinServerByInvite { invite_code: String },
+    JoinServerByInvite {
+        invite_code: String,
+        #[serde(default)]
+        accepted_rules: bool,
+    },
 
     /// Sair de um servidor (membros que não são donos)
     LeaveServer { server_id: String },
@@ -1725,6 +2095,8 @@ pub enum ClientMessage {
         regenerate_invite: bool,
         #[serde(default)]
         is_community: Option<bool>,
+        #[serde(default)]
+        rules_text: Option<String>,
     },
 
     /// Excluir definitivamente um servidor (exclusivo para o criador original)
@@ -1734,6 +2106,10 @@ pub enum ClientMessage {
     InviteFriendToServer {
         server_id: String,
         target_username: String,
+        #[serde(default)]
+        invite_code: Option<String>,
+        #[serde(default)]
+        channel_id: Option<String>,
     },
 
     /// Criar novo cargo dentro de um servidor
@@ -1844,6 +2220,30 @@ pub enum ClientMessage {
         duration_secs: u64,
         #[serde(default)]
         reason: Option<String>,
+    },
+
+    /// Etapa C4: apelido no servidor (o próprio ou de outro membro). `None` ou vazio remove.
+    SetMemberNickname {
+        server_id: String,
+        target_username: String,
+        #[serde(default)]
+        nickname: Option<String>,
+    },
+
+    /// Etapa C5: emoji do servidor a partir de uma imagem já enviada em /api/attachments.
+    CreateServerEmoji {
+        server_id: String,
+        name: String,
+        attachment_id: String,
+    },
+    RenameServerEmoji {
+        server_id: String,
+        emoji_id: String,
+        name: String,
+    },
+    DeleteServerEmoji {
+        server_id: String,
+        emoji_id: String,
     },
 
     /// Remover banimento de um usuário em um servidor
@@ -2012,13 +2412,26 @@ pub enum ServerMessage {
     /// Preferências alteradas em outro dispositivo/aba
     UserPrefsUpdated { prefs: UserPrefs },
 
+    /// Perfil P1: catálogo de cosméticos e chaves possuídas ("tipo:id"), só para a própria conta.
+    CosmeticsState {
+        catalog: Vec<crate::cosmetics::CosmeticItem>,
+        owned: Vec<String>,
+        /// Definições das badges (nome, categoria trust/cosmetic, descrição).
+        badges: Vec<crate::cosmetics::BadgeDef>,
+        collection: CosmeticCollection,
+    },
+    CosmeticCollectionUpdated { collection: CosmeticCollection },
+    ProfileLookApplied { appearance: ProfileAppearance },
+
     /// Convite criado com sucesso (para quem pediu)
     InviteCreated { invite: InviteInfo },
 
-    /// Lista de convites do servidor (resposta a ListInvites / após revogar)
+    /// Lista de convites do servidor (resposta a ListInvites / após revogar / pausar)
     InvitesList {
         server_id: String,
         invites: Vec<InviteInfo>,
+        #[serde(default)]
+        invites_paused: bool,
     },
 
     /// Autenticação do WebSocket recusada (token ausente, inválido ou expirado).
@@ -2071,10 +2484,25 @@ pub enum ServerMessage {
         server: GuildServer,
         #[serde(default)]
         history: HashMap<String, Vec<ChatMessage>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default_channel_id: Option<String>,
     },
 
     /// Dados, canais, cargos ou membros de um servidor foram atualizados
     ServerUpdated { server: GuildServer },
+    /// Novo membro entrou por convite (persiste mensagem de sistema no canal e notifica em tempo real)
+    ServerMemberJoined {
+        server_id: String,
+        username: String,
+        display_name: String,
+        invite_code: String,
+        message: ChatMessage,
+    },
+    ServerProfileUpdated {
+        server_id: String,
+        username: String,
+        profile: Option<ServerMemberProfile>,
+    },
 
     /// Ressincroniza acesso e dados recém-liberados após mudar cargos/permissões.
     ServerAccessUpdated {
@@ -2204,6 +2632,14 @@ pub enum ServerMessage {
     /// Perfil completo de outro usuário (resposta a GetUserProfile)
     UserProfile {
         user: FriendInfo,
+        details_visible: bool,
+        activity_visible: bool,
+        bio_visible: bool,
+        banner_visible: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        links: Vec<ProfileLinkView>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        board: Option<ProfileBoardView>,
         /// "self" | "friend" | "incoming" | "outgoing" | "blocked" | "none"
         relationship: String,
         mutual_servers: Vec<MutualServer>,
@@ -2211,6 +2647,15 @@ pub enum ServerMessage {
         /// Entrada no servidor pedido (ms), se for membro
         joined_server_at: Option<i64>,
         server_id: Option<String>,
+    },
+    ProfileBoardState { board: ProfileBoard },
+    ProfileBoardSaved { board: ProfileBoard },
+    ProfileSharingState { privacy: ProfilePrivacy, links: Vec<ProfileLink> },
+    ProfilePresentationChanged { username: String },
+    BadgeAdminState {
+        can_manage: bool,
+        grants: HashMap<String, Vec<String>>,
+        accounts: Vec<String>,
     },
 
     /// Grupo criado/aberto: o cliente deve navegar até ele
@@ -2255,4 +2700,180 @@ pub enum ServerMessage {
         channel_id: String,
         message_ids: Vec<String>,
     },
+}
+
+/// Perfil (Fase P1): campos novos compartilhados por `Account`, `UserInfo` e `FriendInfo`
+/// (achatados no JSON, sem migração). Só o servidor escreve; os valores já chegam validados.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ProfileExtras {
+    /// Segundo tom e direção do gradiente do nome. A cor primária continua em `name_color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_color_secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_gradient_direction: Option<String>,
+    /// Avatar/banner são GIF: clientes podem mostrar quadro estático fora do perfil aberto.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub avatar_animated: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub banner_animated: bool,
+    /// Tema do perfil: cor de destaque (#rrggbb), "solid" | "gradient" e direção do gradiente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_highlight: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_direction: Option<String>,
+    /// Moldura do cartão de perfil (id do catálogo de cosméticos).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_frame: Option<String>,
+    /// Badges concedidas pelo servidor (nunca escolhidas pelo usuário).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub badges: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileBoard {
+    pub revision: u32,
+    pub audience: BoardAudience,
+    pub widgets: Vec<ProfileWidget>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoardAudience {
+    #[default]
+    Everyone,
+    SharedSpaces,
+    Friends,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileWidget {
+    pub visible: bool,
+    #[serde(flatten)]
+    pub content: ProfileWidgetContent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProfileWidgetContent {
+    FavoriteGame { name: String, description: String, cover_id: Option<String> },
+    Playing { name: String },
+    WantToPlay { name: String },
+    About { text: String },
+    Link { label: String, url: String },
+    Achievements,
+    Custom {
+        title: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        emoji: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileBoardView {
+    pub widgets: Vec<ProfileWidget>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub achievements: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileAudience {
+    #[default]
+    Everyone,
+    SharedSpaces,
+    Friends,
+    OnlyMe,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProfilePrivacy {
+    pub audience: ProfileAudience,
+    pub bio: ProfileAudience,
+    pub pronouns: ProfileAudience,
+    pub banner: ProfileAudience,
+    pub status: ProfileAudience,
+    pub activity: ProfileAudience,
+    pub badges: ProfileAudience,
+    pub board: ProfileAudience,
+    pub connections: ProfileAudience,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProfileSharing {
+    pub privacy: ProfilePrivacy,
+    pub links: Vec<ProfileLink>,
+    pub github_retry_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileLink {
+    pub id: String,
+    pub label: String,
+    pub url: String,
+    pub visible: bool,
+    pub verified_github: bool,
+    pub challenge: Option<GitHubProfileChallenge>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubProfileChallenge {
+    pub code: String,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileLinkView {
+    pub label: String,
+    pub url: String,
+    pub verified_github: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CosmeticCollection {
+    pub favorites: Vec<String>,
+    pub seen: Vec<String>,
+    pub presets: Vec<ProfilePreset>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfilePreset {
+    pub id: String,
+    pub name: String,
+    pub appearance: ProfileAppearance,
+}
+
+/// Só apresentação. Presets nunca gravam avatar, banner, bio, presença ou identidade.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileAppearance {
+    pub avatar_decoration: Option<String>,
+    pub profile_frame: Option<String>,
+    pub profile_effect: Option<String>,
+    pub nameplate_style: Option<String>,
+    pub name_style: Option<String>,
+    pub name_color: Option<String>,
+    pub name_color_secondary: Option<String>,
+    pub name_gradient_direction: Option<String>,
+    pub theme_primary: Option<String>,
+    pub theme_accent: Option<String>,
+    pub theme_highlight: Option<String>,
+    pub theme_mode: Option<String>,
+    pub theme_direction: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProfileLookChoice {
+    Preset { id: String },
+    Custom { appearance: ProfileAppearance },
 }

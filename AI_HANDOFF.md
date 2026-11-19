@@ -900,7 +900,7 @@ pendente. Os fontes já têm as duas coisas.
 - **Produção atualizada para `0.2.1`:**
   - Backup completo pré-`0.2.1` verificado em `D:\Sancord\data-backup-pre-0.2.1-20261118-1623/` (`11` arquivos de `data/`, `2.582.411` bytes + `SancordServer-0.2.0.exe` e `Sancord-0.2.0.exe`).
   - `D:\Sancord\SancordServer.exe`, `D:\Sancord\Sancord.exe` e `D:\Sancord\dist\` atualizados com os binários oficiais assinados da release `v0.2.1`.
-  - Servidor de produção iniciado na porta `3000` (mantendo o túnel `cloudflared` ativo); `/api/health` respondeu `version: "0.2.1"`, `ok: true`, `protocol_version: 2` tanto localmente (`http://127.0.0.1:3000/api/health`) quanto pelo túnel público (`https://treasure-practitioner-fred-reason.trycloudflare.com/api/health`).
+  - Servidor de produção iniciado na porta `3000` (mantendo o túnel `cloudflared` ativo); `/api/health` respondeu `version: "0.2.1"`, `ok: true`, `protocol_version: 2` tanto localmente (`http://127.0.0.1:3000/api/health`) quanto pelo túnel público (`https://<tunel-publico>.trycloudflare.com/api/health`).
 
 ## Implementação das Etapas A (restante) e B — v0.2.2 (schema v14) — 18/11/2026
 
@@ -919,5 +919,436 @@ pendente. Os fontes já têm as duas coisas.
 - **Etapa B.5 (Exclusão da própria conta):**
   - Adicionado `DeleteAccount` com verificação da senha atual, bloqueio caso o usuário ainda seja dono de algum servidor e limpeza completa em memória e no SQLite (`WriteOp::DeleteUser`).
 - **Validação:**
-  - **248 testes automatizados aprovados** (`111` núcleo Rust + `8` desktop + `1` manutenção + `128` frontend).
+  - **248 testes automatizados aprovados** (`111` núcleo Rust + `8` desktop + `1` manutenção + `128` frontend) + **1 ensaio HTTPS com o artefato real assinado do CI = 249 testes aprovados**.
   - Ensaio de migração em cópia somente-leitura do banco real (`scripts/test-migration.ps1`): `v13 → v14; 31 tabelas antigas preservadas por hash; integridade OK`.
+
+### Release v0.2.2 publicada e produção atualizada — 18/11/2026
+
+- **Commit final:** `fd10d6ee6b21bd93000096d48237ec310f6d6a87` (pai `8123c3cb`), branch `main` avançada sem `force`, tag `v0.2.2` criada no mesmo commit.
+- **CI e Release no GitHub Actions:**
+  - **Windows CI (`main`):** [Run 44393803445](https://github.com/gabrielsanderx/Sancord/actions/runs/44393803445) concluído com `success` em `4m44s`.
+  - **Stable Windows release (`v0.2.2`):** [Run 44393805417](https://github.com/gabrielsanderx/Sancord/actions/runs/44393805417) concluído com `success` em `17m39s` (`tests / test`, `package`, `sign`, `verify-package` e `publish`).
+  - Release pública marcada como `latest`: https://github.com/gabrielsanderx/Sancord/releases/tag/v0.2.2
+- **Coleta e verificação local dos assets publicados (`qa-candidate-0.2.2/published-v0.2.2/`):**
+  - `sancord-release verify` aprovado (`Assinatura e integridade válidas.`).
+  - `https_downloads_real_ci_artifact_with_embedded_release_key` aprovado (`1 passed`).
+  - Hashes SHA-256 dos arquivos publicados na `v0.2.2`:
+    - `Sancord.exe` (`10.697.728` bytes): `0cabbed6433d0aa688d27f63c30ee01740c918389d228374c73eb3f526f4f91a`
+    - `SancordServer.exe` (`10.737.664` bytes): `569ffa8360d56b5c8588a6e275c0a48183e43207cee6d126944727b8a9e2ce6e`
+    - `Sancord-0.2.2-windows-x64.zip` (`5.896.547` bytes): `3694f1c5b3076555ebb9673e25bb4fa531c91ea6af845fd5ed9fd0dc259d1d8d`
+    - `sancord-update.json` (`1.586` bytes): `23392c290b13404ca0d162b8a3fead890bb397e83d1285696e52f4943df9e67e`
+    - `sancord-update.sig` (`128` bytes): `fea49ad409d821b72ab145a227995046dcef862c3c1ab9f2b14114ac70713cbd`
+- **Produção atualizada para `0.2.2`:**
+  - Backup completo pré-`0.2.2` verificado em `D:\Sancord\data-backup-pre-0.2.2-20261118-1803/` (`11` arquivos de `data/`, `2.615.371` bytes, banco v13 com `integrity_check = ok` + `SancordServer-0.2.1.exe` e `Sancord-0.2.1.exe`).
+  - `D:\Sancord\SancordServer.exe`, `D:\Sancord\Sancord.exe` e `D:\Sancord\dist\` atualizados com os binários oficiais assinados da release `v0.2.2`.
+  - `scripts/install-autostart.ps1 -Action Install` registrado em `HKCU:\Software\Microsoft\Windows\CurrentVersion\Run\SancordHost` (`AutostartInstalled: True`, `BackendPort3000: True`, `CloudflaredRunning: True`). Túnel continua em modo rápido `trycloudflare.com` com descoberta assinada (túnel nomeado fixo depende de conta/domínio Cloudflare próprio).
+  - Servidor de produção `0.2.2` iniciado na porta `3000` (mantendo o túnel `cloudflared` PID `13076` ativo); `data/sancord.db` migrado automaticamente para o esquema `14` (coluna `reason` confirmada em `bans`), e `/api/health` responde `version: "0.2.2", ok: true, protocol_version: 2` localmente (`http://127.0.0.1:3000/api/health`) e pelo túnel público (`https://<tunel-publico>.trycloudflare.com/api/health`).
+  - Próximas etapas no roteiro (`DISCORD_GAP_AUDIT.md`): conferir visualmente notificações nativas/updater no `.exe` (Etapa A.4) e iniciar a **Etapa C (UX de chat e social)** ou **Etapa D (TURN provisionado)**.
+
+## Etapa C — item 1: prévia de links (Claude, 18/11/2026) — nos fontes, não publicado
+
+- Conferência do relato do Gemini: GitHub (v0.2.1 e v0.2.2), fontes = `main` `fd10d6e`
+  (exceto anotações de documentação), 248 testes, produção 0.2.2/banco v14 e autostart — tudo
+  confirmado. Backend de QA esquecido na porta 3122 desligado; o da 3110 (PID 8300) roda como
+  administrador e só o usuário pode encerrá-lo.
+- **`src/link_preview.rs`**: depois de enviar/editar (e em mensagens de bots/webhooks), o servidor
+  busca até 3 links e grava `ChatMessage.embeds` (site, título, descrição, imagem). Chega aos
+  clientes como `MessageUpdated`; persistido no JSON da mensagem (sem migração).
+  - Proteção contra SSRF: só http/https sem credenciais; todo IP resolvido precisa ser público
+    (loopback, privados, link-local, CGNAT, multicast, reservados, IPv4 mapeado, NAT64…);
+    conexão presa ao IP verificado (`resolve`, contra DNS rebinding); redirecionamentos manuais
+    (máx. 3) revalidados; 6 s; HTML até 512 KiB; imagem até 5 MiB e só png/jpeg/gif/webp.
+  - Imagem só pelo proxy `GET /api/link-preview/:canal/:mensagem/:índice`: presa a um embed
+    gravado pelo servidor (não é proxy aberto) e sem expor o IP de quem lê. Cache em memória
+    (prévias 1 h/500; imagens 32 MiB).
+  - `SANCORD_LINK_PREVIEWS=0` desliga. `<https://…>` e links em código não geram prévia.
+  - Cliente: `buildEmbedsNode` (chat.js) só com `textContent`; respeita "Pré-visualizar …
+    automaticamente" (rótulo atualizado). Token novo `--link` (mais escuro no tema Claro).
+- **Bug grave encontrado no QA e corrigido (presente na 0.2.2 publicada):** em canais com
+  rolagem, as mensagens encolhiam para 22 px e o texto se sobrepunha (lista flex em coluna +
+  `min-height` explícito em `.message-item`). Correção: `#chat-messages > * { flex-shrink: 0 }`
+  em `ui.css` (versão `?v=2`), com teste de regressão `tests/frontend-chat-layout.test.cjs`.
+- Bug achado com sites reais e corrigido: `og:title` vazio impedia o uso do `<title>`.
+- Testes: `src/link_preview_tests.rs` (5: extração, IPs, HTML, SSRF inclusive por
+  redirecionamento, fluxo completo com proxy) + `tests/frontend-link-embeds.test.cjs` (2) +
+  regressão de layout (2). Suíte: 116 núcleo + 8 desktop + 1 manutenção + 132 frontend.
+- QA na instância 3100 com sites reais (rust-lang.org e GitHub): prévias geradas, imagens pelo
+  proxy. Limite conhecido: geradores lentos de imagem (ex.: opengraph.githubassets.com) podem
+  estourar 6 s no primeiro pedido; a imagem some nessa exibição e carrega numa próxima.
+- **Para publicar (0.2.3):** subir versão, seção no CHANGELOG, commit (sem git local: pela API,
+  como na 0.2.1), CI e autorização do usuário. A correção do chat sobreposto justifica publicar
+  logo.
+
+## Etapa C — item 2: resposta com/sem menção e encaminhamento real (Claude, 18/11/2026) — nos fontes, não publicado
+
+- **Resposta sem menção:** `SendChat.reply_mention` (padrão true) e `ReplyRef.mention`. Sem menção, o
+  autor original não entra em `mentions` (nem depois de editar). Cliente: botão "@ ATIVADO/DESATIVADO"
+  na barra de resposta (some ao responder a si mesmo), lembrado neste aparelho (`audioSettings.replyMention`).
+- **Encaminhar:** `SendChat.forward { channel_id, message_id }` vira `ChatMessage.forward: ForwardSnapshot`
+  (cópia congelada: texto, anexos, prévias, rótulo de origem, data original). Reaproveita todo o caminho
+  de envio: permissões, castigo, modo lento, AutoMod (inclui o texto encaminhado), solicitações de DM.
+  - Regras: quem encaminha precisa poder ler a origem; enquetes não são encaminhadas; não vai para canais
+    de anúncios (nem fóruns); reencaminhar mantém a origem original; o texto da mensagem vira comentário
+    opcional; sem notificações a partir do conteúdo encaminhado.
+  - Proxy de imagens: índices 100+ apontam para as prévias da cópia (`FORWARD_INDEX_BASE`).
+  - Cliente: diálogo com até 5 destinos (canais onde se pode escrever em qualquer servidor, DMs, grupos) e
+    comentário; bloco "↪ Encaminhada" com rodapé de origem que leva à original (`buildForwardNode`).
+    O modal antigo (que copiava texto com prefixo) foi removido do código; o HTML antigo segue no index.
+- Testes: `src/forward_tests.rs` (2) + `tests/frontend-forward-reply.test.cjs` (2). Suíte: 118 núcleo +
+  8 desktop + 1 manutenção + 134 frontend.
+- QA (instância 3100, cliques reais): encaminhada para #memes e DM ao mesmo tempo com comentário; cópia com
+  prévia e imagem; rodapé leva à original destacada; botão "@" alterna e muda de cor.
+
+## Etapa C — item 3: silenciar por tempo, silenciar categoria e caixa de menções (Claude, 18/11/2026) — nos fontes, não publicado
+
+- **Silêncio com prazo:** `UserPrefs.mutes: HashMap<id, fim_ms>` (0 = até reativar), enviado por
+  `UpdateUserPrefs.mutes`. O servidor limpa (`UserPrefs::sanitize_mutes`: chave de 1 a 120 caracteres,
+  prazo no futuro, máximo 500) e `prefs_for` não devolve os que já venceram. Sem migração: as preferências
+  são JSON. `muted_servers` (lista antiga) continua valendo e sai ao reativar pelo menu novo.
+- **Cliente (`static/js/polish.js`):** `muteUntil`/`isMutedId`/`isChannelMuted` (canal → thread-pai →
+  categoria → servidor), `setMute`, `muteMenuItems` ("Silenciar …" abre 15 min/1 h/3 h/8 h/24 h/até
+  reativar; "Reativar …" mostra até quando) e `scheduleMuteExpiry` (redesenha quando o prazo vence).
+  Menus: servidor, categoria (novo; ganhou também "Marcar como lida"), canal, thread, grupo e DM (a DM
+  ganhou menu: abrir, marcar como lida, silenciar e notificações). Itens silenciados ficam esmaecidos e não
+  ficam em negrito por não lidas; menções continuam contando.
+- **Regra de prioridade em `notificationPolicy`:** "Nada" > silêncio do próprio canal/thread/conversa >
+  nível explícito "tudo"/"menções" > silêncio herdado (categoria/servidor) > padrão. Silenciado: só menção
+  direta toca e avisa (como antes com servidor silenciado).
+- **Caixa de menções:** botão de sino no cabeçalho do chat e na tela de Amigos; painel fixo com recorte
+  "todos" ou "este servidor". Usa `SearchMessages` com `mentions_me` e `request_id` "inbox…". O filtro de
+  menções da busca (`db::search_messages`) agora inclui menções aos **cargos do usuário** e **exclui as
+  próprias mensagens** (vale também para `menciona:eu` na busca normal). Não lidas com faixa azul; o clique
+  leva à mensagem.
+- Testes: `src/inbox_mute_tests.rs` (3) + `tests/frontend-mute-inbox.test.cjs` (4); dois testes antigos
+  que copiam funções do polish.js passaram a copiar também as funções de silêncio. Suíte: 121 núcleo +
+  8 desktop + 1 manutenção + 138 frontend, tudo verde.
+- QA (instância 3100, cliques reais): categoria silenciada por 1 h → mensagem comum em #memes sem som, sem
+  aviso e sem negrito; menção direta tocou, avisou e contou "1"; a caixa mostrou só a menção e levou até
+  ela; persistiu após recarregar; reativar pelo menu; servidor "até reativar" esmaece barra e canais;
+  DM por 15 min; expiração automática conferida; caixa aberta também pela tela de Amigos.
+- **Limite conhecido:** DM silenciada continua mostrando o contador vermelho (o contador vem do servidor);
+  sem abas "Não lidas"/"Para você" do Discord.
+- Versões dos assets: `ui.css?v=3`, `servers.js?v=19`, `app.js?v=19`, `chat.js?v=18`, `social.js?v=3`,
+  `threads.js?v=2`, `polish.js?v=2`.
+## Etapa C — item 4: menu completo do usuário e apelido por servidor (Claude, 18/11/2026) — nos fontes, não publicado
+
+- **Apelido por servidor:** `GuildServer.member_nicks` (username_lower → apelido), gravado na coluna nova
+  `server_members.nickname`. **Esquema v15** (`ALTER TABLE` só se a coluna faltar; a coluna também entrou
+  no `CREATE` da conversão v1→v2, como já era feito com `slowmode_secs`). Migração conferida numa cópia de
+  QA (`qa-migration-c4-…`, cópia de outra cópia de QA v14, nunca o banco principal):
+  `sancord-release check-migration` → v14 → v15, 31 tabelas antigas iguais por hash, integridade OK.
+- **Comando** `SetMemberNickname { server_id, target_username, nickname }` → `src/nicknames.rs`
+  (resposta `ServerFeedback` com action `member_nick`; auditoria `member_nick`; `ServerUpdated` para todos).
+  - Apelido: espaços e caracteres de controle normalizados, 1 a 32 caracteres; vazio ou `null` remove.
+  - Próprio apelido: permissão nova `change_nickname` (padrão **sim**, inclusive em cargos antigos via
+    `serde default`); de castigo, não pode (o castigo vale por canal, então é conferido à parte).
+  - De outra pessoa: permissão nova `manage_nicknames` e alvo abaixo na hierarquia; ninguém além do dono
+    mexe no apelido do dono. As duas permissões estão no editor de cargos e no preset de moderação.
+  - O apelido some quando a pessoa sai, é expulsa, banida ou excluída, e acompanha a troca de nome de usuário.
+- **Cliente:** `memberNickname`/`displayNameIn` (chat.js) mostram o apelido no autor da mensagem (com
+  `title="@usuario"`), na linha de resposta, na lista de membros e no perfil aberto dentro do servidor.
+  Mudou o apelido: o chat aberto é redesenhado (`ServerUpdated` compara `member_nicks`). Menções
+  continuam por `@usuario` (o "Mencionar" do menu insere esse formato).
+- **Menu do usuário na lista de membros** (`memberUserMenuItems`, advanced.js): ver perfil, mensagem,
+  ligar (abre a DM e entra na chamada dela), mencionar, adicionar/aceitar amizade (ou "pedido enviado"),
+  mudar apelido, cargos (lista com cargos acima do seu desativados e preservados), copiar nome e ID,
+  bloquear e a moderação que já existia (castigo, expulsar, banir, transferir posse). No menu do servidor:
+  "Editar meu apelido…".
+- Testes: `src/nickname_tests.rs` (3) + `tests/frontend-member-menu.test.cjs` (4). Suíte: 124 núcleo +
+  8 desktop + 1 manutenção + 142 frontend, tudo verde.
+- QA (instância 3100, que migrou para v15): menu completo na lista de membros; apelido de outro membro e o
+  próprio (pelo menu do servidor) aparecem ao vivo no chat, na lista e após recarregar; "Cargos…" aplicou
+  Moderador (depois desfeito); "Mencionar" inseriu `@fase8membro `.
+- **Limites conhecidos:** sem avatar/bio por servidor; o diálogo genérico (`formDialog`) fica largo em
+  janelas pequenas; "Ligar" não foi clicado no QA (pediria microfone), coberto por teste de interface.
+- Versões dos assets: `servers.js?v=20`, `app.js?v=20`, `chat.js?v=19`, `advanced.js?v=2`.
+- **Publicação:** a 0.2.3 agora inclui uma migração de banco (v15); fazer o ensaio de migração da cópia
+  de produção no fluxo de release, como nas versões anteriores.
+## Etapa C — item 5: emojis próprios do servidor (Claude, 18/11/2026) — nos fontes, não publicado
+
+- **Modelo:** `GuildServer.emojis: Vec<ServerEmoji { id, name, animated, creator, created_at }>`. O `id` do
+  emoji é o ID do anexo com a imagem (32 hex): qualquer cliente desenha `<:nome:id>` (ou `<a:nome:id>`,
+  animado) por `/api/attachments/{id}/emoji`, que já serve imagens com `nosniff` e CSP `sandbox`.
+  Anexos não são apagados automaticamente, então a imagem não some.
+- **Banco: esquema v16**, tabela `server_emojis` (regravada com o servidor em `replace_server`, como os
+  cargos; também criada na conversão v1→v2). Ensaio numa cópia de QA (`qa-migration-c5-…`, cópia de outra
+  cópia v14): `check-migration` → v14 → v16, 31 tabelas antigas iguais por hash, integridade OK.
+- **Comandos** `CreateServerEmoji { server_id, name, attachment_id }`, `RenameServerEmoji`,
+  `DeleteServerEmoji` → `src/emojis.rs` (feedback `server_emoji`; auditoria `emoji_create/update/delete`;
+  `ServerUpdated` para todos). Regras: permissão nova `manage_expressions` (ou dono/administrador; está no
+  editor de cargos e no preset de moderação); nome `[A-Za-z0-9_]{2,32}` único no servidor sem diferenciar
+  maiúsculas; até 50 por servidor; só PNG/JPEG/GIF/WebP de até 256 KB, enviados pela própria pessoa; a
+  mesma imagem não vira dois emojis; GIF = animado.
+- **Mensagens:** `SendChat` e `EditChat` passam por `emojis::normalize_content`. Um código só fica se o
+  emoji existir num servidor de que o autor é membro (vale em outros servidores e DMs, como emojis
+  externos do Discord), já com o nome atual e o "a" correto; senão vira `:nome:`.
+- **Reações:** aceitam o código do emoji (chave `<:nome:id>` canônica). Emoji excluído ou de servidor que
+  a pessoa deixou só serve para tirar a própria reação.
+- **Cliente:** `:nome:` vira código no envio (fora de trechos de código; com nome repetido vale o do
+  servidor aberto) e volta a `:nome:` ao editar; imagem no texto (grande quando a mensagem é só emoji),
+  nas reações, no autocompletar `:` (emojis do servidor primeiro, com o nome do servidor) e no seletor
+  (uma seção por servidor, recentes, busca). Prévias de texto puro (resposta, notificação, busca, caixa de
+  menções) mostram `:nome:`. Aba "Emojis" nas configurações: enviar (nome sugerido pelo arquivo), lista
+  com contador, renomear e excluir.
+- Testes: `src/emoji_tests.rs` (2) + `emojis::tests` (1) + `tests/frontend-server-emojis.test.cjs` (5).
+  Suíte: 127 núcleo + 8 desktop + 1 manutenção + 147 frontend, tudo verde.
+- QA (instância 3100, migrou para v16): emoji criado pela aba (PNG gerado num canvas e entregue ao campo
+  de arquivo, já que o seletor nativo não é automatizável), autocompletar `:fes` → envio com imagem no
+  texto; mensagem só com emoji em 48 px; reação pelo seletor; excluir pela aba (confirmação) → `:festa_qa:`
+  deixa de converter e mensagens antigas continuam com a imagem.
+- **Bug achado no QA e corrigido:** com `loading="lazy"` a imagem do emoji não carregava dentro das
+  configurações; removido (emojis são pequenos e ficam em cache imutável).
+- **Limites conhecidos:** sem stickers; sem restringir emoji por cargo; sem recorte/redimensionamento no
+  envio (a imagem é mostrada em 22/48 px como vier).
+- Versões dos assets: `ui.css?v=4`, `app.js?v=21`, `chat.js?v=21`, `advanced.js?v=3`, `polish.js?v=3`.
+## Etapa C — item 6: ordenar fórum, membros da thread e arquivamento automático (Claude, 19/11/2026) — nos fontes, não publicado
+
+- **Thread** ganhou `auto_archive_minutes` (60, 1440, 4320 ou 10080; padrão 1440 = 24 h, também para
+  threads antigas via `serde default`) e `members` (username_lower). Ficam no JSON da thread: **sem
+  migração de banco**.
+- **Membros:** quem cria segue; quem escreve passa a seguir (`threads::on_message` recebe o autor); comandos
+  `JoinThread`/`LeaveThread` para quem vê a thread (máx. 1000). Sem mudança de notificação: seguir hoje
+  serve para a lista e a ordem da barra lateral.
+- **Arquivamento automático:** `threads::archive_idle` (no laço de 30 s do `main.rs`, com castigos e
+  status) arquiva quem passou do próprio prazo sem mensagens (conta desde a última mensagem ou da criação).
+  Nova mensagem desarquiva, como antes. `UpdateThread.auto_archive_minutes` só para dona(o) da thread ou
+  moderação, só com os 4 valores.
+- **Atenção na publicação:** threads existentes sem mensagens há mais de 24 h serão arquivadas no primeiro
+  minuto depois da atualização (comportamento do Discord). Continuam acessíveis e voltam ao escrever.
+- **Cliente (threads.js):** seletor "Atividade recente / Data de criação" no fórum (lembrado por fórum em
+  `localStorage`, arquivadas sempre por último); menu da thread com "Seguir thread / Deixar de seguir",
+  "Membros da thread (N)" e "Arquivar após inatividade ▸" (atual marcado); cabeçalho com "N membros •
+  seguindo"; com uma thread aberta, a lista lateral mostra só quem segue ("MEMBROS DA THREAD — N"); na barra
+  lateral, as threads seguidas vêm primeiro. Ordenação ficou robusta para `archived` ausente.
+- Testes: `src/thread_c6_tests.rs` (2) + `tests/frontend-thread-c6.test.cjs` (3). Suíte: 129 núcleo +
+  8 desktop + 1 manutenção + 150 frontend, tudo verde.
+- QA (instância 3100, cliques reais): duas postagens criadas; ordem por atividade e por criação; prazo de
+  1 semana pelo menu; postagem antiga (22,7 h parada) com prazo de 1 h foi arquivada pelo laço do servidor em
+  7 s; "Deixar de seguir" → "0 membros" e lista vazia com aviso; sem erros de script.
+- **Limites conhecidos:** seguir não muda notificações; sem ordem padrão do fórum definida pela moderação;
+  sem visualização em galeria nem diretrizes do fórum.
+- Versões dos assets: `app.js?v=22`, `threads.js?v=3`.
+## Etapa C — item 7: seletor de GIF local (Claude, 19/11/2026) — nos fontes, não publicado
+
+- **Decisão do usuário:** sem serviço externo (Tenor/GIPHY/KLIPY exigiriam chave de API e mandariam as
+  buscas a terceiros). O seletor é só local; busca na internet fica para depois, se for desejada.
+- **Conta:** `UserPrefs.favorite_gifs` (IDs de anexos, mais recente primeiro). `UpdateUserPrefs.favorite_gifs`
+  passa por `UserPrefs::sanitize_favorite_gifs`: só IDs de 32 hex, sem repetir, que existam em
+  `st.attachments` com `content_type = image/gif`, no máximo 200. Sem migração (preferências são JSON).
+- **Envio:** mandar um GIF = `SendChat` com `attachment_ids: [id]`. Já era permitido reusar um anexo pelo
+  ID (o ID funciona como URL de capacidade; quem o tem já consegue baixá-lo); o envio continua passando por
+  todas as regras do canal.
+- **Cliente (chat.js):** botão "GIF" ao lado do emoji; painel com abas "Favoritos (N)" e "Nas conversas (N)"
+  (GIFs das mensagens carregadas, inclusive encaminhadas, sem repetir, mais recentes primeiro), filtro pelo
+  nome do arquivo e estrela em cada item; um clique envia (respeitando a resposta em andamento) e fecha.
+  Nos GIFs do chat aparece uma ☆ ao passar o mouse para favoritar/desfavoritar (o sistema de ícones a
+  desenha como SVG). Abrir um seletor fecha o outro.
+- Testes: `src/gif_tests.rs` (2) + `tests/frontend-gif-picker.test.cjs` (4); `buildAttachmentsNode` ficou
+  defensivo para o teste antigo que a isola. Suíte: 131 núcleo + 8 desktop + 1 manutenção + 154 frontend.
+- QA (instância 3100, cliques reais): GIFs enviados pelo caminho de anexos (um de 1×1 e um de 48×48 gerado
+  byte a byte, já que a janela de arquivos do sistema não é automatizável); ☆ favoritou; o seletor mostrou
+  Favoritos (2) e Nas conversas (2); clique no GIF laranja enviou a mensagem só com ele; favoritos
+  persistiram após recarregar; sem erros de script.
+- **Limites conhecidos:** sem busca na internet; "Nas conversas" só vê mensagens já carregadas; só
+  `image/gif` (vídeos curtos/"gifv" não entram).
+- Versões dos assets: `ui.css?v=5`, `chat.js?v=22`, `servers.js?v=21`.
+- **Etapa C completa nos fontes (itens 1 a 7).** Nada publicado: a 0.2.3 inclui C1–C7, a correção do chat
+  sobreposto e as migrações v15 e v16.
+## Perfis — Fase P1: modelo, editor, avatar, banner, bio e tema (Claude, 19/11/2026) — nos fontes, não publicado
+
+Pedido do usuário: expansão completa do sistema de perfis em 8 fases, **antes de publicar a 0.2.3**.
+Documentação viva da arquitetura: `PROFILE_SYSTEM.md`.
+
+- **Análise do que existia:** avatar e banner como data-URL na conta (difundidos inteiros a todos a cada
+  mudança), tema com 2 cores, editor com rascunho e prévia, 24 decorações/12 efeitos/11 placas/11 estilos
+  desenhados no cliente, status personalizado com emoji e prazo. Cosméticos eram texto livre (sem checagem).
+- **Servidor:**
+  - `ProfileExtras` (`models.rs`) achatado em `Account`/`UserInfo`/`FriendInfo` (JSON, sem migração):
+    `avatar_animated`, `banner_animated`, `theme_highlight`, `theme_mode`, `theme_direction`,
+    `profile_frame`, `badges`. `Account.inventory` (privado).
+  - `src/cosmetics.rs`: catálogo (`CosmeticItem`, tipos, raridade, disponibilidade free/badge/grant),
+    posse e `check_equip`. `UpdateProfile` valida decoração, estilo de nome, placa, efeito e moldura pelo
+    catálogo (recusa com `ServerFeedback update_profile`). `CosmeticsState` vai logo após o `Welcome`.
+  - `src/profile.rs`: `SetProfileMedia` (anexo do próprio usuário, PNG/JPEG/WebP/GIF, avatar 6 MB, banner
+    8 MB, caminho `/api/attachments/...`, GIF = animado), `clean_choice`, bio 300.
+  - **Bug corrigido (pré-existente):** o middleware `response_headers` forçava `no-store` em TODAS as
+    respostas, anulando o cache imutável dos anexos. Agora respeita quem já definiu `Cache-Control`.
+- **Cliente:** módulo novo `static/js/profile.js` (embutido no desktop em `desktop_assets.rs`):
+  catálogo/posse, política de animação (Sempre/Hover/Nunca + Reduzir animações do app ou Windows, com
+  quadro parado em canvas), tema (`profileThemeBackground`, `profileTextTone`, `applyProfileTheme`),
+  banner como `<img>`, bio markdown segura com contador, rascunho de mídia (envio só em Salvar), prévia
+  em contextos (Perfil/Chat/Membros/DM). `app.js`: recorte generalizado (avatar círculo / banner faixa,
+  exporta WebP via `toBlob`), editor com controles de tema, chat redesenhado quando a aparência de alguém
+  muda (`VoiceStateSync`). `ui-kit.js`: `cachedMediaUrl` resolve `/api/...` para o servidor.
+  - **Bug corrigido (pré-existente desde a refatoração visual):** `.profile-card-body` e
+    `.profile-modal-left` tinham fundo sólido e escondiam o tema do perfil; agora ficam transparentes
+    quando há tema, com contraste automático.
+- Testes: `src/profile_p1_tests.rs` (3: mídia/sync/regras/persistência, cache, cosméticos/tema/bio) +
+  `cosmetics::tests` (1) + `tests/frontend-profile-p1.test.cjs` (7). Suíte: 135 núcleo + 8 desktop +
+  1 manutenção + 161 frontend, tudo verde; `cargo build --all-targets` ok.
+- QA (instância 3100, cliques reais): avatar e banner escolhidos pelo campo de arquivo (PNG gerado em
+  canvas), recorte circular e em faixa (arraste ok), rascunho com barra de "não salvo", tema gradiente
+  diagonal + destaque + contraste escuro, bio com negrito/link e contador "47 / 300", prévia "Chat",
+  Salvar → servidor gravou caminhos `/api/attachments/...` WebP; outro usuário (Fase8Membro) recebeu o
+  perfil novo (lista de usuários com 3 KB); imagem com `Cache-Control: immutable` após o ajuste; popout
+  com tema, banner e bio corretos.
+- **Observação:** nesta máquina o Windows pede "reduzir movimento", então a política vira "Nunca" e o
+  seletor fica desativado com explicação (comportamento pedido: respeitar Reduzir movimento).
+- Versões dos assets: `ui.css?v=6`, `app.js?v=23`, `ui-kit.js?v=19`, `profile.js?v=1`.
+- **Próximo:** Fase 2 (decorações de avatar com camadas e molduras de perfil próprias, coleção
+  "Sancord Core", molduras por conquista com badges concedidas pelo servidor).
+## Perfis — Fase P2: decorações de avatar, molduras de perfil e badges (Claude, 19/11/2026) — nos fontes
+
+- **Servidor (`src/cosmetics.rs`):** 41 itens novos no catálogo (`PHASE2`): coleção Sancord Core (Órbita +
+  Pulso Core), 11 decorações novas, 9 molduras estáticas, 11 animadas, 2 reativas, 6 por conquista
+  (`badge:<id>`) e 1 de temporada (`grant`). `BADGES` (8 de confiança, 5 cosméticas). Badges efetivas =
+  `badges.json` do operador (pasta de dados, lido ao iniciar; `ServerState.badge_grants`) + `early_user`
+  automática (contas antes de 01/01/2027); calculadas na carga (`state.rs`) e ao entrar (`ws.rs`).
+  `CosmeticsState` ganhou `badges` (definições).
+- **Cliente (`static/js/profile.js`):** arte SVG própria das decorações novas (`SANCORD_DECORATION_ART`,
+  ligada em `getDecoSvgHtml`), molduras (`applyProfileFrame`: uma `.pf-layer` sobre o cartão, só a borda
+  por máscara, ornamentos próprios; remove só a classe da moldura anterior), moldura reativa
+  (`setFrameReactiveState` + `onFrameVoiceState` agrupado em 150 ms, ligado aos 3 pontos que mudam
+  `state.speakingUsers`), badges (`renderProfileBadges`, ícones SVG próprios, confiança × cosmética) e o
+  seletor de cosméticos do catálogo (decorações e molduras separados; abas, coleções, bloqueados com "como
+  conseguir", prévia grande). `app.js`: rascunho/salvar/rótulo da moldura, popout e prévia com moldura,
+  estado reativo e badges.
+- **CSS (`ui.css`):** animações das decorações, 29 molduras, reativas por `data-presence`/`data-voice`,
+  badges, seletor; política "Nunca"/Reduzir animações/`prefers-reduced-motion` param tudo; com moldura, a
+  borda de destaque do tema sai (hierarquia).
+- **Bugs achados e corrigidos na fase:** `applyProfileFrame` apagava outras classes `pf-*` (achado pelo
+  teste); borda de destaque escondia as molduras nas miniaturas e no cartão (achado no QA); badges claras
+  ilegíveis em cartão claro (achado no QA).
+- Testes: `src/profile_p2_tests.rs` (2) + `cosmetics::tests::badge_dates_and_order` +
+  `tests/frontend-profile-p2.test.cjs` (6). Suíte: 138 núcleo + 8 desktop + 1 manutenção + 167 frontend.
+- QA (3100, cliques reais): `qa-phase8/data/badges.json` concedeu founder + bug_hunter à Fase8Dona (só na
+  pasta de QA); seletor de molduras com 29 itens e bloqueados certos; "Fundação" aplicada; seletor de
+  decorações (35) com "Órbita Nebular"; Salvar; popout com moldura dourada + ornamento, decoração e 3
+  badges; outro usuário recebeu moldura/decoração/badges e não possui a moldura de conquista; Aura Reativa
+  vermelha/apagada em "Não perturbe" e verde em "Online".
+- **Não verificado ao vivo:** reação à voz (precisaria de chamada com áudio); animações (o Windows desta
+  máquina pede "reduzir movimento", então tudo fica estático — comportamento correto).
+- Versões: `ui.css?v=7`, `app.js?v=24`, `profile.js?v=2`.
+- **Próximo:** Fase 3 (efeitos de perfil próprios com entrada→animação→estável, botão "Reproduzir efeito",
+  redução da moldura enquanto o efeito roda).
+
+### Conferência das fases de perfil — 19/11/2026
+
+- Comparados o prompt de 100 itens, `PROFILE_SYSTEM.md`, o histórico e a implementação. P1/P2 estão nos fontes. P3/P4/P5/P7/P8 já têm partes aproveitáveis. P6, privacidade e conexões ainda faltam. O mapa está em `PROFILE_SYSTEM.md` e a seção de perfis da auditoria foi atualizada.
+- A versão estável do GitHub é `v0.2.2` (`fd10d6e`). O Git local da pasta principal ainda parte de `390aeee`, com alterações em andamento. `git fetch` atualizou a referência de `origin/main` preservando a pasta de trabalho. `Cargo.toml` e `Cargo.lock` ainda indicam `0.2.2`, embora os fontes incluam o esquema v16 e o trabalho previsto para `0.2.3`.
+- Corrigido o cartão visitado em `static/app.js` e `static/js/social.js`. A resposta `UserProfile` agora aplica avatar, banner, bio, pronomes, tema, moldura e selos também para quem está offline e preserva o apelido do servidor. A área de relações aguarda dados reais do servidor em vez de apresentar estimativas incorretas. Assets `app.js?v=25` e `social.js?v=4`.
+- `tests/frontend-dom.test.cjs` cobre a atualização de um perfil offline e o estado das relações. `cargo check --locked --all-targets`, suíte Rust (138 núcleo + 8 desktop + 1 manutenção) e frontend (168) aprovados. Um teste Rust que exige artefato assinado ficou ignorado. A conferência desta correção foi em DOM e testes automatizados.
+- Próximo passo do prompt: P3 sobre o sistema existente de efeitos. Tratar conjuntamente a política de segundo plano e os limites de animação. O salvamento com confirmação do servidor continua como pendência técnica do editor.
+
+### Perfis — Fase P3 de efeitos de entrada — 19/11/2026
+
+- Mantidos os efeitos clássicos e o equipamento existente. `src/cosmetics.rs` acrescenta sete efeitos gratuitos. Sinal Core integra a coleção de Órbita e Pulso Core. Os efeitos novos aparecem no seletor quando o backend anuncia suas definições.
+- `static/js/profile.js` limita a um efeito por janela e 1,5 s por execução. A abertura do cartão toca uma vez, inclusive quando o efeito chega com `UserProfile` em visita a um usuário offline. O editor e o seletor permitem replay. A lateral da DM fica estática.
+- `static/ui.css` contém a arte dos efeitos novos, a transição de entrada/saída e a pausa da moldura durante o efeito. As variações mais bruscas de Tempestade Arcana e Sinal VHS foram suavizadas. Fechamento, perda de foco, janela oculta e redução de movimento cancelam o efeito. GIFs de avatar e banner continuam com a política de mídia da P1.
+- `static/app.js`, `static/js/social.js` e `static/index.html` conectam seleção, replay, visita e rascunho. `UpdateProfile` e `profile_effect` continuam sendo a rota de salvamento, sem migração ou mudança de protocolo. Versões locais dos scripts: app 26, social 5, profile 3, ui.css 8 e styles.css 19.
+- `tests/frontend-profile-p3.test.cjs` cobre reprodução única, replay, rascunho, posse, fim da animação e interrupções. `src/profile_p1_tests.rs` cobre catálogo, equipamento pelo WebSocket existente e persistência após reabrir o banco. Validação automatizada, sem confirmação da arte em WebView2 real nesta etapa.
+- `cargo check --locked --all-targets` e build de `SancordApp` e `sancord` aprovados. Suíte verde com 139 testes de núcleo, 8 desktop, 1 manutenção e 171 frontend, total de 319. Um teste Rust de artefato assinado permaneceu ignorado.
+- Próximo passo do prompt: **P4**, ampliar as nameplates e os estilos de nome que já existem. Nenhuma versão é publicada durante esta etapa.
+
+### Perfis — Fase P4 de placas e estilos de nome — 19/11/2026
+
+- `src/cosmetics.rs` acrescenta nove placas e oito estilos. IDs clássicos preservados. Faixa Core completa a coleção Core. Os itens novos são apresentados quando o servidor os anuncia e são equipados pela validação de catálogo/posse existente.
+- Campos opcionais `name_color_secondary` e `name_gradient_direction` em `ProfileExtras` e `UpdateProfile`, com hex de seis dígitos e quatro direções permitidas. Mantida a cor primária existente. `VoiceStateSync`, `FriendsSync` e `UserProfile` recebem os campos das estruturas já usadas e as sessões da mesma conta recebem as mudanças de nome e placa. Sem migração.
+- `static/app.js`, `chat.js`, `profile.js`, `index.html` e `ui.css` integram gradiente em tempo real na prévia, placas em amigos, DMs e perfis, e nomes personalizados no chat e nos membros. A opção em Aparência troca as superfícies por nomes simples usando a configuração local, preservando apelidos, cores de cargo e selos. As animações são breves e respeitam Reduzir movimento e Animações de perfil.
+- Salvar verifica o retorno do envio de `UpdateProfile` antes de atualizar a UI local. Sem conexão, permanece o rascunho. Com envio aceito pelo socket, o aviso diz que as alterações foram enviadas. A resposta/sincronização existente do servidor continua responsável pelo estado confirmado.
+- Testes em `src/profile_p1_tests.rs` e `tests/frontend-profile-p4.test.cjs` cobrem catálogo, persistência, sincronização de duas sessões, cliente legado, validação, rascunho, prévia e preferência local. Animação e contraste visual no WebView2 ainda não foram inspecionados nesta etapa.
+- `cargo check --locked --all-targets` e build desktop/servidor aprovados, com **322 testes** na suíte (140 núcleo, 8 desktop, 1 manutenção e 173 frontend). O teste que depende de um artefato assinado ficou ignorado.
+- Assets: `app.js?v=27`, `chat.js?v=23`, `profile.js?v=4`, `ui.css?v=9`. Próxima fase do prompt: **P5**, identidade por servidor sobre o sistema de apelidos já existente.
+
+### Perfis — Fase P5 de identidade por servidor — 19/11/2026
+
+- O menu do servidor abre **Editar perfil do servidor…** para personalizar avatar, banner e bio. A ação de apelidos continua usando `SetMemberNickname` e suas permissões de moderação. Outros aspectos de aparência e status herdam o perfil global.
+- `SetServerProfile` aceita alterações esparsas para a própria conta de um membro. Campos ausentes preservam o valor local. Texto vazio remove a personalização. O servidor valida a titularidade, o tipo e o tamanho dos anexos antes de aplicar o conjunto de alterações.
+- Migração SQLite v17 adiciona `server_members.profile_json` e conserva a coluna de apelidos. Personalizações acompanham mudanças de nome de usuário e são removidas ao perder a associação com o servidor. O evento `ServerProfileUpdated` e os snapshots só enviam os dados aos membros.
+- O cartão visitado resolve a aparência pelo contexto de abertura. Cartão, chat e lista de membros reagem ao evento ao vivo. GetUserProfile continua fornecendo os dados globais e relações. A interface ignora respostas atrasadas de outro contexto. A mídia segue as regras de acesso do serviço de anexos existente.
+- Testes de integração em `src/profile_p5_tests.rs` cobrem duas sessões via WebSocket, adesão posterior, membro externo, anexos, mutação atômica, recarga de SQLite e saída. O DOM em `tests/frontend-profile-p5.test.cjs` cobre formulário, upload, remoção, atualização ao vivo e isolamento de DM.
+- As suítes passaram com 141 testes de núcleo, 8 desktop, 1 manutenção e 175 frontend. O teste de artefato assinado segue condicionado a um pacote de CI. A verificação visual do editor no WebView2 permanece pendente.
+- Assets alterados: app 28, chat 24, profile 5, social 6, servers 22 e ui-kit 20. Próxima fase do prompt: **P6**, mural e widgets.
+
+### Perfis — Fase P6 de mural e widgets — 19/11/2026
+
+- **Configurações → Perfil → Editar mural** abre o editor de ordem, visibilidade e audiência. A aba Mural do cartão atende visitantes. Implementados Jogo favorito (capa/descrição), Jogando agora (manual), Quero jogar, Sobre mim, Link e Conquistas derivadas dos selos concedidos pelo servidor.
+- `Account.profile_board` guarda a lista, ordem, visibilidade, audiência e revisão no SQLite. Compatibilidade por `serde(default)` no JSON da conta, sem migração de esquema. `GetProfileBoard` carrega a configuração do titular. `SaveProfileBoard` valida campos e anexos, rejeita conflitos de revisão e atualiza outras sessões da conta.
+- `GetUserProfile` retorna uma projeção autorizada que exclui widgets ocultos e considera bloqueios em ambos os sentidos. Ficam disponíveis as audiências Todos, Amigos e pessoas com servidor em comum, e Somente amigos. As regras do mural são independentes das demais partes do perfil.
+- `static/js/profile-board.js` é embutido no desktop. O editor permite arrastar pela alça e usar botões Subir/Descer. Rascunhos recebem confirmação de salvamento do servidor. Assets: app 29, social 7, ui.css 10 e profile-board 1.
+- Testes de integração de WebSocket e SQLite em `src/profile_board_tests.rs`. Testes de DOM em `tests/frontend-profile-board.test.cjs` exercitam edição, upload, ordenação, conflito entre sessões e renderização.
+- Suítes aprovadas com 143 testes de núcleo, 8 desktop, 1 manutenção e 178 frontend. O teste de artefato assinado segue condicionado a um pacote de CI. A conferência visual no WebView2 segue pendente.
+- Próxima fase do prompt: **P7**, coleções, inventário e presets. Marcos de contagem, widget personalizado e privacidade do perfil inteiro são expansões do mural.
+
+### Perfis — Fase P7 de coleções, inventário e presets — 19/11/2026
+
+- **Configurações → Perfil → Minha Coleção** agrupa os itens possuídos por coleção. Tem filtros de categoria, conjunto e favoritos, estado equipado, marca de itens ainda não vistos e prévia. Um item avulso entra no rascunho pelo botão **Usar no editor**.
+- `Account.cosmetic_collection` persiste favoritos, itens vistos e até 12 presets no JSON da conta em SQLite. `CosmeticsState` inclui a coleção na conexão. `CosmeticCollectionUpdated` sincroniza as alterações com as demais sessões da conta. O esquema continua v17.
+- `ProfileAppearance` contém exclusivamente os campos visuais do tema e dos cinco tipos de cosmético. `EquipProfileLook` valida todos os campos e a posse atual antes de aplicar presets ou combinações. A aplicação atualiza a conta e suas conexões ativas. O editor conserva os demais campos de rascunho.
+- **Surpreenda-me** escolhe cosméticos com base no catálogo e nas chaves de posse retornadas pelo servidor. O botão de aplicar só envia depois da prévia. O replay reutiliza as preferências de movimento do perfil.
+- Adicionados `src/cosmetic_collection.rs` e `static/js/profile-collection.js` com recurso embutido no desktop. Assets alterados: app 30, profile 6, profile-collection 1 e ui.css 11. Testes direcionados cobrem posse revogada, exclusão, isolamento das sessões, persistência, ordenação visual por coleção e prévia.
+- Suítes aprovadas com 145 testes de núcleo, oito desktop, um de manutenção e 181 frontend. Um teste de artefato assinado segue condicionado a um pacote de CI. A conferência visual no WebView2 segue pendente.
+- Próxima fase do prompt: **P8**, polimento, desempenho e acessibilidade.
+
+### Perfis — Fase P8 de polimento, desempenho e acessibilidade — 19/11/2026
+
+- **Aparência → Acessibilidade do perfil** tem controles locais para animação, decoração, moldura, efeito, placa de nome e estilo de nome. A redução de movimento do aplicativo e do Windows continua prioritária.
+- `static/js/profile-motion.js` carrega até dois GIFs originais visíveis, gera quadros estáticos no `ImageDecoder` com limite de duas tarefas e mantém até 64 resultados no cache. Em segundo plano, retira os originais do DOM e cancela as tarefas. Uma área de cosméticos anima por vez. Efeitos de entrada continuam limitados a uma execução de 1,5 s. Assets: app 31, profile 7, profile-motion 1, styles.css 20 e ui.css 12.
+- `UpdateProfile` sincroniza as mudanças entre as sessões da conta. Avatar e moldura do cartão permanecem no DOM se a origem e o item já estão corretos. A validação de anexos acrescenta limite de dimensões e área. O esquema continua v17.
+- `cargo check --locked --all-targets`, build Windows de desktop/servidor e **338 testes automatizados** aprovados. Um teste de artefato de CI permanece ignorado.
+- QA real do executável com `scripts/profile-motion-qa.mjs`. 240 perfis sintéticos e 110 visíveis, 2 GIFs ligados e 0 desligados ou após perda de foco simulada. As medidas de responsividade, CPU, GPU e memória estão em `PROFILE_SYSTEM.md`. A validação usou mídia sintética e dados temporários.
+
+### Fechamento de perfis e preparação local da 0.2.3 — 19/11/2026
+
+- Privacidade geral e por campo projetada pelo servidor em usuários, conversas, grupos e personalizações por servidor. Conexões são ocultas por padrão. O GitHub pode ser verificado por desafio temporário na bio pública, com consulta HTTPS fixa e revalidação do estado antes da confirmação.
+- Cartão rápido para avatares de mensagem e lista de membros. O perfil completo está disponível por ação e pelo menu. Prévias do cartão rápido e do painel inferior integradas ao editor.
+- Candidata 0.2.3 com pacote em `qa-release-0.2.3`, esquema v17 e migração da cópia de v14 validada. Auditoria Git aprovada e comparação com `origin/main` em índice separado.
+- O ensaio público do updater entre 0.2.1 e 0.2.2 passou com instalação e reinício. Notificação desktop entregue no QA WebView2. Restam câmera física, TURN entre redes distintas e o workflow MSVC com assinatura da candidata. Detalhes em `HOMOLOGACAO.md`.
+- O pacote local 0.2.3 passou no QA dos cartões, privacidade, conexões e notificação. A suíte totaliza 344 testes com o ensaio separado de artefato assinado. Candidata Git local em `codex/prepare-0.2.3` sobre a ponta publicada de `main`. O índice e a branch de trabalho foram preservados.
+
+### Expansões adicionais pré-0.2.3 (cosméticos por servidor, mural completo, conexões/admin de selos e Etapa D) — 19/11/2026
+
+- **Cosméticos e tema por servidor:** `ServerMemberProfile` e `ServerProfileChanges` ampliados com `avatar_decoration`, `profile_frame`, `profile_effect`, `nameplate_style`, `name_style`, `name_color`, `name_color_secondary`, `name_gradient_direction`, `theme_primary`, `theme_accent`, `theme_highlight`, `theme_mode` e `theme_direction` (validados por `cosmetics::check_equip`, redactados por privacidade em `project_member_profile` e aplicados em chat, lista de membros, cartão rápido e perfil completo; DMs mantêm perfil global).
+- **Mural completo:** adicionado `ProfileWidgetContent::Custom` (título, emoji opcional, texto e imagem opcional até 4 MB) e marcos automáticos em `profile_board::view` (`milestone_first_server`, `milestone_5_friends`, `milestone_100_messages`, `milestone_500_messages`) com contagem via `db.count_messages_by_author` + cache em memória.
+- **Conexões sociais e painel admin de selos:** detecção/seleção de plataformas sociais em `ProfileLink`/`ProfileLinkView` (sem falsificar verificação fora do GitHub) e comandos `GetBadgeAdminState` / `SetUserBadges` restritos a operadores (`founder`/`developer` ou `SANCORD_OPERATORS`) com gravação atômica em `badges.json` e guarda contra remoção do último operador.
+- **Etapa D (chat em canais de voz + bitrate de áudio):** canais de voz aceitam mensagens (`ChannelKind::accepts_messages`), histórico, reações, fixados, permissões, busca e limpeza na exclusão, com botão `💬` na lista de canais de voz e no palco de chamada; adicionada coluna `channels.bitrate_kbps` (migração SQLite **v18**, faixa `32..=256` kbps ou `0` padrão) configurável em `UpdateChannel` e injetada na negociação Opus/SDP.
+- **Validação:** `cargo test --locked --all-targets --target-dir target-review-phase6` (154 núcleo + 8 desktop + 1 release_tools, 1 ignorado de CI) e `node --test tests/frontend-*.test.cjs` (189 frontend) = **352 testes aprovados, 0 falhas**. Migração segura em cópia somente-leitura (`scripts/test-migration.ps1`): **v14 → v18** com 31 tabelas antigas preservadas por hash e integridade OK. Publicação da `0.2.3` mantida em espera conforme pedido do usuário (mais itens previstos antes do release).
+
+### Expansão Completa da Central de Configurações — 19/11/2026
+
+- **Arquivos alterados/criados:** `static/index.html`, `static/ui.css`, `static/js/icons.js`, `static/app.js`, `static/js/chat.js`, `static/js/social.js`, `static/js/settings-center.js` (novo), `src/bin/desktop_assets.rs`, `src/bin/SancordApp.rs`, `tests/frontend-settings-center.test.cjs` (novo), `DISCORD_GAP_AUDIT.md`, `CHANGELOG.md`.
+- **22 páginas reais em 4 grupos:**
+  - `CONTA`: `account`, `profile` (sub-abas Global e Perfis por servidor), `security`, `devices`, `connections`.
+  - `PRIVACIDADE E SOCIAL`: `privacy`, `social`, `requests`, `blocked`, `activity`.
+  - `CONFIGURAÇÕES DO APP`: `voice`, `notifications`, `appearance`, `accessibility`, `chat`, `language`, `shortcuts`, `windows`.
+  - `SANCORD`: `updates`, `advanced`, `diagnostics`, `about`.
+- **Componentes e UX:** busca profunda (`#settings-search-results`) navegando e destacando opções por página; `SettingsSection`, `SettingsRow`, switch unificado, indicador `Sincronizado com sua conta` vs `Somente neste dispositivo`, botão de fechar com rótulo `ESC`, scroll independente de sidebar e conteúdo, coluna útil de 860px (1060px no editor de Perfil).
+- **Novas chaves locais (`localStorage["sancord_audio_settings"]`, retrocompatível via merge com `DEFAULT_AUDIO_SETTINGS`):** `pttReleaseDelayMs`, `screenDefaultQuality`, `screenDefaultFps`, `screenDefaultAudio`, `soundEvents` (10 sons individuais), `showChatAvatars`, `showChatTimestamps`, `compactSidebar`, `chatGroupGap`, `uiZoom`, `customAccentColor`, `notifShowPreview`, `notifWhenFocused`, `notifTitleBadge`, `uiSaturation`, `highContrast`, `roleColorsMode`, `enhancedFocus`, `ttsEnabled`, `ttsRate`, `ttsVolume`, `chatConvertEmoticons`, `chatInlineImages`, `chatAutoplayVideo`, `chatSpellcheck`, `chatEnterSends`, `chatGroupMessages`, `chatGroupWindowMins`, `chatTimeFormat`, `regionalDateFormat`, `customShortcuts`, `updatesAutoCheck`, `developerMode`, `logLevel`.
+- **IPC Desktop Windows (`src/bin/SancordApp.rs`):** `desktop:get-state`, `desktop:set-autostart:1|0` (`HKCU\...\Run\SancordDesktop`), `desktop:set-start-minimized:1|0`, `desktop:set-minimize-on-close:1|0`, `desktop:open-data-dir`, flag CLI `--minimized` e `desktop-prefs.json` no diretório de dados do cliente.
+- **Validação:** `cargo test --locked --all-targets --target-dir target-review-phase6` (**154 núcleo + 8 desktop + 1 release_tools**) e `node --test tests/frontend-*.test.cjs` (**192 frontend**) = **355 testes aprovados, 0 falhas** (1 teste de artefato assinado de CI ignorado).
+- **Pendências honestas (não simuladas):** TOTP/Passkey (planejado), OAuth externo para Steam/Twitch/Spotify/YouTube (hoje links manuais + GitHub verificado por bio), detecção nativa de jogos em execução, bandeja do sistema (tray icon) além de minimizar para barra de tarefas, e conferência visual no executável Windows WebView2 em 1366×768 / 1920×1080 / 2560×1440.
+- **Próximo passo:** aguardar novas solicitações do usuário ou autorização explícita para empacotar/publicar `v0.2.3`.
+
+### Reforma e Expansão Completa do Sistema de Convites de Servidores — 19/11/2026
+
+- **Arquivos alterados/criados:** `src/models.rs`, `src/permissions.rs`, `src/chat.rs`, `src/db.rs` (migração `SCHEMA_VERSION = 19`), `src/state.rs`, `src/access.rs`, `src/http.rs`, `src/lib.rs`, `src/ws.rs`, `src/invites_tests.rs` (novo), `src/tests.rs`, `src/bin/desktop_assets.rs`, `static/js/transport.js`, `static/js/icons.js`, `static/js/permissions.js`, `static/js/invites.js` (novo), `static/js/servers.js`, `static/js/chat.js`, `static/app.js`, `static/index.html`, `static/ui.css`, `tests/frontend-invites.test.cjs` (novo), `CHANGELOG.md`, `DISCORD_GAP_AUDIT.md`.
+- **Backend & Segurança (schema v19):**
+  - Códigos criptográficos via `OsRng` no formato `SANC-XXXXXXXX` (8 chars Base32 sem ambiguidade, 40 bits de entropia, mantendo retrocompatibilidade com códigos `SANC-XXXXXX` legados).
+  - Revogação por tombstone (`invites.revoked_at`, `invites.revoked_by`): códigos revogados nunca são reutilizados e retornam `410` / `"Este convite não é mais válido."`.
+  - Convites vinculados a canal (`invites.channel_id`), associação temporária (`invites.temporary`, `server_members.temporary`, com remoção automática ao desconectar a última sessão caso o membro não tenha recebido cargo — e promoção automática a permanente ao receber cargo) e registro de `last_used_at`.
+  - Pausa/retomada de convites (`servers.invites_paused`, `ClientMessage::SetInvitesPaused`) sem apagar links ativos e preservando expirações naturais.
+  - Regras opcionais de entrada (`servers.rules_text`), link personalizado por slug (`SetCustomInviteSlug` + `ServerState::validate_custom_invite_slug`: 3–32 chars `[a-z0-9-]`, palavras reservadas bloqueadas, unicidade global entre servidores e códigos/tombstones de convite, auditoria `custom_invite_slug_set`/`clear` e UI dedicada em Configurações do Servidor → Convites), permissão `manage_invites` separada de `create_invites` e sobrescrita por canal de `create_invites`.
+  - Prévia HTTP em `GET /api/invites/:code` (e alias legado `/api/invite/:code`) com autenticação Bearer opcional (`already_member`, `banned` genérico sem vazar motivo), ocultação de nome de canal privado e rate limits em prévia, criação, entrada e envio por DM.
+  - Entrada atômica sob lock de escrita (evita race condition em convites com 1 uso restante), incremento de `uses` somente após entrada bem-sucedida, registro de auditoria (`invite_create`, `invite_revoke`, `invites_paused`, `invites_resumed`, `member_join_invite`) e mensagem de sistema persistida + `ServerMemberJoined`.
+- **Frontend (`static/js/invites.js` + `static/js/transport.js`):**
+  - Abstração central `SancordNet.INVITE_BASE_URL`, `SancordNet.inviteUrl(code, origin)` e `SancordNet.extractInviteCode(raw)`.
+  - `InviteModal` (2 páginas: busca instantânea de amigos/contatos de DM, estado `"Já está no servidor"`, envio em 1 clique com trava `"Enviado ✓"`, link + copiar `"Copiado ✓"`, e Página 2 `← Configurações do convite` com expiração, limite de usos, canal e associação temporária sempre gerando um novo link).
+  - Pontos de entrada: cabeçalho do servidor, menu de contexto do servidor, ícone hover `user-plus` ao lado de canais com permissão `create_invites`, e Configurações do Servidor → Convites (`+ Criar convite`).
+  - `InvitePreviewModal` completo antes de entrar (ícone, banner, descrição, online/membros, convidador, canal, checkbox de regras, `"Você já participa deste servidor."` e erros claros) + hidratação ao vivo de `.dm-server-invite-card`.
+  - `InviteManagementPage` com tabela estruturada (`CÓDIGO | CRIADO POR | CANAL | USOS | EXPIRAÇÃO | AÇÕES`), banner e botão de pausa/retomada, detalhes completos, confirmação para revogar e sincronização em tempo real via `InvitesList`.
+- **Migração verificada:** `scripts/test-migration.ps1` validou cópia somente-leitura do banco real (`v14 → v19`; 31 tabelas preservadas por hash; integridade OK).
+- **Validação automatizada:** `cargo test --locked --all-targets --target-dir target-review-phase6` (**162 núcleo + 8 desktop + 1 release_tools**, 1 ignorado de CI) e `node --test tests/frontend-*.test.cjs` (**197 frontend**) = **368 testes aprovados, 0 falhas**.
+- **QA Visual & Funcional no WebView2 nativo (`SancordApp.exe` + `sancord.exe` em pasta/porta temporárias isoladas):**
+  - Verificados ao vivo: login pela interface, criação de servidor com regras, link personalizado (`comunidade-qa`), botão hover de convite nos canais, `InviteModal` Páginas 1 e 2, `InvitePreviewModal` via slug personalizado, `InviteManagementPage` com tabela de 3 convites + toolbar + slug, Central de Configurações com 22 páginas em 4 grupos e IPC Windows Desktop (`winAvailable: true`) em `1366×768` e `1920×1080`, com **0 erros de console** e **0 overflow horizontal**.
+  - Quatro refinamentos visuais identificados na primeira captura (alinhamento à esquerda no `InviteModal`, altura do botão `Copiar`, banner full-bleed + botão fechar contrastado no `InvitePreviewModal` e toolbar em linha única no gerenciamento) foram corrigidos em `static/ui.css`, retestados e revalidados em nova rodada de capturas no WebView2.
+- **Próximo passo:** empacotar/publicar `v0.2.3` quando autorizado pelo usuário.

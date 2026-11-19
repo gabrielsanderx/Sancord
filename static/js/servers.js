@@ -29,12 +29,15 @@ function updatePrefs(partial) {
 function onUserPrefsUpdated(payload) {
   state.prefs = payload?.prefs || state.prefs;
   if (typeof applySyncedUserPrefs === "function") applySyncedUserPrefs(state.prefs);
+  if (typeof scheduleMuteExpiry === "function") scheduleMuteExpiry();
+  if (typeof refreshGifStars === "function") refreshGifStars();
   renderGuildRailV2();
   renderChannelTree();
+  if (typeof renderDmList === "function") renderDmList();
 }
 
 function isServerMuted(serverId) {
-  return getPrefs().muted_servers.includes(serverId);
+  return (getPrefs().muted_servers || []).includes(serverId) || (typeof isMutedId === "function" && isMutedId(serverId));
 }
 
 function toggleServerMuted(srv) {
@@ -304,6 +307,7 @@ function renderChannelTree() {
 function buildCategoryHeader(srv, cat, isCollapsed, canManage) {
   const head = document.createElement("div");
   head.className = "category-header";
+  if (typeof isMutedId === "function" && isMutedId(cat.id)) head.classList.add("is-muted");
   head.dataset.categoryId = cat.id;
   head.setAttribute("role", "treeitem");
   head.setAttribute("aria-expanded", String(!isCollapsed));
@@ -447,6 +451,20 @@ function buildEditButton(srv, ch) {
   return btn;
 }
 
+function buildChannelInviteButton(srv, ch) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "channel-del-btn channel-invite-btn";
+  btn.innerHTML = SancordIcons.html("user-plus");
+  btn.setAttribute("aria-label", `Criar convite para ${ch.name}`);
+  SancordUI.tooltip(btn, "Criar convite", "top");
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openInviteServerModal(srv.id, ch.id);
+  });
+  return btn;
+}
+
 function buildTextChannelRow(srv, ch, canManage) {
   const li = document.createElement("li");
   li.className = `channel-item ${ch.id === state.currentTextChannel ? "active" : ""} kind-${ch.kind}`;
@@ -458,7 +476,9 @@ function buildTextChannelRow(srv, ch, canManage) {
   if (ch.topic) li.title = ch.topic;
   // Não lidas (negrito + marcador) e menções (contador vermelho).
   const unread = typeof channelUnreadInfo === "function" ? channelUnreadInfo(ch.id) : { unread: false, mentions: 0 };
-  if (unread.unread && ch.id !== state.currentTextChannel) li.classList.add("unread");
+  const muted = typeof isChannelMuted === "function" && isChannelMuted(ch.id);
+  if (muted) li.classList.add("is-muted");
+  if (unread.unread && !muted && ch.id !== state.currentTextChannel) li.classList.add("unread");
   if (unread.mentions > 0) {
     const badge = document.createElement("span");
     badge.className = "mention-badge";
@@ -466,6 +486,8 @@ function buildTextChannelRow(srv, ch, canManage) {
     badge.setAttribute("aria-label", `${unread.mentions} menções`);
     li.appendChild(badge);
   }
+  const chPerms = typeof getChannelPermissions === "function" ? getChannelPermissions(srv, ch) : { create_invites: true };
+  if (chPerms.create_invites) li.appendChild(buildChannelInviteButton(srv, ch));
   if (canManage) li.appendChild(buildEditButton(srv, ch));
   const open = () => {
     if (ch.kind === "forum" && typeof openForumView === "function") {
@@ -493,16 +515,38 @@ function buildTextChannelRow(srv, ch, canManage) {
   return frag;
 }
 
+function openVoiceTextChat(channelId, serverId = null) {
+  const srv = serverId
+    ? state.servers.find((s) => s.id === serverId)
+    : state.servers.find((s) => (s.voice_channels || []).some((c) => c.id === channelId));
+  if (!srv) return;
+  if (state.activeServerId !== srv.id) {
+    switchToServerId(srv.id, channelId);
+    return;
+  }
+  state.currentTextChannel = channelId;
+  switchToServerView();
+  renderVoiceChannels();
+}
+
 function buildVoiceChannelNode(srv, ch, canManage) {
   const wrapper = document.createElement("li");
   wrapper.className = "voice-channel-node";
   wrapper.setAttribute("role", "treeitem");
 
+  const unreadInfo = typeof channelUnreadInfo === "function" ? channelUnreadInfo(ch.id) : { unread: false, mentions: 0 };
+  const chatOpen = state.activeView === "server" && state.currentTextChannel === ch.id;
   const row = document.createElement("div");
-  row.className = `channel-item ${ch.id === state.currentVoiceChannel ? "active" : ""} kind-voice`;
+  row.className = `channel-item ${ch.id === state.currentVoiceChannel ? "active" : ""} ${chatOpen ? "voice-chat-open" : ""} ${unreadInfo.unread ? "has-unread" : ""} kind-voice`;
   row.dataset.channelId = ch.id;
   row.tabIndex = 0;
   row.appendChild(buildChannelLabel(ch));
+  if (unreadInfo.mentions > 0) {
+    const badge = document.createElement("span");
+    badge.className = "unread-mention-badge";
+    badge.textContent = unreadInfo.mentions > 99 ? "99+" : String(unreadInfo.mentions);
+    row.appendChild(badge);
+  }
   if (ch.user_limit > 0) {
     const count = document.createElement("span");
     count.className = "voice-limit-pill";
@@ -511,6 +555,19 @@ function buildVoiceChannelNode(srv, ch, canManage) {
     count.title = `Limite de ${ch.user_limit} pessoa(s)`;
     row.appendChild(count);
   }
+  const chatBtn = document.createElement("button");
+  chatBtn.type = "button";
+  chatBtn.className = `channel-edit-btn voice-chat-open-btn${chatOpen ? " active" : ""}`;
+  chatBtn.textContent = "💬";
+  chatBtn.title = "Abrir chat de texto";
+  chatBtn.setAttribute("aria-label", `Abrir chat de texto de ${ch.name}`);
+  chatBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openVoiceTextChat(ch.id, srv.id);
+  });
+  row.appendChild(chatBtn);
+  const vPerms = typeof getChannelPermissions === "function" ? getChannelPermissions(srv, ch) : { create_invites: true };
+  if (vPerms.create_invites) row.appendChild(buildChannelInviteButton(srv, ch));
   if (canManage) row.appendChild(buildEditButton(srv, ch));
   row.addEventListener("click", () => joinVoiceChannel(ch.id));
   row.addEventListener("keydown", (e) => {
@@ -576,7 +633,8 @@ function openChannelMenu(e, srv, ch) {
     isVoice
       ? { label: inVoice ? "Sair da chamada" : "Entrar no canal de voz", icon: "🔊", onSelect: () => (inVoice ? leaveVoiceChannel() : joinVoiceChannel(ch.id)) }
       : { label: "Abrir canal", icon: "#", onSelect: () => { state.currentTextChannel = ch.id; switchToServerView(); } },
-    !isVoice && {
+    isVoice && { label: "Abrir chat de texto", icon: "💬", onSelect: () => openVoiceTextChat(ch.id, srv.id) },
+    {
       label: "Marcar como lido",
       icon: "✔️",
       disabled: !channelUnreadInfo(ch.id).unread && !channelUnreadInfo(ch.id).mentions,
@@ -587,8 +645,9 @@ function openChannelMenu(e, srv, ch) {
       },
     },
     { label: "Copiar link do canal", icon: "🔗", onSelect: async () => copyTextSafe(await channelLink(srv, ch), "Link do canal copiado!") },
-    ...(!isVoice && typeof notifyMenuItems === "function" ? notifyMenuItems(ch.id) : []),
-    !isVoice && (perms.manage_messages || perms.administrator) && typeof openBulkDeleteDialog === "function" && {
+    ...(typeof muteMenuItems === "function" ? [{ separator: true }, ...muteMenuItems(ch.id, "canal", `${isVoice ? "🔊" : "#"}${ch.name}`, { x: e.clientX, y: e.clientY })] : []),
+    ...(typeof notifyMenuItems === "function" ? notifyMenuItems(ch.id) : []),
+    (perms.manage_messages || perms.administrator) && typeof openBulkDeleteDialog === "function" && {
       label: "Limpar mensagens…",
       icon: "🧹",
       danger: true,
@@ -620,6 +679,20 @@ function openCategoryMenu(e, srv, cat, isCollapsed) {
         renderChannelTree();
       },
     },
+    {
+      label: "Marcar como lida",
+      icon: "✔️",
+      disabled: !(srv.text_channels || []).some((c) => c.category_id === cat.id && channelUnreadInfo(c.id).unread),
+      onSelect: () => {
+        for (const c of srv.text_channels || []) {
+          if (c.category_id !== cat.id) continue;
+          const list = state.chatHistory?.[c.id] || [];
+          const last = list[list.length - 1];
+          if (last && (channelUnreadInfo(c.id).unread || channelUnreadInfo(c.id).mentions)) sendWs("AckChannel", { channel_id: c.id, message_id: last.id });
+        }
+      },
+    },
+    ...(typeof muteMenuItems === "function" ? muteMenuItems(cat.id, "categoria", cat.name, { x: e.clientX, y: e.clientY }) : []),
     perms.manage_channels && { separator: true },
     perms.manage_channels && { label: "Criar canal aqui", icon: "＋", onSelect: () => openCreateChannelDialog({ categoryId: cat.id }) },
     perms.manage_channels && { label: "Renomear categoria", icon: "✏️", onSelect: () => openRenameCategoryDialog(srv, cat) },
@@ -668,8 +741,20 @@ function openServerMenu(e, srv, { anchor = null } = {}) {
     perms.manage_channels && { label: "Criar canal", icon: "＋", onSelect: () => { ensureActive(); openCreateChannelDialog({}); } },
     perms.manage_channels && { label: "Criar categoria", icon: "📁", onSelect: () => { ensureActive(); openCreateCategoryDialog(); } },
     { separator: true },
-    { label: muted ? "Reativar notificações" : "Silenciar servidor", icon: muted ? "🔔" : "🔕", onSelect: () => toggleServerMuted(srv) },
+    ...(typeof muteMenuItems === "function"
+      ? muteMenuItems(srv.id, "servidor", srv.name, { x: e?.clientX || 0, y: e?.clientY || 0, anchor })
+      : [{ label: muted ? "Reativar notificações" : "Silenciar servidor", icon: muted ? "🔔" : "🔕", onSelect: () => toggleServerMuted(srv) }]),
     ...(typeof notifyMenuItems === "function" ? notifyMenuItems(srv.id) : []),
+    me && srv.id !== "sancord" && {
+      label: "Editar perfil do servidor…",
+      icon: "👤",
+      onSelect: () => openServerProfileDialog(srv.id),
+    },
+    typeof canChangeNickname === "function" && canChangeNickname(srv, me) && {
+      label: "Editar meu apelido…",
+      icon: "🏷️",
+      onSelect: () => openNicknameDialog(srv, me.toLowerCase(), me),
+    },
     { label: "Copiar ID do servidor", icon: "🆔", onSelect: () => copyTextSafe(srv.id, "ID do servidor copiado!") },
     (!isOwner && srv.id !== "sancord") && { separator: true },
     (!isOwner && srv.id !== "sancord") && {
@@ -810,6 +895,21 @@ async function openEditChannelDialog(srv, ch) {
         value: String(ch.user_limit || 0),
         hint: "0 = sem limite (máximo 99). Quem pode mover membros entra mesmo com o canal cheio.",
       },
+      isVoice && {
+        name: "bitrate_kbps",
+        label: "QUALIDADE DE ÁUDIO (BITRATE)",
+        type: "select",
+        value: String(ch.bitrate_kbps || 0),
+        options: [
+          { value: "0", label: "Padrão (128 kbps)" },
+          { value: "64", label: "64 kbps (economia de banda)" },
+          { value: "96", label: "96 kbps (equilibrado)" },
+          { value: "128", label: "128 kbps (alta qualidade)" },
+          { value: "192", label: "192 kbps (estúdio)" },
+          { value: "256", label: "256 kbps (máxima)" },
+        ],
+        hint: "Taxa de bits aplicada nas chamadas de voz deste canal.",
+      },
       { name: "category_id", label: "CATEGORIA", type: "select", value: ch.category_id || "", options: categoryOptions(srv) },
     ].filter(Boolean),
     submitLabel: "Salvar alterações",
@@ -823,6 +923,7 @@ async function openEditChannelDialog(srv, ch) {
     topic: isVoice ? null : values.topic.trim(),
     kind: isVoice || ch.kind === "forum" ? null : values.kind,
     user_limit: isVoice ? Math.max(0, Math.min(99, parseInt(values.user_limit, 10) || 0)) : null,
+    bitrate_kbps: isVoice ? Number(values.bitrate_kbps) || 0 : null,
     slowmode_secs: isVoice ? null : Number(values.slowmode_secs) || 0,
     forum_tags: (() => {
       if (ch.kind !== "forum") return null;
@@ -1191,9 +1292,11 @@ document.getElementById("server-menu-btn")?.addEventListener("click", (e) => {
 /** Atualiza ícone, descrição e permissão de escrita conforme o tipo do canal. */
 function applyChannelHeader(srv, ch) {
   const isAnn = ch?.kind === "announcement";
+  const isVoice = ch?.kind === "voice";
   if (chatHeaderIcon) chatHeaderIcon.innerHTML = channelIconSvg(ch?.kind || "text");
   if (chatChannelTopic) {
-    chatChannelTopic.textContent = ch?.topic || srv?.description || "Converse em tempo real com o servidor.";
+    const bitrateSuffix = isVoice && ch?.bitrate_kbps > 0 ? ` • ${ch.bitrate_kbps} kbps` : "";
+    chatChannelTopic.textContent = ch?.topic || (isVoice ? `Chat de texto do canal de voz ${ch.name}${bitrateSuffix}` : srv?.description || "Converse em tempo real com o servidor.");
     chatChannelTopic.title = chatChannelTopic.textContent;
   }
   chatMessagesEl?.classList.toggle("is-announcement-channel", isAnn);
@@ -1208,16 +1311,16 @@ function applyChannelHeader(srv, ch) {
   refreshSlowmodeIndicator();
   const timeoutUntil = ch ? memberTimeoutUntil(srv, state.selfUser?.username) : null;
   chatInput.placeholder = canPost
-    ? `Conversar em #${name}`
+    ? (isVoice ? `Conversar no canal de voz ${name}` : `Conversar em #${name}`)
     : timeoutUntil
       ? `Você está de castigo neste servidor até ${formatTimeoutEnd(timeoutUntil)}`
       : isAnn
       ? `Somente moderadores publicam em #${name}`
-      : ch ? `Você não tem permissão para enviar mensagens em #${name}` : "Nenhum canal acessível neste servidor";
+      : ch ? `Você não tem permissão para enviar mensagens em ${isVoice ? name : `#${name}`}` : "Nenhum canal acessível neste servidor";
 }
 
 // ---------------------------------------------------------------------------
-// Convites
+// Convites (delegado ao módulo reutilizável static/js/invites.js)
 // ---------------------------------------------------------------------------
 function formatInviteExpiry(inv) {
   const parts = [];
@@ -1231,88 +1334,22 @@ function formatInviteExpiry(inv) {
   return parts.join(" • ");
 }
 
-document.getElementById("invite-modal-create-btn")?.addEventListener("click", () => {
-  const srv = getActiveServer();
-  if (!srv) return;
-  const maxAge = Number(document.getElementById("invite-modal-expiry")?.value || 0);
-  const maxUses = Number(document.getElementById("invite-modal-max-uses")?.value || 0);
-  state.awaitingInviteFor = srv.id;
-  sendWs("CreateInvite", { server_id: srv.id, max_age_secs: maxAge, max_uses: maxUses });
-});
-
 async function onInviteCreated(payload) {
-  const inv = payload?.invite;
-  if (!inv) return;
-  const origin = await resolvePublicOriginUrl();
-  const link = SancordNet.link({ invite: inv.code }, origin);
-  const modal = document.getElementById("invite-server-modal");
-  if (modal && !modal.classList.contains("hidden") && state.awaitingInviteFor === inv.server_id) {
-    const linkInput = document.getElementById("invite-modal-link-input");
-    const badge = document.getElementById("invite-modal-code-badge");
-    const note = document.getElementById("invite-modal-expiry-note");
-    if (linkInput) linkInput.value = link;
-    if (badge) badge.textContent = inv.code;
-    if (note) note.textContent = `Convite personalizado: ${formatInviteExpiry(inv)}.`;
-    linkInput?.select();
+  if (window.SancordInvites?.onInviteCreated) {
+    return window.SancordInvites.onInviteCreated(payload);
   }
-  state.awaitingInviteFor = null;
-  showUiToast("Convite criado!");
-  if (typeof editingServerId !== "undefined" && editingServerId === inv.server_id) requestServerInvites(inv.server_id);
 }
 
 function requestServerInvites(serverId) {
-  const list = document.getElementById("srv-invites-list");
-  if (list && !list.children.length) list.innerHTML = `<div class="pinned-empty">Carregando convites...</div>`;
+  if (window.SancordInvites?.requestServerInvites) {
+    return window.SancordInvites.requestServerInvites(serverId);
+  }
   sendWs("ListInvites", { server_id: serverId });
 }
 
 async function onInvitesList(payload) {
-  const list = document.getElementById("srv-invites-list");
-  if (!list || (typeof editingServerId !== "undefined" && editingServerId !== payload.server_id)) return;
-  const origin = await resolvePublicOriginUrl();
-  list.innerHTML = "";
-  const invites = payload.invites || [];
-  if (invites.length === 0) {
-    list.innerHTML = `<div class="pinned-empty">Nenhum convite ativo.</div>`;
-    return;
-  }
-  for (const inv of invites) {
-    const row = document.createElement("div");
-    row.className = "srv-manage-row invite-row";
-    const info = document.createElement("div");
-    const code = document.createElement("strong");
-    code.className = "invite-code-text";
-    code.textContent = inv.code;
-    const meta = document.createElement("div");
-    meta.className = "settings-hint-text";
-    meta.textContent = `${inv.is_default ? "Padrão • " : ""}criado por ${inv.creator_name} • ${formatInviteExpiry(inv)}`;
-    info.append(code, meta);
-    const actions = document.createElement("div");
-    actions.className = "invite-row-actions";
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "btn-secondary small-btn";
-    copy.textContent = "Copiar link";
-    copy.addEventListener("click", () => copyTextSafe(SancordNet.link({ invite: inv.code }, origin), "Link de convite copiado!"));
-    actions.appendChild(copy);
-    if (!inv.is_default) {
-      const revoke = document.createElement("button");
-      revoke.type = "button";
-      revoke.className = "btn-secondary small-btn danger-text";
-      revoke.textContent = "Revogar";
-      revoke.addEventListener("click", async () => {
-        const ok = await SancordUI.confirm({
-          title: `Revogar o convite ${inv.code}?`,
-          message: "Quem tiver este link não conseguirá mais entrar por ele.",
-          confirmLabel: "Revogar",
-          danger: true,
-        });
-        if (ok) sendWs("RevokeInvite", { server_id: payload.server_id, code: inv.code });
-      });
-      actions.appendChild(revoke);
-    }
-    row.append(info, actions);
-    list.appendChild(row);
+  if (window.SancordInvites?.onInvitesList) {
+    return window.SancordInvites.onInvitesList(payload);
   }
 }
 

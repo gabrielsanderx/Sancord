@@ -24,7 +24,49 @@ function threadsOf(parentId) {
 
 /** Ativas primeiro, mais recentes primeiro. */
 function sortThreads(list) {
-  return [...list].sort((a, b) => (a.archived - b.archived) || (b.last_message_at || 0) - (a.last_message_at || 0));
+  return [...list].sort((a, b) => (Number(Boolean(a.archived)) - Number(Boolean(b.archived))) || (b.last_message_at || 0) - (a.last_message_at || 0));
+}
+
+// ---------------------------------------------------------------------------
+// Etapa C6: seguir thread, prazo de arquivamento e ordenação do fórum
+// ---------------------------------------------------------------------------
+const AUTO_ARCHIVE_CHOICES = [
+  [60, "1 hora"],
+  [1440, "24 horas"],
+  [4320, "3 dias"],
+  [10080, "1 semana"],
+];
+
+function autoArchiveLabel(minutes) {
+  return (AUTO_ARCHIVE_CHOICES.find(([m]) => m === minutes) || AUTO_ARCHIVE_CHOICES[1])[1];
+}
+
+function isThreadMember(t, lower = (state.selfUser?.username || "").toLowerCase()) {
+  return Boolean(t && lower && (t.members || []).includes(lower));
+}
+
+/** Ordem escolhida para cada fórum (neste aparelho): "activity" ou "created". */
+function forumSortFor(forumId) {
+  try {
+    const map = JSON.parse(localStorage.getItem("sancord_forum_sort") || "{}");
+    return map[forumId] === "created" ? "created" : "activity";
+  } catch (_) {
+    return "activity";
+  }
+}
+
+function setForumSort(forumId, mode) {
+  try {
+    const map = JSON.parse(localStorage.getItem("sancord_forum_sort") || "{}");
+    map[forumId] = mode === "created" ? "created" : "activity";
+    localStorage.setItem("sancord_forum_sort", JSON.stringify(map));
+  } catch (_) {}
+}
+
+/** Arquivadas por último; depois por atividade recente ou por data de criação. */
+function sortForumPosts(list, mode) {
+  const key = mode === "created" ? (t) => t.created_at || 0 : (t) => t.last_message_at || t.created_at || 0;
+  return [...list].sort((a, b) => (Number(Boolean(a.archived)) - Number(Boolean(b.archived))) || key(b) - key(a));
 }
 
 function serverOfThread(t) {
@@ -50,7 +92,10 @@ function timeAgo(ms) {
 function refreshThreadViews(thread) {
   if (typeof renderChannelTree === "function") renderChannelTree();
   if (state.forumViewChannel) renderForumPosts();
-  if (thread && state.currentTextChannel === thread.id && state.activeView !== "home") applyThreadHeader(thread);
+  if (thread && state.currentTextChannel === thread.id && state.activeView !== "home") {
+    applyThreadHeader(thread);
+    if (typeof renderMembersSidebar === "function") renderMembersSidebar();
+  }
   // O link "🧵" fica sob a mensagem inicial: redesenha o canal-pai se estiver aberto.
   if (thread?.starter_message_id && state.currentTextChannel === thread.parent_id) renderChatMessages();
 }
@@ -103,10 +148,14 @@ function onThreadDeleted({ thread_id, parent_id }) {
 // ---------------------------------------------------------------------------
 
 function buildNestedThreadRows(srv, ch) {
-  const active = sortThreads(threadsOf(ch.id)).filter((t) => !t.archived || t.id === state.currentTextChannel).slice(0, 5);
+  // Threads que você segue aparecem primeiro (no Discord, a lista lateral mostra as seguidas).
+  const active = sortThreads(threadsOf(ch.id))
+    .filter((t) => !t.archived || t.id === state.currentTextChannel)
+    .sort((a, b) => Number(isThreadMember(b)) - Number(isThreadMember(a)))
+    .slice(0, 5);
   return active.map((t) => {
     const li = document.createElement("li");
-    li.className = `channel-item thread-item${t.id === state.currentTextChannel ? " active" : ""}`;
+    li.className = `channel-item thread-item${t.id === state.currentTextChannel ? " active" : ""}${typeof isChannelMuted === "function" && isChannelMuted(t.id) ? " is-muted" : ""}`;
     li.dataset.channelId = t.id;
     li.setAttribute("role", "treeitem");
     li.tabIndex = 0;
@@ -184,6 +233,8 @@ function onServerViewShown(ch) {
   if (!state.forumViewChannel || ch?.id !== state.forumViewChannel) closeForumView();
   const t = isThreadId(state.currentTextChannel) ? threadById(state.currentTextChannel) : null;
   if (t) applyThreadHeader(t);
+  // A lista de membros alterna entre o servidor e quem segue a thread.
+  if (typeof renderMembersSidebar === "function") renderMembersSidebar();
 }
 
 function threadPermissions(t) {
@@ -199,7 +250,9 @@ function applyThreadHeader(t) {
   if (chatChannelTopic) {
     const flags = [t.archived && "arquivada", t.locked && "trancada"].filter(Boolean).join(" • ");
     const where = parent ? `${parent.kind === "forum" ? "Postagem em" : "Thread em"} #${parent.name}` : "Thread";
-    chatChannelTopic.textContent = `← ${where} • ${t.message_count} ${t.message_count === 1 ? "mensagem" : "mensagens"}${flags ? ` • ${flags}` : ""}`;
+    const members = (t.members || []).length;
+    const following = isThreadMember(t) ? " • seguindo" : "";
+    chatChannelTopic.textContent = `← ${where} • ${t.message_count} ${t.message_count === 1 ? "mensagem" : "mensagens"} • ${members} ${members === 1 ? "membro" : "membros"}${following}${flags ? ` • ${flags}` : ""}`;
     chatChannelTopic.title = "Voltar ao canal";
     chatChannelTopic.style.cursor = "pointer";
     chatChannelTopic.onclick = () => {
@@ -243,6 +296,38 @@ function openThreadMenu(e, t) {
   const mod = Boolean(perms.manage_messages);
   const own = t.owner === me;
   const items = [{ header: t.name }];
+  const following = isThreadMember(t, me);
+  items.push({
+    label: following ? "Deixar de seguir" : "Seguir thread",
+    icon: following ? "🔕" : "🔔",
+    onSelect: () => sendWs(following ? "LeaveThread" : "JoinThread", { thread_id: t.id }),
+  });
+  const count = (t.members || []).length;
+  items.push({
+    label: `Membros da thread (${count})`,
+    icon: "👥",
+    onSelect: () => {
+      if (state.currentTextChannel !== t.id) openThread(t.id);
+      showThreadMembers();
+    },
+  });
+  if (own || mod) {
+    items.push({
+      label: "Arquivar após inatividade",
+      icon: "⏳",
+      hint: autoArchiveLabel(t.auto_archive_minutes),
+      onSelect: () =>
+        SancordUI.contextMenu(e.clientX, e.clientY, [
+          { header: "Arquivar após inatividade" },
+          ...AUTO_ARCHIVE_CHOICES.map(([minutes, label]) => ({
+            label,
+            icon: (t.auto_archive_minutes || 1440) === minutes ? "✓" : "",
+            onSelect: () => sendWs("UpdateThread", { thread_id: t.id, auto_archive_minutes: minutes }),
+          })),
+        ]),
+    });
+  }
+  if (own || mod) items.push({ separator: true });
   if (own || mod) {
     items.push({
       label: "Renomear",
@@ -271,6 +356,7 @@ function openThreadMenu(e, t) {
     });
   }
   if (items.length === 1) items.push({ label: "Abrir", icon: "🧵", onSelect: () => openThread(t.id) });
+  if (typeof muteMenuItems === "function") items.push({ separator: true }, ...muteMenuItems(t.id, "thread", t.name, { x: e.clientX, y: e.clientY }));
   if (typeof notifyMenuItems === "function") items.push(...notifyMenuItems(t.id));
   SancordUI.contextMenu(e.clientX, e.clientY, items);
 }
@@ -419,7 +505,10 @@ function renderForumPosts() {
   const filtering = Boolean(q) || state.forumTagFilter.size > 0;
   const forum = getActiveServer()?.text_channels?.find((c) => c.id === state.forumViewChannel);
   const tagById = new Map((forum?.forum_tags || []).map((t) => [t.id, t]));
-  const posts = sortThreads(threadsOf(state.forumViewChannel))
+  const sortSelect = document.getElementById("forum-sort");
+  const mode = forumSortFor(state.forumViewChannel);
+  if (sortSelect && sortSelect.value !== mode) sortSelect.value = mode;
+  const posts = sortForumPosts(threadsOf(state.forumViewChannel), mode)
     .filter((t) => !q || t.name.toLowerCase().includes(q))
     .filter((t) => matchesTagFilter(t, state.forumTagFilter));
   list.innerHTML = "";
@@ -482,3 +571,14 @@ async function openNewForumPostDialog() {
 
 document.getElementById("forum-new-post-btn")?.addEventListener("click", openNewForumPostDialog);
 document.getElementById("forum-filter")?.addEventListener("input", renderForumPosts);
+document.getElementById("forum-sort")?.addEventListener("change", (e) => {
+  if (!state.forumViewChannel) return;
+  setForumSort(state.forumViewChannel, e.target.value);
+  renderForumPosts();
+});
+
+/** Mostra a lista de membros (que, numa thread, lista quem a segue). */
+function showThreadMembers() {
+  if (document.getElementById("app-layout")?.classList.contains("hide-members")) document.getElementById("toggle-members-btn")?.click();
+  if (typeof renderMembersSidebar === "function") renderMembersSidebar();
+}

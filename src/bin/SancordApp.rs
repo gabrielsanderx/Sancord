@@ -42,6 +42,73 @@ enum UserEvent {
     /// Página terminou de carregar (usado para injetar a ponte só em origens confiáveis).
     PageLoaded(String),
     Update(serde_json::Value),
+    DesktopState(serde_json::Value),
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct DesktopPrefs {
+    #[serde(default)]
+    start_minimized: bool,
+    #[serde(default)]
+    minimize_on_close: bool,
+}
+
+impl DesktopPrefs {
+    fn load(data_dir: &Path) -> Self {
+        fs::read_to_string(data_dir.join("desktop-prefs.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+    fn save(&self, data_dir: &Path) {
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let _ = fs::write(data_dir.join("desktop-prefs.json"), json);
+        }
+    }
+}
+
+const RUN_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_REG_VALUE: &str = "SancordDesktop";
+
+fn query_windows_autostart() -> bool {
+    Command::new("reg.exe")
+        .args(["query", RUN_REG_KEY, "/v", RUN_REG_VALUE])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+fn set_windows_autostart(enabled: bool, minimized: bool) {
+    if !enabled {
+        let _ = Command::new("reg.exe")
+            .args(["delete", RUN_REG_KEY, "/v", RUN_REG_VALUE, "/f"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+        return;
+    }
+    let Ok(exe) = env::current_exe() else { return };
+    let value = if minimized {
+        format!("\"{}\" --minimized", exe.display())
+    } else {
+        format!("\"{}\"", exe.display())
+    };
+    let _ = Command::new("reg.exe")
+        .args(["add", RUN_REG_KEY, "/v", RUN_REG_VALUE, "/t", "REG_SZ", "/d", &value, "/f"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
+
+fn desktop_state_json(data_dir: &Path, prefs: &DesktopPrefs) -> serde_json::Value {
+    serde_json::json!({
+        "isDesktop": true,
+        "version": env!("CARGO_PKG_VERSION"),
+        "arch": env::consts::ARCH,
+        "os": "Windows",
+        "dataDir": data_dir.display().to_string(),
+        "autostart": query_windows_autostart(),
+        "startMinimized": prefs.start_minimized,
+        "minimizeOnClose": prefs.minimize_on_close,
+    })
 }
 
 /// Chave pública de descoberta embutida pelo build.rs (vazia = descoberta remota desativada).
@@ -641,7 +708,13 @@ fn main() {
     );
 
     install_workarea_maximize_hook(&window);
+    if env::args().any(|arg| arg == "--minimized") {
+        window.set_minimized(true);
+    }
 
+    let desktop_prefs = Arc::new(Mutex::new(DesktopPrefs::load(&data_dir)));
+    let ipc_data_dir = data_dir.clone();
+    let ipc_prefs = desktop_prefs.clone();
     let mut web_context = WebContext::new(Some(data_dir));
     let win_ipc = window.clone();
     let base_title = env::var("SANCORD_WINDOW_TITLE").unwrap_or_else(|_| "Sancord".into());
@@ -718,6 +791,46 @@ fn main() {
                 }
                 return;
             }
+            if let Some(action) = cmd.strip_prefix("desktop:") {
+                let mut prefs = ipc_prefs.lock().unwrap_or_else(|e| e.into_inner());
+                match action {
+                    "get-state" => {}
+                    "set-autostart:1" => set_windows_autostart(true, prefs.start_minimized),
+                    "set-autostart:0" => set_windows_autostart(false, false),
+                    "set-start-minimized:1" => {
+                        prefs.start_minimized = true;
+                        prefs.save(&ipc_data_dir);
+                        if query_windows_autostart() {
+                            set_windows_autostart(true, true);
+                        }
+                    }
+                    "set-start-minimized:0" => {
+                        prefs.start_minimized = false;
+                        prefs.save(&ipc_data_dir);
+                        if query_windows_autostart() {
+                            set_windows_autostart(true, false);
+                        }
+                    }
+                    "set-minimize-on-close:1" => {
+                        prefs.minimize_on_close = true;
+                        prefs.save(&ipc_data_dir);
+                    }
+                    "set-minimize-on-close:0" => {
+                        prefs.minimize_on_close = false;
+                        prefs.save(&ipc_data_dir);
+                    }
+                    "open-data-dir" => {
+                        let _ = Command::new("explorer.exe")
+                            .arg(&ipc_data_dir)
+                            .creation_flags(CREATE_NO_WINDOW)
+                            .spawn();
+                    }
+                    _ => {}
+                }
+                let snapshot = desktop_state_json(&ipc_data_dir, &prefs);
+                let _ = ipc_proxy.send_event(UserEvent::DesktopState(snapshot));
+                return;
+            }
             if let Some(n) = cmd.strip_prefix("badge:") {
                 let count: u32 = n.trim().parse().unwrap_or(0).min(999);
                 win_ipc.set_title(&desktop_title(&base_title, count));
@@ -734,7 +847,15 @@ fn main() {
                     win_ipc.set_maximized(!win_ipc.is_maximized());
                 }
                 "close" => {
-                    std::process::exit(0);
+                    let minimize = ipc_prefs
+                        .lock()
+                        .map(|p| p.minimize_on_close)
+                        .unwrap_or(false);
+                    if minimize {
+                        win_ipc.set_minimized(true);
+                    } else {
+                        std::process::exit(0);
+                    }
                 }
                 _ => {}
             }
@@ -817,6 +938,11 @@ fn main() {
                     *control_flow = ControlFlow::Exit;
                 } else if let Ok(json) = serde_json::to_string(&value) {
                     let _ = webview.evaluate_script(&format!("window.dispatchEvent(new CustomEvent('sancord-update', {{detail:{json}}}));"));
+                }
+            }
+            Event::UserEvent(UserEvent::DesktopState(value)) => {
+                if let Ok(json) = serde_json::to_string(&value) {
+                    let _ = webview.evaluate_script(&format!("window.dispatchEvent(new CustomEvent('sancord-desktop-state', {{detail:{json}}}));"));
                 }
             }
             Event::WindowEvent {

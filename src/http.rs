@@ -115,6 +115,11 @@ pub async fn register_handler(State(state): State<SharedState>, Json(req): Json<
         created_at: Some(format_pt_date_now()),
         email: None,
         recovery_code_hash: None,
+        inventory: Vec::new(),
+        cosmetic_collection: Default::default(),
+        profile_board: Default::default(),
+        profile_sharing: Default::default(),
+        profile: Default::default(),
         token: String::new(),
     };
     st.accounts.insert(key, account.clone());
@@ -325,22 +330,131 @@ pub async fn public_url_handler(State(state): State<SharedState>) -> Json<serde_
     Json(serde_json::json!({ "url": found_url }))
 }
 
+fn invite_preview_err(
+    status: StatusCode,
+    kind: &str,
+    msg: impl Into<String>,
+) -> (StatusCode, Json<InvitePreviewResponse>) {
+    (
+        status,
+        Json(InvitePreviewResponse {
+            ok: false,
+            code: None,
+            server_id: None,
+            name: None,
+            description: None,
+            icon_url: None,
+            icon_color: None,
+            banner_url: None,
+            member_count: 0,
+            online_count: 0,
+            is_community: false,
+            expires_at: None,
+            inviter_name: None,
+            inviter_avatar: None,
+            channel_id: None,
+            channel_name: None,
+            temporary: false,
+            already_member: false,
+            invites_paused: kind == "paused",
+            rules_text: None,
+            error_kind: Some(kind.to_string()),
+            message: Some(msg.into()),
+        }),
+    )
+}
+
 pub async fn invite_preview_handler(
     State(state): State<SharedState>,
+    headers: axum::http::HeaderMap,
     AxumPath(code): AxumPath<String>,
 ) -> (StatusCode, Json<InvitePreviewResponse>) {
-    let st = state.read().await;
-    match st.resolve_invite(&code) {
+    let bearer = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer ").or_else(|| s.strip_prefix("bearer ")))
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let rate_key = if let Some(tok) = bearer {
+        format!("tok:{}", auth::hash_token(tok))
+    } else if let Some(ip) = headers
+        .get("x-forwarded-for")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        format!("ip:{ip}")
+    } else {
+        "anon".to_string()
+    };
+
+    let mut st = state.write().await;
+    let now = auth::now_ms();
+    if st.invite_preview_rates.len() > 2048 {
+        st.invite_preview_rates.clear();
+    }
+    let allowed = st
+        .invite_preview_rates
+        .entry(rate_key)
+        .or_default()
+        .allow(now, 60, 60_000);
+    if !allowed {
+        return invite_preview_err(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "Muitas tentativas de consulta de convite. Aguarde um momento.",
+        );
+    }
+
+    let requester_lower: Option<String> = bearer
+        .and_then(|tok| st.validate_session(tok))
+        .map(|(_, acc)| acc.username.to_lowercase());
+
+    match st.resolve_invite_detailed(&code) {
         Ok((invite, srv)) => {
+            if let Some(ref req_lower) = requester_lower {
+                if srv.is_banned(req_lower) {
+                    return invite_preview_err(
+                        StatusCode::FORBIDDEN,
+                        "banned",
+                        "Você não pode entrar neste servidor.",
+                    );
+                }
+            }
+            let already_member = requester_lower
+                .as_deref()
+                .is_some_and(|u| srv.is_member(u));
             let member_count = if srv.id == "sancord" {
                 st.accounts.len().max(srv.members.len())
             } else {
                 srv.members.len().max(1)
             };
+            let inviter_acc = st.accounts.get(&invite.creator);
+            let inviter_name = inviter_acc
+                .map(|a| a.display_name.clone().filter(|d| !d.is_empty()).unwrap_or_else(|| a.username.clone()))
+                .filter(|n| !n.is_empty());
+            let inviter_avatar = inviter_acc.and_then(|a| a.avatar_url.clone());
+
+            // Só expõe o nome do canal se @everyone puder visualizá-lo (ou se o usuário já for membro com acesso).
+            let (channel_id, channel_name) = invite
+                .channel_id
+                .as_deref()
+                .and_then(|cid| srv.find_channel(cid))
+                .filter(|ch| {
+                    let probe = requester_lower.as_deref().filter(|u| srv.is_member(u)).unwrap_or("");
+                    srv.channel_permissions(probe, &ch.id).view_channel
+                })
+                .map(|ch| (Some(ch.id.clone()), Some(ch.name.clone())))
+                .unwrap_or((None, None));
+
             (
                 StatusCode::OK,
                 Json(InvitePreviewResponse {
                     ok: true,
+                    code: Some(invite.code.clone()),
                     server_id: Some(srv.id.clone()),
                     name: Some(srv.name.clone()),
                     description: srv.description.clone(),
@@ -351,26 +465,26 @@ pub async fn invite_preview_handler(
                     online_count: st.online_member_count(srv),
                     is_community: srv.is_community,
                     expires_at: invite.expires_at,
+                    inviter_name,
+                    inviter_avatar,
+                    channel_id,
+                    channel_name,
+                    temporary: invite.temporary,
+                    already_member,
+                    invites_paused: srv.invites_paused,
+                    rules_text: srv.rules_text.clone(),
+                    error_kind: None,
                     message: None,
                 }),
             )
         }
-        Err(msg) => (
-            StatusCode::NOT_FOUND,
-            Json(InvitePreviewResponse {
-                ok: false,
-                server_id: None,
-                name: None,
-                description: None,
-                icon_url: None,
-                icon_color: None,
-                banner_url: None,
-                member_count: 0,
-                online_count: 0,
-                is_community: false,
-                expires_at: None,
-                message: Some(msg.to_string()),
-            }),
-        ),
+        Err((kind, msg)) => {
+            let status = match kind {
+                "paused" => StatusCode::FORBIDDEN,
+                "expired" | "revoked" | "max_uses" => StatusCode::GONE,
+                _ => StatusCode::NOT_FOUND,
+            };
+            invite_preview_err(status, kind, msg)
+        }
     }
 }

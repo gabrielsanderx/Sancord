@@ -3,7 +3,7 @@ const CHANNEL_PERMISSION_LABELS = {
   view_channel: "Visualizar canal", read_history: "Visualizar histórico",
   send_messages: "Enviar mensagens", attach_files: "Anexar arquivos",
   add_reactions: "Adicionar reações", manage_messages: "Gerenciar mensagens", pin_messages: "Fixar mensagens",
-  mention_everyone: "Mencionar todos", connect_voice: "Conectar à voz",
+  mention_everyone: "Mencionar todos", create_invites: "Criar convites", connect_voice: "Conectar à voz",
   speak_voice: "Falar na voz", stream_video: "Transmitir tela e câmera",
 };
 
@@ -34,8 +34,9 @@ function messagePermissions(message) {
   if (isPrivateTextId(message.channel_id)) return { send_messages: true, add_reactions: true, pin_messages: true, attach_files: true };
   // Mensagem de thread: vale o canal-pai (como no servidor).
   const channelId = state.threadIndex?.get(message.channel_id)?.parent_id || message.channel_id;
-  const srv = state.servers.find(s => s.text_channels?.some(c => c.id === channelId));
-  return getChannelPermissions(srv, srv?.text_channels.find(c => c.id === channelId));
+  const srv = state.servers.find(s => s.text_channels?.some(c => c.id === channelId) || s.voice_channels?.some(c => c.id === channelId));
+  const ch = srv?.text_channels?.find(c => c.id === channelId) || srv?.voice_channels?.find(c => c.id === channelId);
+  return getChannelPermissions(srv, ch);
 }
 
 function canEditRole(srv, role) {

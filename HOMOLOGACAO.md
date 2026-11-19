@@ -269,3 +269,13 @@ comprova apenas `c1941fd`, não o commit desta consolidação.
     - câmera física, redes e TURN;
     - ciclo público do updater, que exige duas releases;
     - autorização para mover a `main` ou criar tag.
+
+## Preparação local da 0.2.3 — 19/11/2026
+
+- O empacotador gerou cliente, backend e ZIP em `qa-release-0.2.3/` com o ambiente GNU/LLVM disponível neste Windows. A build MSVC e a assinatura desta candidata passam pelo CI de publicação.
+- A migração de uma cópia levou o SQLite de v14 a v17. A integridade passou e as 31 tabelas antigas foram preservadas por hash. O banco original foi aberto somente para criar a cópia de leitura.
+- A auditoria Git passou com 184 arquivos. A comparação com a ponta oficial de `main` usou um índice temporário, incluindo os arquivos novos e sem exclusões integrais de arquivos.
+- O ciclo público **0.2.1 → 0.2.2** passou em instalação temporária. O cliente detectou a release no GitHub, baixou com progresso até 100%, verificou e reiniciou. O SHA-256 pós-instalação coincidiu com o manifesto assinado e uma chave de teste no armazenamento do WebView foi preservada. O teste HTTPS com o artefato público também passou.
+- O WebView2 confirmou a entrega de uma notificação real do teste de DM. O clique foi simulado e encaminhou o ID correto da mensagem. A permissão foi concedida no perfil temporário de QA.
+- O executável 0.2.3 extraído pelo empacotador abriu os dois cartões, a aba de privacidade e as conexões. O ZIP contém somente o cliente. `cargo check --locked --all-targets` e 344 testes passaram, incluindo o ensaio separado com o pacote oficial assinado.
+- Permanecem pendentes webcam física e um ensaio em redes distintas com TURN provisionado. As regras de prova e visibilidade do GitHub passaram em testes. A verificação ao vivo depende de publicar temporariamente o código na bio de uma conta própria.

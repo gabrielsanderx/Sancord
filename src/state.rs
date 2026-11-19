@@ -57,6 +57,8 @@ pub struct ServerState {
     pub voice_channels: Vec<Channel>,
     pub servers: Vec<GuildServer>,
     pub accounts: HashMap<String, Account>, // username_lower -> Account
+    /// Perfil P2: badges concedidas pelo operador (adges.json na pasta de dados), por username_lower.
+    pub badge_grants: HashMap<String, Vec<String>>,
     pub users: HashMap<String, UserInfo>,   // connection_id -> UserInfo
     pub peers: HashMap<String, Peer>,       // connection_id -> Peer
     /// Cache das mensagens recentes por canal (no máximo `MESSAGE_CACHE_PER_CHANNEL`).
@@ -79,6 +81,8 @@ pub struct ServerState {
     pub read_states: HashMap<(String, String), ReadState>,
     /// connection_id -> limites de ritmo
     pub rates: HashMap<String, ConnRate>,
+    /// chave (conta ou IP) -> limite de prévia de convite HTTP
+    pub invite_preview_rates: HashMap<String, crate::chat::SlidingWindow>,
     /// id (gdm:<uuid>) -> grupo privado
     pub group_dms: HashMap<String, GroupDm>,
     /// Direitos de mídia da última entrada na voz, para encerrar conexões ao revogar.
@@ -140,6 +144,13 @@ fn default_hub(text_channels: Vec<Channel>, voice_channels: Vec<Channel>) -> Gui
         automod: Default::default(),
         threads: Vec::new(),
         member_timeouts: HashMap::new(),
+        member_nicks: HashMap::new(),
+        member_profiles: HashMap::new(),
+        emojis: Vec::new(),
+        invites_paused: false,
+        rules_text: None,
+        custom_invite_slug: None,
+        temporary_members: Vec::new(),
     }
 }
 
@@ -251,9 +262,13 @@ impl ServerState {
         let sessions_vec = db.load_sessions(now)?;
         db.write(WriteOp::DeleteExpiredSessions { now });
 
+        // Badges são derivadas no servidor (operador + automáticas); o cliente nunca as define.
+        let badge_grants = crate::cosmetics::load_badge_grants(&config.data_dir);
         let mut accounts = HashMap::new();
-        for acc in accounts_vec {
-            accounts.insert(acc.username.to_lowercase(), acc);
+        for mut acc in accounts_vec {
+            let lower = acc.username.to_lowercase();
+            acc.profile.badges = crate::cosmetics::effective_badges(&acc, badge_grants.get(&lower).map(Vec::as_slice).unwrap_or(&[]));
+            accounts.insert(lower, acc);
         }
 
         let created_hub = servers.is_empty();
@@ -281,6 +296,7 @@ impl ServerState {
             voice_channels,
             servers,
             accounts,
+            badge_grants,
             users: HashMap::new(),
             peers: HashMap::new(),
             chat_history,
@@ -297,6 +313,7 @@ impl ServerState {
                 .map(|(u, c, s)| ((u, c), s))
                 .collect(),
             rates: HashMap::new(),
+            invite_preview_rates: HashMap::new(),
             group_dms: group_dms_vec.into_iter().map(|g| (g.id.clone(), g)).collect(),
             voice_grants: HashMap::new(),
             active_calls: HashMap::new(),
@@ -346,6 +363,11 @@ impl ServerState {
                     expires_at: None,
                     max_uses: None,
                     uses: 0,
+                    channel_id: None,
+                    temporary: false,
+                    revoked_at: None,
+                    revoked_by: None,
+                    last_used_at: None,
                 });
             }
         }
@@ -379,6 +401,8 @@ impl ServerState {
                 mentions: MessageMentions::default(),
                 poll: None,
                 author_kind: crate::models::AuthorKind::System,
+                embeds: Vec::new(),
+                forward: None,
             });
         }
 
@@ -468,6 +492,8 @@ impl ServerState {
             srv.members.retain(|m| m != username_lower);
             srv.member_roles.remove(username_lower);
             srv.member_joined_at.remove(username_lower);
+            srv.member_nicks.remove(username_lower);
+            srv.member_profiles.remove(username_lower);
             srv.voice_moderation.remove(username_lower);
             srv.member_timeouts.remove(username_lower);
             if was_member {
@@ -619,7 +645,7 @@ impl ServerState {
         ReadStateInfo { channel_id: channel_id.to_string(), last_read_at: s.last_read_at, mention_count: s.mention_count }
     }
 
-    /// Canais de texto (servidores + DMs) que o usuário pode ler.
+    /// Canais com mensagens (texto, chat de voz, threads e DMs) que o usuário pode ler.
     pub fn readable_channels(&self, username_lower: &str) -> Vec<String> {
         let mut out: Vec<String> = self
             .servers
@@ -628,6 +654,7 @@ impl ServerState {
             .flat_map(|s| {
                 s.text_channels
                     .iter()
+                    .chain(s.voice_channels.iter())
                     .map(|c| c.id.clone())
                     .chain(s.threads.iter().map(|t| t.id.clone()))
                     .filter(|id| self.can_view_channel(username_lower, id))
@@ -1073,7 +1100,7 @@ impl ServerState {
     pub fn public_chat_history_for(&self, username_lower: &str) -> HashMap<String, Vec<ChatMessage>> {
         let mut allowed_channels: HashSet<&str> = HashSet::new();
         for srv in self.servers.iter().filter(|s| s.is_member(username_lower)) {
-            for ch in &srv.text_channels {
+            for ch in srv.text_channels.iter().chain(srv.voice_channels.iter()) {
                 if self.can_read_text_channel(username_lower, &ch.id) { allowed_channels.insert(ch.id.as_str()); }
             }
         }
@@ -1088,23 +1115,78 @@ impl ServerState {
     // Servidores
     // ---------------------------------------------------------------------
 
-    /// Novo código de convite no formato `SANC-XXXXXX`, sem caracteres ambíguos
-    /// (0/O, 1/I/L) e garantidamente único.
+    /// Novo código de convite criptograficamente aleatório no formato `SANC-XXXXXXXX`
+    /// (8 caracteres Base32 sem ambiguidade: 0/O, 1/I/L — 40 bits de entropia) e
+    /// garantidamente único (jamais reutiliza códigos ativos ou revogados).
     pub fn generate_invite_code(&self) -> String {
         use argon2::password_hash::rand_core::{OsRng, RngCore};
         const ALPHABET: &[u8] = b"23456789ABCDEFGHJKMNPQRSTUVWXYZ";
         loop {
-            let mut bytes = [0u8; 6];
+            let mut bytes = [0u8; 8];
             OsRng.fill_bytes(&mut bytes);
             let body: String = bytes
                 .iter()
                 .map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char)
                 .collect();
             let code = format!("SANC-{body}");
-            if !self.invites.contains_key(&code) {
+            if !self.invites.contains_key(&code)
+                && !self
+                    .servers
+                    .iter()
+                    .any(|s| s.custom_invite_slug.as_deref().is_some_and(|sl| sl.eq_ignore_ascii_case(&code)))
+            {
                 return code;
             }
         }
+    }
+
+    /// Valida e normaliza um slug personalizado de convite (3–32 chars, `[a-z0-9-]`,
+    /// sem hifens no início/fim/duplos e fora da lista de nomes reservados).
+    pub fn validate_custom_invite_slug(raw: &str) -> Result<String, &'static str> {
+        let slug = raw.trim().to_lowercase();
+        if slug.len() < 3 || slug.len() > 32 {
+            return Err("O link personalizado deve ter entre 3 e 32 caracteres.");
+        }
+        if !slug
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return Err("Use apenas letras sem acento, números e hífen (-).");
+        }
+        if slug.starts_with('-') || slug.ends_with('-') || slug.contains("--") {
+            return Err("O link personalizado não pode começar, terminar ou repetir hífen.");
+        }
+        const RESERVED: &[&str] = &[
+            "api", "invite", "invites", "login", "register", "admin", "sancord", "system",
+            "open", "ws", "health", "attachments", "settings", "help", "support", "channel",
+            "channels", "server", "servers", "user", "users", "dm", "voice", "auth",
+            "logout", "session", "public-url",
+        ];
+        if RESERVED.contains(&slug.as_str()) || slug.starts_with("sanc-") {
+            return Err("Este endereço é reservado. Escolha outro nome.");
+        }
+        Ok(slug)
+    }
+
+    /// Extrai o código de convite de uma entrada crua (código puro, `?invite=`,
+    /// `sancord://invite/CODIGO`, `https://.../invite/CODIGO` ou `sancord.gg/CODIGO`).
+    pub fn extract_invite_code(raw: &str) -> String {
+        let trimmed = raw.trim();
+        let candidate = if let Some((_, after)) = trimmed.split_once("invite=") {
+            after.split(['&', '#', ' ']).next().unwrap_or(after)
+        } else if let Some((_, after)) = trimmed.split_once("://invite/") {
+            after.split(['?', '#', '/', ' ']).next().unwrap_or(after)
+        } else if let Some((_, after)) = trimmed.split_once("/invite/") {
+            after.split(['?', '#', '/', ' ']).next().unwrap_or(after)
+        } else if let Some((_, after)) = trimmed.split_once("sancord.gg/") {
+            after.split(['?', '#', '/', ' ']).next().unwrap_or(after)
+        } else {
+            trimmed
+        };
+        candidate
+            .trim()
+            .trim_matches(|c: char| matches!(c, '/' | '?' | '#' | '.' | ',' | ';'))
+            .to_uppercase()
     }
 
     /// Registra (ou atualiza) um convite em memória e no banco.
@@ -1113,19 +1195,45 @@ impl ServerState {
         self.invites.insert(invite.code.to_uppercase(), invite);
     }
 
+    /// Marca o convite como revogado (tombstone) no banco e na memória, impedindo
+    /// que o código seja reutilizado e garantindo erro claro em tentativas futuras.
+    pub fn revoke_invite(&mut self, code: &str, actor: &str) -> bool {
+        let key = code.trim().to_uppercase();
+        if let Some(mut inv) = self.invites.get(&key).cloned() {
+            if inv.revoked_at.is_none() {
+                inv.revoked_at = Some(auth::now_ms());
+                inv.revoked_by = Some(actor.to_string());
+                self.register_invite(inv);
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn remove_invite(&mut self, code: &str) {
         let code = code.to_uppercase();
         self.invites.remove(&code);
         self.db.write(WriteOp::DeleteInvite { code });
     }
 
-    /// Cria um convite novo para o servidor.
+    /// Quantidade de convites atualmente ativos (não revogados, não vencidos, sem esgotar usos).
+    pub fn active_invite_count(&self, server_id: &str) -> usize {
+        let now = auth::now_ms();
+        self.invites
+            .values()
+            .filter(|i| i.server_id == server_id && i.invalid_status(now).is_none())
+            .count()
+    }
+
+    /// Cria um convite novo para o servidor (jamais modifica convites existentes).
     pub fn create_invite(
         &mut self,
         server_id: &str,
         creator: &str,
         max_age_secs: Option<u64>,
         max_uses: Option<u32>,
+        channel_id: Option<String>,
+        temporary: bool,
     ) -> Invite {
         let now = auth::now_ms();
         let invite = Invite {
@@ -1139,69 +1247,135 @@ impl ServerState {
                 .map(|s| now + (s.min(30 * 24 * 3600) as i64) * 1000),
             max_uses: max_uses.filter(|m| *m > 0).map(|m| m.min(1000)),
             uses: 0,
+            channel_id,
+            temporary,
+            revoked_at: None,
+            revoked_by: None,
+            last_used_at: None,
         };
         self.register_invite(invite.clone());
         invite
     }
 
-    /// Resolve um código (ou link `?invite=`) para um convite válido.
-    pub fn resolve_invite(&self, raw: &str) -> Result<(Invite, &GuildServer), &'static str> {
-        let trimmed = raw.trim();
-        let code = match trimmed.split_once("invite=") {
-            Some((_, after)) => after.split('&').next().unwrap_or(after).trim(),
-            None => trimmed,
-        }
-        .to_uppercase();
+    /// Resolve um código ou link para um convite válido, retornando `(error_kind, mensagem)` em caso de falha.
+    pub fn resolve_invite_detailed(&self, raw: &str) -> Result<(Invite, &GuildServer), (&'static str, &'static str)> {
+        let code = Self::extract_invite_code(raw);
         if code.is_empty() {
-            return Err("Informe o código ou link do convite.");
+            return Err(("invalid", "Informe o código ou link do convite."));
         }
-        let invite = self.invites.get(&code).ok_or("Convite não encontrado ou expirado.")?;
-        if let Some(reason) = invite.invalid_reason(auth::now_ms()) {
-            return Err(reason);
+        let invite = if let Some(inv) = self.invites.get(&code) {
+            inv.clone()
+        } else if let Some(srv) = self
+            .servers
+            .iter()
+            .find(|s| s.custom_invite_slug.as_deref().is_some_and(|sl| sl.eq_ignore_ascii_case(&code)))
+        {
+            if let Some(inv) = self.invites.get(&srv.invite_code.to_uppercase()) {
+                inv.clone()
+            } else {
+                return Err(("invalid", "Convite inválido ou expirado."));
+            }
+        } else {
+            return Err(("invalid", "Convite inválido ou expirado."));
+        };
+
+        let now = auth::now_ms();
+        if invite.is_revoked() {
+            return Err(("revoked", "Este convite não é mais válido."));
         }
         let srv = self
             .find_server(&invite.server_id)
-            .ok_or("O servidor deste convite não existe mais.")?;
-        Ok((invite.clone(), srv))
+            .ok_or(("unavailable", "Este servidor não está mais disponível."))?;
+        if srv.invites_paused {
+            return Err(("paused", "Convites temporariamente pausados."));
+        }
+        if let Some((kind, reason)) = invite.invalid_status(now) {
+            return Err((kind, reason));
+        }
+        Ok((invite, srv))
+    }
+
+    /// Resolve um código (ou link `?invite=`) para um convite válido.
+    pub fn resolve_invite(&self, raw: &str) -> Result<(Invite, &GuildServer), &'static str> {
+        self.resolve_invite_detailed(raw).map_err(|(_, msg)| msg)
     }
 
     pub fn invite_info(&self, invite: &Invite) -> InviteInfo {
-        let creator_name = self
-            .accounts
-            .get(&invite.creator)
-            .map(|a| a.username.clone())
+        let acc = self.accounts.get(&invite.creator);
+        let creator_name = acc
+            .map(|a| a.display_name.clone().filter(|d| !d.is_empty()).unwrap_or_else(|| a.username.clone()))
             .unwrap_or_else(|| invite.creator.clone());
-        let is_default = self
-            .find_server(&invite.server_id)
-            .is_some_and(|s| s.invite_code.eq_ignore_ascii_case(&invite.code));
-        InviteInfo { invite: invite.clone(), creator_name, is_default }
+        let creator_avatar = acc.and_then(|a| a.avatar_url.clone());
+        let srv = self.find_server(&invite.server_id);
+        let is_default = srv.is_some_and(|s| s.invite_code.eq_ignore_ascii_case(&invite.code));
+        let ch = invite
+            .channel_id
+            .as_deref()
+            .and_then(|cid| srv.and_then(|s| s.find_channel(cid)));
+        InviteInfo {
+            invite: invite.clone(),
+            creator_name,
+            is_default,
+            creator_avatar,
+            channel_name: ch.map(|c| c.name.clone()),
+            channel_kind: ch.map(|c| c.kind.clone()),
+        }
     }
 
-    /// Convites ainda válidos do servidor (mais novos primeiro). Remove os vencidos.
+    /// Convites ainda ativos do servidor (mais novos primeiro).
+    /// Convites revogados ou vencidos permanecem registrados como histórico/tombstone e não aparecem na lista ativa.
     pub fn server_invites(&mut self, server_id: &str) -> Vec<InviteInfo> {
         let now = auth::now_ms();
-        let expired: Vec<String> = self
-            .invites
-            .values()
-            .filter(|i| i.server_id == server_id && i.invalid_reason(now).is_some())
-            .filter(|i| {
-                !self
-                    .find_server(server_id)
-                    .is_some_and(|s| s.invite_code.eq_ignore_ascii_case(&i.code))
-            })
-            .map(|i| i.code.clone())
-            .collect();
-        for code in expired {
-            self.remove_invite(&code);
-        }
         let mut list: Vec<InviteInfo> = self
             .invites
             .values()
-            .filter(|i| i.server_id == server_id)
+            .filter(|i| i.server_id == server_id && i.invalid_status(now).is_none())
             .map(|i| self.invite_info(i))
             .collect();
         list.sort_by(|a, b| b.invite.created_at.cmp(&a.invite.created_at));
         list
+    }
+
+    /// Remove um usuário de servidores onde entrou com associação temporária
+    /// assim que sua última sessão ativa desconecta e ele não recebeu nenhum cargo.
+    pub fn cleanup_temporary_members_for(&mut self, username_lower: &str) -> Vec<GuildServer> {
+        let still_online = self
+            .users
+            .values()
+            .any(|u| u.username.to_lowercase() == username_lower);
+        if still_online {
+            return Vec::new();
+        }
+        let mut changed_servers = Vec::new();
+        for srv in &mut self.servers {
+            if srv.id == "sancord" || srv.is_owner(username_lower) {
+                continue;
+            }
+            if !srv.temporary_members.iter().any(|m| m == username_lower) {
+                continue;
+            }
+            let has_role = srv
+                .member_roles
+                .get(username_lower)
+                .is_some_and(|roles| roles.iter().any(|r| r != "everyone"));
+            if has_role {
+                // Promovido a membro permanente por possuir cargo.
+                srv.temporary_members.retain(|m| m != username_lower);
+                changed_servers.push(srv.clone());
+                continue;
+            }
+            srv.temporary_members.retain(|m| m != username_lower);
+            srv.members.retain(|m| m != username_lower);
+            srv.member_roles.remove(username_lower);
+            srv.member_joined_at.remove(username_lower);
+            srv.member_nicks.remove(username_lower);
+            srv.member_profiles.remove(username_lower);
+            changed_servers.push(srv.clone());
+        }
+        if !changed_servers.is_empty() {
+            self.save_servers();
+        }
+        changed_servers
     }
 
     /// Membros do servidor conectados agora (sem contar invisíveis).
@@ -1230,6 +1404,8 @@ impl ServerState {
             .collect();
         prefs.guild_layout = sanitize_layout(prefs.guild_layout, &visible);
         prefs.muted_servers.retain(|id| visible.contains(id));
+        let now = chrono::Utc::now().timestamp_millis();
+        prefs.mutes.retain(|_, until| *until == 0 || *until > now);
         prefs
     }
 
@@ -1257,9 +1433,11 @@ impl ServerState {
     }
 
     pub fn find_server_by_text_channel(&self, channel_id: &str) -> Option<&GuildServer> {
-        self.servers
-            .iter()
-            .find(|s| s.text_channels.iter().any(|c| c.id == channel_id) || s.thread(channel_id).is_some())
+        self.servers.iter().find(|s| {
+            s.text_channels.iter().any(|c| c.id == channel_id)
+                || s.voice_channels.iter().any(|c| c.id == channel_id)
+                || s.thread(channel_id).is_some()
+        })
     }
 
     pub fn has_public_voice_channel(&self, channel_id: &str) -> bool {
@@ -1341,6 +1519,7 @@ impl ServerState {
                 name_color: u.name_color.clone(),
                 nameplate_style: u.nameplate_style.clone(),
                 profile_effect: u.profile_effect.clone(),
+                profile: u.profile.clone(),
                 created_at: acc_created,
                 online: visible_online,
                 voice_channel_id: u.voice_channel_id.clone(),
@@ -1366,6 +1545,7 @@ impl ServerState {
                 name_color: acc.name_color.clone(),
                 nameplate_style: acc.nameplate_style.clone(),
                 profile_effect: acc.profile_effect.clone(),
+                profile: acc.profile.clone(),
                 created_at: acc.created_at.clone(),
                 online: false,
                 voice_channel_id: None,

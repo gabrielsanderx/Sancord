@@ -43,6 +43,7 @@ async fn main() {
             tick.tick().await;
             sancord::social::expire_statuses(&expiry_state).await;
             sancord::timeouts::expire(&expiry_state).await;
+            sancord::threads::expire(&expiry_state).await;
             sancord::slowmode::prune_shared(&expiry_state).await;
         }
     });

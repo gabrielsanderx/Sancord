@@ -14,6 +14,9 @@ pub const NAME_MAX: usize = 100;
 pub const MAX_THREADS_PER_SERVER: usize = 1000;
 pub const MAX_FORUM_TAGS: usize = 20;
 pub const MAX_POST_TAGS: usize = 5;
+/// Etapa C6: prazos de inatividade aceitos (1 h, 24 h, 3 dias, 1 semana).
+pub const AUTO_ARCHIVE_CHOICES: [u32; 4] = [60, 1440, 4320, 10080];
+pub const MAX_THREAD_MEMBERS: usize = 1000;
 const TAG_NAME_MAX: usize = 20;
 const TAG_EMOJI_MAX: usize = 8;
 
@@ -144,6 +147,9 @@ pub async fn create(state: &SharedState, user_id: &str, channel_id: String, name
     let result: Result<Thread, &'static str> = (|| {
         let srv = st.find_server_by_text_channel(&channel_id).ok_or("Canal não encontrado.")?;
         let ch = srv.find_channel(&channel_id).ok_or("Não é possível criar uma thread dentro de outra.")?;
+        if !ch.kind.is_text_like() {
+            return Err("Threads só podem ser criadas em canais de texto ou fórum.");
+        }
         let perms = srv.channel_permissions(&lower, &channel_id);
         if !perms.view_channel || !perms.read_history || !perms.send_messages {
             return Err("Você não pode criar threads neste canal.");
@@ -187,6 +193,8 @@ pub async fn create(state: &SharedState, user_id: &str, channel_id: String, name
             archived: false,
             locked: false,
             tags,
+            auto_archive_minutes: crate::models::default_auto_archive_minutes(),
+            members: vec![lower.clone()],
         })
     })();
     let thread = match result {
@@ -207,7 +215,8 @@ pub async fn create(state: &SharedState, user_id: &str, channel_id: String, name
     st.send_to(user_id, ServerMessage::ThreadCreated { thread });
 }
 
-pub async fn update(state: &SharedState, user_id: &str, thread_id: String, name: Option<String>, archived: Option<bool>, locked: Option<bool>, tags: Option<Vec<String>>) {
+#[allow(clippy::too_many_arguments)]
+pub async fn update(state: &SharedState, user_id: &str, thread_id: String, name: Option<String>, archived: Option<bool>, locked: Option<bool>, tags: Option<Vec<String>>, auto_archive_minutes: Option<u32>) {
     let mut st = state.write().await;
     let Some(lower) = lower_of(&st, user_id) else { return };
     let Some(mut thread) = find_thread(&st, &thread_id).filter(|t| st.can_view_channel(&lower, &t.id)) else { return };
@@ -215,7 +224,7 @@ pub async fn update(state: &SharedState, user_id: &str, thread_id: String, name:
     let owner = thread.owner == lower;
     let parent = st.find_server(&thread.server_id).and_then(|s| s.find_channel(&thread.parent_id)).cloned();
     let result: Result<(), &'static str> = (|| {
-        if (name.is_some() || archived.is_some() || tags.is_some()) && !(owner || moderator) {
+        if (name.is_some() || archived.is_some() || tags.is_some() || auto_archive_minutes.is_some()) && !(owner || moderator) {
             return Err("Só quem criou a thread ou a moderação podem alterá-la.");
         }
         if let Some(requested) = &tags {
@@ -240,6 +249,12 @@ pub async fn update(state: &SharedState, user_id: &str, thread_id: String, name:
         }
         if let Some(l) = locked {
             thread.locked = l;
+        }
+        if let Some(m) = auto_archive_minutes {
+            if !AUTO_ARCHIVE_CHOICES.contains(&m) {
+                return Err("Escolha 1 hora, 24 horas, 3 dias ou 1 semana.");
+            }
+            thread.auto_archive_minutes = m;
         }
         Ok(())
     })();
@@ -297,9 +312,15 @@ pub fn remove_threads_of(st: &mut ServerState, server_id: &str, parent_id: &str)
 }
 
 /// Nova mensagem numa thread: atualiza atividade e desarquiva (se não trancada).
-pub fn on_message(st: &mut ServerState, channel_id: &str, at: i64) {
+pub fn on_message(st: &mut ServerState, channel_id: &str, at: i64, author_lower: Option<&str>) {
     let Some(mut thread) = find_thread(st, channel_id) else { return };
     thread.last_message_at = at;
+    // Quem escreve passa a seguir a thread (como no Discord).
+    if let Some(a) = author_lower {
+        if !thread.members.iter().any(|m| m == a) && thread.members.len() < MAX_THREAD_MEMBERS {
+            thread.members.push(a.to_string());
+        }
+    }
     thread.message_count = thread.message_count.saturating_add(1);
     if thread.archived && !thread.locked {
         thread.archived = false;
@@ -312,4 +333,54 @@ pub fn on_message_deleted(st: &mut ServerState, channel_id: &str) {
     let Some(mut thread) = find_thread(st, channel_id) else { return };
     thread.message_count = thread.message_count.saturating_sub(1);
     store(st, thread);
+}
+
+/// Etapa C6: seguir (`join = true`) ou deixar de seguir uma thread que a pessoa vê.
+pub async fn set_membership(state: &SharedState, user_id: &str, thread_id: String, join: bool) {
+    let mut st = state.write().await;
+    let Some(lower) = lower_of(&st, user_id) else { return };
+    let Some(mut thread) = find_thread(&st, &thread_id).filter(|t| st.can_view_channel(&lower, &t.id)) else {
+        st.feedback(user_id, false, "thread_member", "Thread não encontrada.");
+        return;
+    };
+    let present = thread.members.iter().any(|m| m == &lower);
+    if join == present {
+        return;
+    }
+    if join {
+        if thread.members.len() >= MAX_THREAD_MEMBERS {
+            st.feedback(user_id, false, "thread_member", "Esta thread atingiu o limite de membros.");
+            return;
+        }
+        thread.members.push(lower);
+    } else {
+        thread.members.retain(|m| m != &lower);
+    }
+    store(&mut st, thread);
+}
+
+/// Etapa C6: arquiva as threads sem mensagens há mais que o prazo de cada uma.
+/// Devolve quantas foram arquivadas. Chamado pelo laço periódico do servidor.
+pub fn archive_idle(st: &mut ServerState, now: i64) -> usize {
+    let idle: Vec<Thread> = st
+        .servers
+        .iter()
+        .flat_map(|s| s.threads.iter())
+        .filter(|t| {
+            let minutes = if AUTO_ARCHIVE_CHOICES.contains(&t.auto_archive_minutes) { t.auto_archive_minutes } else { 1440 };
+            !t.archived && now - t.last_message_at.max(t.created_at) >= minutes as i64 * 60_000
+        })
+        .cloned()
+        .collect();
+    let count = idle.len();
+    for mut t in idle {
+        t.archived = true;
+        store(st, t);
+    }
+    count
+}
+
+pub async fn expire(state: &SharedState) {
+    let mut st = state.write().await;
+    archive_idle(&mut st, crate::auth::now_ms());
 }

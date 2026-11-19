@@ -213,14 +213,45 @@ fn server_template(template: Option<&str>, srv_id: &str) -> (Vec<Category>, Vec<
     }
 }
 
-fn can_manage_server(st: &ServerState, user_id: &str, server_id: &str) -> bool {
+fn can_manage_invites_user(srv: &GuildServer, username_lower: &str) -> bool {
+    let p = srv.effective_permissions(username_lower);
+    srv.is_member(username_lower)
+        && (srv.is_owner(username_lower) || p.administrator || p.manage_server || p.manage_invites)
+}
+
+fn can_manage_invites(st: &ServerState, user_id: &str, server_id: &str) -> bool {
     let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
         return false;
     };
-    st.find_server(server_id).is_some_and(|s| {
-        let p = s.effective_permissions(&me_lower);
-        s.is_member(&me_lower) && (s.is_owner(&me_lower) || p.manage_server || p.administrator)
-    })
+    st.find_server(server_id)
+        .is_some_and(|s| can_manage_invites_user(s, &me_lower))
+}
+
+/// Atualiza a lista de convites em tempo real para todos os gerenciadores conectados do servidor.
+fn broadcast_invites_list(st: &mut ServerState, server_id: &str, exclude_user_id: Option<&str>) {
+    let invites = st.server_invites(server_id);
+    let invites_paused = st.find_server(server_id).is_some_and(|s| s.invites_paused);
+    let recipients: Vec<String> = st
+        .find_server(server_id)
+        .map(|srv| {
+            st.users
+                .iter()
+                .filter(|(uid, u)| {
+                    exclude_user_id != Some(uid.as_str())
+                        && can_manage_invites_user(srv, &u.username.to_lowercase())
+                })
+                .map(|(uid, _)| uid.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let msg = ServerMessage::InvitesList {
+        server_id: server_id.to_string(),
+        invites,
+        invites_paused,
+    };
+    for uid in recipients {
+        st.send_to(&uid, msg.clone());
+    }
 }
 
 /// Persiste o servidor e envia o estado novo a todos os membros conectados.
@@ -248,6 +279,7 @@ fn update_channel(
     topic: Option<String>,
     kind: Option<ChannelKind>,
     user_limit: Option<u32>,
+    bitrate_kbps: Option<u32>,
     slowmode_secs: Option<u32>,
     forum_tags: Option<Vec<crate::models::ForumTag>>,
 ) {
@@ -313,6 +345,15 @@ fn update_channel(
             }
             ch.user_limit = limit.min(crate::voice::MAX_USER_LIMIT);
         }
+        if let Some(kbps) = bitrate_kbps {
+            if ch.kind != ChannelKind::Voice {
+                return Err("Taxa de bits só vale para canais de voz.");
+            }
+            if kbps != 0 && !(32..=256).contains(&kbps) {
+                return Err("A taxa de bits deve ficar entre 32 e 256 kbps.");
+            }
+            ch.bitrate_kbps = kbps;
+        }
         if let Some(secs) = slowmode_secs {
             ch.slowmode_secs = secs;
         }
@@ -325,6 +366,12 @@ fn update_channel(
     match result {
         Ok(tag_names) => {
             let mut parts = Vec::new();
+            if let Some(kbps) = bitrate_kbps {
+                parts.push(match kbps {
+                    0 => "bitrate: padrão (128 kbps)".to_string(),
+                    v => format!("bitrate: {v} kbps"),
+                });
+            }
             if let Some(s) = slowmode_secs {
                 parts.push(match s {
                     0 => "modo lento desligado".to_string(),
@@ -490,10 +537,19 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
 /// Registra a conexão autenticada e envia o estado inicial completo.
 /// Como o `Welcome` contém o estado atual, uma reconexão também serve para
 /// sincronizar tudo que o cliente perdeu enquanto estava offline.
-async fn join_authenticated(user_id: &str, acc: Account, state: &SharedState) {
+async fn join_authenticated(user_id: &str, mut acc: Account, state: &SharedState) {
     let account_id = acc.id.clone();
     let account_email = acc.email.clone();
     let mut st = state.write().await;
+    // Badges derivadas no servidor (contas criadas depois da carga também recebem as suas).
+    {
+        let lower = acc.username.to_lowercase();
+        let granted = st.badge_grants.get(&lower).cloned().unwrap_or_default();
+        acc.profile.badges = crate::cosmetics::effective_badges(&acc, &granted);
+        if let Some(stored) = st.accounts.get_mut(&lower) {
+            stored.profile.badges = acc.profile.badges.clone();
+        }
+    }
     {
         {
             let user_info = {
@@ -517,6 +573,7 @@ async fn join_authenticated(user_id: &str, acc: Account, state: &SharedState) {
                     name_color: acc.name_color,
                     nameplate_style: acc.nameplate_style,
                     profile_effect: acc.profile_effect,
+                    profile: acc.profile,
                     created_at: acc.created_at,
                     voice_channel_id: None,
                     muted: false,
@@ -564,6 +621,12 @@ async fn join_authenticated(user_id: &str, acc: Account, state: &SharedState) {
                 ice_servers: st.config.ice_servers.clone(),
             };
             st.send_to(user_id, welcome);
+            if let Some(acc) = st.accounts.get(&final_lower) {
+                st.send_to(
+                    user_id,
+                    crate::profile::cosmetics_state(acc),
+                );
+            }
             st.send_to(
                 user_id,
                 ServerMessage::AccountEmailUpdated {
@@ -584,6 +647,26 @@ async fn join_authenticated(user_id: &str, acc: Account, state: &SharedState) {
             st.broadcast_friends_sync_all();
         }
     }
+}
+
+/// Etapa C2 — de onde veio uma mensagem encaminhada ("#canal · Servidor", DM, grupo).
+fn forward_label(st: &ServerState, channel_id: &str) -> String {
+    if channel_id.starts_with("gdm:") {
+        return "Grupo".into();
+    }
+    if ServerState::is_private_text(channel_id) {
+        return "Mensagem direta".into();
+    }
+    st.find_server_by_text_channel(channel_id)
+        .map(|s| {
+            let place = s
+                .find_channel(channel_id)
+                .map(|c| format!("#{}", c.name))
+                .or_else(|| s.thread(channel_id).map(|t| format!("🧵 {}", t.name)))
+                .unwrap_or_else(|| "#canal".into());
+            format!("{place} · {}", s.name)
+        })
+        .unwrap_or_else(|| "Canal".into())
 }
 
 /// Busca uma mensagem para alteração: primeiro no cache, depois no banco
@@ -824,6 +907,63 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             }
         }
 
+        ClientMessage::SetProfileMedia { kind, attachment_id } => {
+            let mut st = state.write().await;
+            match crate::profile::set_media(&mut st, user_id, &kind, attachment_id.as_deref()) {
+                Ok(msg) => st.feedback(user_id, true, "profile_media", msg),
+                Err(msg) => st.feedback(user_id, false, "profile_media", msg),
+            }
+        }
+
+        ClientMessage::SetServerProfile { server_id, changes } => {
+            let mut st = state.write().await;
+            match crate::profile::set_server_profile(&mut st, user_id, &server_id, changes) {
+                Ok(()) => st.feedback(user_id, true, "server_profile", "Perfil do servidor salvo."),
+                Err(msg) => st.feedback(user_id, false, "server_profile", msg),
+            }
+        }
+
+        ClientMessage::GetProfileBoard => crate::profile_board::send_owner_state(&*state.read().await, user_id),
+        ClientMessage::SaveProfileBoard { board } => {
+            let mut st = state.write().await;
+            if let Err(message) = crate::profile_board::save(&mut st, user_id, board) {
+                st.feedback(user_id, false, "profile_board", message);
+            }
+        }
+
+        m @ (ClientMessage::GetProfileSharing
+        | ClientMessage::SetProfilePrivacy { .. }
+        | ClientMessage::SetProfileLink { .. }
+        | ClientMessage::RemoveProfileLink { .. }
+        | ClientMessage::StartGitHubProfileVerification { .. }
+        | ClientMessage::CheckGitHubProfileVerification { .. }) => {
+            crate::profile_sharing::handle(state, user_id, m).await;
+        }
+
+        ClientMessage::GetBadgeAdminState => {
+            let st = state.read().await;
+            crate::profile::send_badge_admin_state(&st, user_id);
+        }
+
+        ClientMessage::SetUserBadges { target_username, badges } => {
+            let mut st = state.write().await;
+            match crate::profile::set_user_badges(&mut st, user_id, &target_username, badges) {
+                Ok(()) => st.feedback(user_id, true, "badge_admin", "Selos atualizados."),
+                Err(msg) => st.feedback(user_id, false, "badge_admin", msg),
+            }
+        }
+
+        m @ (ClientMessage::SetCosmeticFavorite { .. }
+        | ClientMessage::MarkCosmeticsSeen { .. }
+        | ClientMessage::SaveProfilePreset { .. }
+        | ClientMessage::DeleteProfilePreset { .. }
+        | ClientMessage::EquipProfileLook { .. }) => {
+            let mut st = state.write().await;
+            if let Err(message) = crate::cosmetic_collection::handle(&mut st, user_id, m) {
+                st.feedback(user_id, false, "cosmetic_collection", message);
+            }
+        }
+
         ClientMessage::UpdateAvatar { avatar_url } => {
             if let Err(e) = validate_image_data_url(&avatar_url, MAX_PROFILE_IMAGE_BYTES) {
                 state.read().await.feedback(user_id, false, "update_avatar", e.user_message());
@@ -862,12 +1002,18 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             theme_accent,
             name_style,
             name_color,
+            name_color_secondary,
+            name_gradient_direction,
             nameplate_style,
             profile_effect,
             display_name,
             pronouns,
             custom_status_emoji,
             custom_status_expires_in,
+            theme_highlight,
+            theme_mode,
+            theme_direction,
+            profile_frame,
         } => {
             let mut st = state.write().await;
             // None = manter; Some("") = limpar.
@@ -888,7 +1034,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 .map(|s| s.trim().chars().take(60).collect::<String>())
                 .filter(|s| !s.is_empty());
             let clean_bio = bio
-                .map(|s| s.trim().chars().take(200).collect::<String>())
+                .map(|s| s.trim().chars().take(crate::profile::BIO_MAX_CHARS).collect::<String>())
                 .filter(|s| !s.is_empty());
 
             fn clean_opt_token(input: Option<String>, max_len: usize) -> Option<Option<String>> {
@@ -902,7 +1048,6 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 })
             }
 
-            let upd_dec = clean_opt_token(avatar_decoration, 40);
             let upd_banner = banner_url.map(|s| {
                 let t = s.trim();
                 if t.is_empty() {
@@ -917,49 +1062,70 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             fn clean_color(input: Option<String>) -> Option<Option<String>> {
                 clean_opt_token(input, 16).map(|v| v.filter(|c| is_hex_color(c)))
             }
-            // Identificadores de estilo: apenas [a-z0-9-_].
-            fn clean_ident(input: Option<String>, max_len: usize) -> Option<Option<String>> {
-                clean_opt_token(input, max_len).map(|v| {
-                    v.filter(|s| s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
-                })
-            }
-            let upd_dec = upd_dec.map(|v| v.filter(|s| !s.contains(['<', '>', '"', '\''])));
             let upd_tp = clean_color(theme_primary);
             let upd_ta = clean_color(theme_accent);
-            let upd_ns = clean_ident(name_style, 24);
             let upd_nc = clean_color(name_color);
-            let upd_np = clean_ident(nameplate_style, 32);
-            let upd_pe = clean_ident(profile_effect, 32);
-
-            let username_opt = if let Some(user) = st.users.get_mut(user_id) {
-                if let Some(ref sk) = clean_status {
-                    user.status_kind = sk.clone();
+            let upd_nc_secondary = name_color_secondary.and_then(|color| {
+                let color = color.trim();
+                if color.is_empty() { return Some(None); }
+                (color.len() == 7 && is_hex_color(color)).then(|| Some(color.to_ascii_lowercase()))
+            });
+            let upd_name_dir = crate::profile::clean_choice(name_gradient_direction, &crate::profile::THEME_DIRECTIONS);
+            let upd_th = clean_color(theme_highlight);
+            let upd_tm = crate::profile::clean_choice(theme_mode, &crate::profile::THEME_MODES);
+            let upd_td = crate::profile::clean_choice(theme_direction, &crate::profile::THEME_DIRECTIONS);
+            // Cosméticos: o servidor é a fonte de verdade (existe, é do tipo certo e a conta possui).
+            let me_key = st.users.get(user_id).map(|u| u.username.to_lowercase());
+            let account = me_key.as_ref().and_then(|l| st.accounts.get(l));
+            let mut equip_errors: Vec<&'static str> = Vec::new();
+            let mut equip = |input: Option<String>, kind: crate::cosmetics::Kind| -> Option<Option<String>> {
+                let raw = input?;
+                let acc = account?;
+                match crate::cosmetics::check_equip(acc, kind, &raw) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        equip_errors.push(e);
+                        None
+                    }
                 }
-                user.custom_status = clean_custom.clone();
-                user.bio = clean_bio.clone();
-                if let Some(ref v) = upd_display { user.display_name = v.clone(); }
-                if let Some(ref v) = upd_pronouns { user.pronouns = v.clone(); }
-                if clean_custom.is_none() {
-                    user.custom_status_emoji = None;
-                    user.custom_status_expires_at = None;
-                } else {
-                    if let Some(ref v) = upd_emoji { user.custom_status_emoji = v.clone(); }
-                    if let Some(v) = upd_expires { user.custom_status_expires_at = v; }
-                }
-                if let Some(ref v) = upd_dec { user.avatar_decoration = v.clone(); }
-                if let Some(ref v) = upd_banner { user.banner_url = v.clone(); }
-                if let Some(ref v) = upd_tp { user.theme_primary = v.clone(); }
-                if let Some(ref v) = upd_ta { user.theme_accent = v.clone(); }
-                if let Some(ref v) = upd_ns { user.name_style = v.clone(); }
-                if let Some(ref v) = upd_nc { user.name_color = v.clone(); }
-                if let Some(ref v) = upd_np { user.nameplate_style = v.clone(); }
-                if let Some(ref v) = upd_pe { user.profile_effect = v.clone(); }
-                Some(user.username.to_lowercase())
-            } else {
-                None
             };
+            let upd_dec = equip(avatar_decoration, crate::cosmetics::Kind::AvatarDecoration);
+            let upd_ns = equip(name_style, crate::cosmetics::Kind::NameStyle);
+            let upd_np = equip(nameplate_style, crate::cosmetics::Kind::Nameplate);
+            let upd_pe = equip(profile_effect, crate::cosmetics::Kind::ProfileEffect);
+            let upd_fr = equip(profile_frame, crate::cosmetics::Kind::ProfileFrame);
 
-            if let Some(key) = username_opt {
+            if let Some(key) = me_key {
+                for user in st.users.values_mut().filter(|user| user.username.to_lowercase() == key) {
+                    if let Some(ref sk) = clean_status {
+                        user.status_kind = sk.clone();
+                    }
+                    user.custom_status = clean_custom.clone();
+                    user.bio = clean_bio.clone();
+                    if let Some(ref v) = upd_display { user.display_name = v.clone(); }
+                    if let Some(ref v) = upd_pronouns { user.pronouns = v.clone(); }
+                    if clean_custom.is_none() {
+                        user.custom_status_emoji = None;
+                        user.custom_status_expires_at = None;
+                    } else {
+                        if let Some(ref v) = upd_emoji { user.custom_status_emoji = v.clone(); }
+                        if let Some(v) = upd_expires { user.custom_status_expires_at = v; }
+                    }
+                    if let Some(ref v) = upd_dec { user.avatar_decoration = v.clone(); }
+                    if let Some(ref v) = upd_banner { user.banner_url = v.clone(); }
+                    if let Some(ref v) = upd_tp { user.theme_primary = v.clone(); }
+                    if let Some(ref v) = upd_ta { user.theme_accent = v.clone(); }
+                    if let Some(ref v) = upd_ns { user.name_style = v.clone(); }
+                    if let Some(ref v) = upd_nc { user.name_color = v.clone(); }
+                    if let Some(ref v) = upd_nc_secondary { user.profile.name_color_secondary = v.clone(); }
+                    if let Some(ref v) = upd_name_dir { user.profile.name_gradient_direction = v.clone(); }
+                    if let Some(ref v) = upd_np { user.nameplate_style = v.clone(); }
+                    if let Some(ref v) = upd_pe { user.profile_effect = v.clone(); }
+                    if let Some(ref v) = upd_fr { user.profile.profile_frame = v.clone(); }
+                    if let Some(ref v) = upd_th { user.profile.theme_highlight = v.clone(); }
+                    if let Some(ref v) = upd_tm { user.profile.theme_mode = v.clone(); }
+                    if let Some(ref v) = upd_td { user.profile.theme_direction = v.clone(); }
+                }
                 if let Some(acc) = st.accounts.get_mut(&key) {
                     if let Some(sk) = clean_status {
                         acc.status_kind = sk;
@@ -981,10 +1147,19 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     if let Some(v) = upd_ta { acc.theme_accent = v; }
                     if let Some(v) = upd_ns { acc.name_style = v; }
                     if let Some(v) = upd_nc { acc.name_color = v; }
+                    if let Some(v) = upd_nc_secondary { acc.profile.name_color_secondary = v; }
+                    if let Some(v) = upd_name_dir { acc.profile.name_gradient_direction = v; }
                     if let Some(v) = upd_np { acc.nameplate_style = v; }
                     if let Some(v) = upd_pe { acc.profile_effect = v; }
+                    if let Some(v) = upd_fr { acc.profile.profile_frame = v; }
+                    if let Some(v) = upd_th { acc.profile.theme_highlight = v; }
+                    if let Some(v) = upd_tm { acc.profile.theme_mode = v; }
+                    if let Some(v) = upd_td { acc.profile.theme_direction = v; }
                 }
                 st.save_accounts();
+            }
+            if let Some(first) = equip_errors.first() {
+                st.feedback(user_id, false, "update_profile", *first);
             }
 
             let sync_msg = ServerMessage::VoiceStateSync {
@@ -1003,11 +1178,18 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             nonce,
             attachment_ids,
             poll,
+            reply_mention,
+            forward,
         } => {
             let nonce: Option<String> = nonce.map(|n| n.chars().take(64).collect());
             // Mensagem respondida pode estar fora do cache: busca antes de travar o estado.
-            let reply_target = match &reply_to_id {
-                Some(rid) => fetch_message_for_mutation(state, &channel_id, rid).await,
+            // Encaminhar não é responder: com `forward`, a resposta é ignorada.
+            let reply_target = match (&reply_to_id, &forward) {
+                (Some(rid), None) => fetch_message_for_mutation(state, &channel_id, rid).await,
+                _ => None,
+            };
+            let forward_source = match &forward {
+                Some(f) => fetch_message_for_mutation(state, &f.channel_id, &f.message_id).await,
                 None => None,
             };
             let fail = |st: &ServerState, message: &str| {
@@ -1043,7 +1225,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             };
             let trimmed = if trimmed.is_empty() { poll.as_ref().map(|p| p.question.as_str()).unwrap_or("") } else { trimmed };
 
-            if trimmed.is_empty() && !valid_img && attachment_ids.is_empty() {
+            if trimmed.is_empty() && !valid_img && attachment_ids.is_empty() && forward.is_none() {
                 return;
             }
 
@@ -1073,7 +1255,44 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     }
                 }
             }
-            let has_files = valid_img || !attachments.is_empty();
+            // Encaminhar (Etapa C2): cópia congelada, só de mensagem que a pessoa pode ler.
+            let forward_snapshot = match &forward {
+                None => None,
+                Some(req) => {
+                    if poll.is_some() {
+                        fail(&st, "Não é possível encaminhar junto com uma enquete.");
+                        return;
+                    }
+                    let Some(src) = forward_source.as_ref().filter(|m| m.channel_id == req.channel_id) else {
+                        fail(&st, "A mensagem que você quer encaminhar não existe mais.");
+                        return;
+                    };
+                    if !st.can_read_text_channel(&me_lower, &req.channel_id) {
+                        fail(&st, "Você não tem acesso à mensagem que quer encaminhar.");
+                        return;
+                    }
+                    if src.poll.is_some() {
+                        fail(&st, "Enquetes não podem ser encaminhadas.");
+                        return;
+                    }
+                    // Reencaminhar mantém a cópia original (sem encaminhamento dentro de encaminhamento).
+                    let snapshot = src.forward.clone().unwrap_or_else(|| crate::models::ForwardSnapshot {
+                        source_channel_id: src.channel_id.clone(),
+                        source_message_id: src.id.clone(),
+                        source_label: forward_label(&st, &src.channel_id),
+                        original_created_at: src.created_at,
+                        content: src.content.clone(),
+                        attachments: src.attachments.clone(),
+                        embeds: src.embeds.clone(),
+                    });
+                    if snapshot.content.trim().is_empty() && snapshot.attachments.is_empty() && snapshot.embeds.is_empty() {
+                        fail(&st, "Esta mensagem não pode ser encaminhada.");
+                        return;
+                    }
+                    Some(snapshot)
+                }
+            };
+            let has_files = valid_img || !attachments.is_empty() || forward_snapshot.as_ref().is_some_and(|f| !f.attachments.is_empty());
             let is_dm = ServerState::is_private_text(&channel_id);
             let mut target_server_id: Option<String> = None;
             // Canal com modo lento: registra o envio só depois de a mensagem ser aceita.
@@ -1131,6 +1350,10 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     fail(&st, "Somente moderadores podem publicar em canais de anúncios.");
                     return;
                 }
+                if is_announcement && forward_snapshot.is_some() {
+                    fail(&st, "Não é possível encaminhar para canais de anúncios.");
+                    return;
+                }
                 // Modo lento: quem gerencia mensagens ou canais não espera.
                 let slow = srv.slowmode_for(&channel_id);
                 if slow > 0 && !(perms.manage_messages || perms.manage_channels || perms.administrator) {
@@ -1157,21 +1380,29 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     id: target.id.clone(),
                     author_name: target.author_name.clone(),
                     preview: preview_src,
+                    mention: reply_mention,
                 }
             });
             let content: String = trimmed.chars().take(2000).collect();
+            // Emojis de servidor: só os que o autor pode usar continuam como imagem.
+            let content: String = crate::emojis::normalize_content(&st, &me_lower, &content).chars().take(2000).collect();
+            // Resposta sem menção: o autor original não é notificado (salvo um @ explícito no texto).
             let reply_author_lower = reply_target
                 .as_ref()
-                .filter(|t| t.author_id != "system")
+                .filter(|t| t.author_id != "system" && reply_mention)
                 .map(|t| t.author_name.to_lowercase());
             let mentions = compute_mentions(&st, &channel_id, &content, &me_lower, reply_author_lower.as_deref());
 
             // AutoMod (Fase 8): aplicado no servidor, antes de gravar ou distribuir.
             if let Some(srv_id) = target_server_id.clone() {
-                let checked = match &poll {
+                let mut checked = match &poll {
                     Some(p) => format!("{content} {}", crate::community::poll_text(p)),
                     None => content.clone(),
                 };
+                // O conteúdo encaminhado também passa pelas regras do servidor de destino.
+                if let Some(f) = &forward_snapshot {
+                    checked = format!("{checked} {}", f.content);
+                }
                 if let Err((rule, reason)) = crate::moderation::check_message(&mut st, &srv_id, &me_lower, &checked, &mentions) {
                     fail(&st, reason);
                     crate::moderation::report_violation(&mut st, &srv_id, &me_lower, &channel_id, rule, &content);
@@ -1199,6 +1430,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 mentions,
                 poll,
                 author_kind: crate::models::AuthorKind::User,
+                embeds: Vec::new(),
+                forward: forward_snapshot,
             };
 
             // Estado social antes de contar menções: solicitações não notificam.
@@ -1228,7 +1461,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             }
             if !is_dm {
                 // Thread: atividade, contador e desarquivar (no-op para canais comuns).
-                crate::threads::on_message(&mut st, &channel_id, chat_msg.created_at);
+                crate::threads::on_message(&mut st, &channel_id, chat_msg.created_at, Some(&me_lower));
             }
             // Menções pendentes para os destinatários; o autor já leu a própria mensagem.
             st.bump_mentions(&channel_id, &me_lower, &chat_msg.mentions);
@@ -1236,6 +1469,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 st.mark_read(&acc, &channel_id, chat_msg.created_at);
             }
 
+            // Prévias de links: em segundo plano, chegam como atualização da mensagem.
+            crate::link_preview::spawn_for_message(state.clone(), &chat_msg);
             if is_dm {
                 st.send_to_dm_participants(&channel_id, ServerMessage::NewChatMessage { message: chat_msg });
                 if let Some((peer, _)) = &dm_peer {
@@ -1279,6 +1514,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 Some(srv.id.clone())
             };
             let new_content: String = trimmed.chars().take(2000).collect();
+            let new_content: String = crate::emojis::normalize_content(&st, &me_lower, &new_content).chars().take(2000).collect();
             // Menções recalculadas para o destaque (edição não gera nova notificação).
             let new_mentions = compute_mentions(&st, &channel_id, &new_content, &me_lower, None);
             if let Some(sid) = srv_id.clone() {
@@ -1293,7 +1529,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 if msg.authored_by(user_id, &user.username) {
                     msg.content = new_content;
                     msg.edited = true;
-                    let reply_author = msg.reply_to.as_ref().map(|r| r.author_name.to_lowercase());
+                    // Resposta enviada sem menção continua sem menção depois da edição.
+                    let reply_author = msg.reply_to.as_ref().filter(|r| r.mention).map(|r| r.author_name.to_lowercase());
                     msg.mentions = new_mentions;
                     if let Some(r) = reply_author.filter(|r| *r != me_lower) {
                         if !msg.mentions.users.contains(&r) {
@@ -1309,6 +1546,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 st.feedback(user_id, false, "edit_chat", "Não foi possível editar esta mensagem.");
             }
             if let Some(message) = updated_msg {
+                // Texto novo pode ter outros links (ou nenhum): as prévias são recalculadas.
+                crate::link_preview::spawn_for_message(state.clone(), &message);
                 if is_dm {
                     st.send_to_dm_participants(&channel_id, ServerMessage::MessageUpdated { message });
                 } else if let Some(sid) = srv_id {
@@ -1424,14 +1663,26 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             message_id,
             emoji,
         } => {
-            let Some(clean_emoji) = clean_reaction(&emoji) else {
+            let unicode = clean_reaction(&emoji);
+            if unicode.is_none() && !emoji.trim_start().starts_with('<') {
                 state.read().await.feedback(user_id, false, "reaction", "Reação inválida.");
                 return;
-            };
+            }
             let fallback = fetch_message_for_mutation(state, &channel_id, &message_id).await;
             let mut st = state.write().await;
             let Some(user) = st.users.get(user_id).cloned() else {
                 return;
+            };
+            // Emoji do servidor: só quem pode usá-lo adiciona; os demais só tiram a própria reação.
+            let (clean_emoji, removal_only) = match unicode {
+                Some(e) => (e, false),
+                None => match crate::emojis::reaction_key(&st, &user.username.to_lowercase(), &emoji) {
+                    Some(k) => k,
+                    None => {
+                        st.feedback(user_id, false, "reaction", "Reação inválida.");
+                        return;
+                    }
+                },
             };
             if !st.rates.entry(user_id.to_string()).or_default().allow_reaction(crate::auth::now_ms()) {
                 return;
@@ -1453,6 +1704,9 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             };
             let username = user.username.clone();
             let updated_msg = mutate_message(&mut st, &channel_id, &message_id, fallback, |msg| {
+                if removal_only && !msg.reactions.get(&clean_emoji).is_some_and(|u| u.contains(&username)) {
+                    return false;
+                }
                 if !msg.reactions.contains_key(&clean_emoji) && msg.reactions.len() >= MAX_REACTIONS_PER_MESSAGE {
                     return false;
                 }
@@ -1562,6 +1816,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     permission_overwrites: overwrites,
                     permissions_synced,
                     user_limit: 0,
+                    bitrate_kbps: 0,
                     slowmode_secs: 0,
                     forum_tags: Vec::new(),
                     effective_permissions: None,
@@ -1630,8 +1885,10 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             match removed {
                 Ok(kind) => {
                     crate::integrations::remove_channel(&mut st, &channel_id);
-                    if kind.is_text_like() {
+                    if kind.is_text_like() || kind.accepts_messages() {
                         st.delete_channel_history(&channel_id);
+                    }
+                    if kind.is_text_like() {
                         crate::threads::remove_threads_of(&mut st, &target_srv_id, &channel_id);
                     }
                     crate::moderation::audit_by_uid(&st, user_id, &target_srv_id, "channel_delete", Some(&channel_id), Some(format!("tipo: {}", kind.as_str())));
@@ -1656,7 +1913,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         } => {
             // Mantido por compatibilidade; equivale a UpdateChannel só com nome.
             let mut st = state.write().await;
-            update_channel(&mut st, user_id, &server_id, &channel_id, Some(name), None, None, None, None, None);
+            update_channel(&mut st, user_id, &server_id, &channel_id, Some(name), None, None, None, None, None, None);
         }
 
         ClientMessage::UpdateChannel {
@@ -1666,11 +1923,12 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             topic,
             kind,
             user_limit,
+            bitrate_kbps,
             slowmode_secs,
             forum_tags,
         } => {
             let mut st = state.write().await;
-            update_channel(&mut st, user_id, &server_id, &channel_id, name, topic, kind, user_limit, slowmode_secs, forum_tags);
+            update_channel(&mut st, user_id, &server_id, &channel_id, name, topic, kind, user_limit, bitrate_kbps, slowmode_secs, forum_tags);
         }
 
         ClientMessage::UpdateChannelPermissions { server_id, channel_id, overwrites, sync_category } => {
@@ -1850,39 +2108,88 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             server_id,
             max_age_secs,
             max_uses,
+            channel_id,
+            temporary,
         } => {
             let mut st = state.write().await;
+            let now = crate::auth::now_ms();
+            if !st.rates.entry(user_id.to_string()).or_default().allow_invite_create(now) {
+                st.feedback(user_id, false, "create_invite", "Muitos convites criados em sequência. Aguarde um momento.");
+                return;
+            }
             let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
                 return;
             };
-            let allowed = st
-                .find_server(&server_id)
-                .is_some_and(|s| s.is_member(&me_lower) && s.effective_permissions(&me_lower).create_invites);
-            if !allowed {
-                st.feedback(user_id, false, "create_invite", "Você não tem permissão para criar convites neste servidor.");
-                return;
-            }
-            if st.invites.values().filter(|i| i.server_id == server_id).count() >= MAX_INVITES_PER_SERVER {
-                st.server_invites(&server_id); // limpa vencidos
-                if st.invites.values().filter(|i| i.server_id == server_id).count() >= MAX_INVITES_PER_SERVER {
-                    st.feedback(user_id, false, "create_invite", "Limite de convites ativos atingido. Revogue alguns antes.");
+            let target_channel = channel_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|c| !c.is_empty())
+                .map(str::to_string);
+            let check = st.find_server(&server_id).map(|s| {
+                if !s.is_member(&me_lower) {
+                    return Err("Você não é membro deste servidor.");
+                }
+                if let Some(ref cid) = target_channel {
+                    if s.find_channel(cid).is_none() {
+                        return Err("Canal do convite não encontrado neste servidor.");
+                    }
+                    let cp = s.channel_permissions(&me_lower, cid);
+                    if !cp.view_channel || !cp.create_invites {
+                        return Err("Você não tem permissão para criar convites para este canal.");
+                    }
+                } else if !s.effective_permissions(&me_lower).create_invites {
+                    return Err("Você não tem permissão para criar convites neste servidor.");
+                }
+                Ok(())
+            });
+            match check {
+                None => {
+                    st.feedback(user_id, false, "create_invite", "Servidor não encontrado.");
                     return;
                 }
+                Some(Err(msg)) => {
+                    st.feedback(user_id, false, "create_invite", msg);
+                    return;
+                }
+                Some(Ok(())) => {}
             }
-            let invite = st.create_invite(&server_id, &me_lower, max_age_secs, max_uses);
-            crate::moderation::audit(&st, &server_id, &me_lower, "invite_create", Some(&invite.code), Some(format!("validade: {:?} s; usos: {:?}", max_age_secs, max_uses)));
+            if st.active_invite_count(&server_id) >= MAX_INVITES_PER_SERVER {
+                st.feedback(user_id, false, "create_invite", "Limite de convites ativos atingido. Revogue alguns antes.");
+                return;
+            }
+            let invite = st.create_invite(
+                &server_id,
+                &me_lower,
+                max_age_secs,
+                max_uses,
+                target_channel.clone(),
+                temporary,
+            );
+            crate::moderation::audit(
+                &st,
+                &server_id,
+                &me_lower,
+                "invite_create",
+                Some(&invite.code),
+                Some(format!(
+                    "validade: {:?} s; usos: {:?}; canal: {:?}; temporário: {}",
+                    max_age_secs, max_uses, target_channel, temporary
+                )),
+            );
             let info = st.invite_info(&invite);
             st.send_to(user_id, ServerMessage::InviteCreated { invite: info });
+            broadcast_invites_list(&mut st, &server_id, Some(user_id));
         }
 
         ClientMessage::ListInvites { server_id } => {
             let mut st = state.write().await;
-            if !can_manage_server(&st, user_id, &server_id) {
+            if !can_manage_invites(&st, user_id, &server_id) {
                 st.feedback(user_id, false, "list_invites", "Você não tem permissão para ver os convites deste servidor.");
                 return;
             }
             let invites = st.server_invites(&server_id);
-            st.send_to(user_id, ServerMessage::InvitesList { server_id, invites });
+            let invites_paused = st.find_server(&server_id).is_some_and(|s| s.invites_paused);
+            st.send_to(user_id, ServerMessage::InvitesList { server_id, invites, invites_paused });
         }
 
         ClientMessage::RevokeInvite { server_id, code } => {
@@ -1891,11 +2198,16 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
                 return;
             };
-            let Some(invite) = st.invites.get(&code_up).cloned().filter(|i| i.server_id == server_id) else {
+            let Some(invite) = st
+                .invites
+                .get(&code_up)
+                .cloned()
+                .filter(|i| i.server_id == server_id && !i.is_revoked())
+            else {
                 st.feedback(user_id, false, "revoke_invite", "Convite não encontrado.");
                 return;
             };
-            if !(can_manage_server(&st, user_id, &server_id) || invite.creator == me_lower) {
+            if !(can_manage_invites(&st, user_id, &server_id) || invite.creator == me_lower) {
                 st.feedback(user_id, false, "revoke_invite", "Você não pode revogar este convite.");
                 return;
             }
@@ -1911,13 +2223,113 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 );
                 return;
             }
-            st.remove_invite(&code_up);
+            st.revoke_invite(&code_up, &me_lower);
             crate::moderation::audit(&st, &server_id, &me_lower, "invite_revoke", Some(&code_up), None);
             st.feedback(user_id, true, "revoke_invite", "Convite revogado.");
-            if can_manage_server(&st, user_id, &server_id) {
-                let invites = st.server_invites(&server_id);
-                st.send_to(user_id, ServerMessage::InvitesList { server_id, invites });
+            broadcast_invites_list(&mut st, &server_id, None);
+        }
+
+        ClientMessage::SetInvitesPaused { server_id, paused } => {
+            let mut st = state.write().await;
+            let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
+                return;
+            };
+            if !can_manage_invites(&st, user_id, &server_id) {
+                st.feedback(user_id, false, "invites_paused", "Você não tem permissão para pausar ou retomar convites.");
+                return;
             }
+            let Some(srv) = st.find_server_mut(&server_id) else {
+                return;
+            };
+            srv.invites_paused = paused;
+            let updated_srv = srv.clone();
+            st.save_servers();
+            crate::moderation::audit(
+                &st,
+                &server_id,
+                &me_lower,
+                if paused { "invites_paused" } else { "invites_resumed" },
+                None,
+                None,
+            );
+            st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
+            broadcast_invites_list(&mut st, &server_id, None);
+            st.feedback(
+                user_id,
+                true,
+                "invites_paused",
+                if paused {
+                    "Convites pausados temporariamente."
+                } else {
+                    "Convites retomados."
+                },
+            );
+        }
+
+        ClientMessage::SetCustomInviteSlug { server_id, slug } => {
+            if server_id == "sancord" {
+                state.read().await.feedback(user_id, false, "custom_invite_slug", "O servidor principal usa o endereço reservado SANCORD.");
+                return;
+            }
+            let mut st = state.write().await;
+            let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
+                return;
+            };
+            if !can_manage_invites(&st, user_id, &server_id) {
+                st.feedback(user_id, false, "custom_invite_slug", "Você não tem permissão para configurar o link personalizado.");
+                return;
+            }
+            let trimmed = slug.as_deref().map(str::trim).unwrap_or("");
+            let new_slug = if trimmed.is_empty() {
+                None
+            } else {
+                let valid = match ServerState::validate_custom_invite_slug(trimmed) {
+                    Ok(s) => s,
+                    Err(msg) => {
+                        st.feedback(user_id, false, "custom_invite_slug", msg);
+                        return;
+                    }
+                };
+                let upper = valid.to_uppercase();
+                let taken_by_server = st.servers.iter().any(|s| {
+                    s.id != server_id
+                        && s.custom_invite_slug
+                            .as_deref()
+                            .is_some_and(|sl| sl.eq_ignore_ascii_case(&valid))
+                });
+                let taken_by_invite = st.invites.contains_key(&upper);
+                if taken_by_server || taken_by_invite {
+                    st.feedback(user_id, false, "custom_invite_slug", "Este link personalizado já está em uso.");
+                    return;
+                }
+                Some(valid)
+            };
+
+            let Some(srv) = st.find_server_mut(&server_id) else {
+                return;
+            };
+            srv.custom_invite_slug = new_slug.clone();
+            let updated_srv = srv.clone();
+            st.save_servers();
+            crate::moderation::audit(
+                &st,
+                &server_id,
+                &me_lower,
+                if new_slug.is_some() { "custom_invite_slug_set" } else { "custom_invite_slug_clear" },
+                new_slug.as_deref(),
+                None,
+            );
+            st.broadcast_to_server(&server_id, ServerMessage::ServerUpdated { server: updated_srv });
+            st.feedback(
+                user_id,
+                true,
+                "custom_invite_slug",
+                if new_slug.is_some() {
+                    "Link personalizado salvo!"
+                } else {
+                    "Link personalizado removido."
+                },
+            );
         }
 
         ClientMessage::UpdateUserPrefs {
@@ -1929,6 +2341,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             user_notes,
             ignored_users,
             starred_messages,
+            mutes,
+            favorite_gifs,
         } => {
             let mut st = state.write().await;
             let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
@@ -1967,6 +2381,15 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             }
             if let Some(starred) = starred_messages {
                 prefs.starred_messages = crate::models::UserPrefs::sanitize_starred_messages(starred);
+            }
+            if let Some(m) = mutes {
+                prefs.mutes = crate::models::UserPrefs::sanitize_mutes(m, chrono::Utc::now().timestamp_millis());
+            }
+            if let Some(gifs) = favorite_gifs {
+                let attachments = &st.attachments;
+                prefs.favorite_gifs = crate::models::UserPrefs::sanitize_favorite_gifs(gifs, |id| {
+                    attachments.get(id).is_some_and(|a| a.content_type == "image/gif")
+                });
             }
             st.set_prefs(&account_id, prefs);
             // Revalida (remove servidores que não são do usuário) e sincroniza todas as abas.
@@ -2172,6 +2595,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             st.save_friends();
             st.send_friends_sync_to_username(&me_lower);
             st.send_friends_sync_to_username(&from_lower);
+            if accept { crate::profile_sharing::refresh_relationship(&st, &me_lower, &from_lower); }
         }
 
         ClientMessage::CancelFriendRequest { target_username } => {
@@ -2212,6 +2636,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             st.save_friends();
             st.send_friends_sync_to_username(&me_lower);
             st.send_friends_sync_to_username(&target_lower);
+            crate::profile_sharing::refresh_relationship(&st, &me_lower, &target_lower);
         }
 
         ClientMessage::OpenDm { target_username } => {
@@ -2373,11 +2798,17 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         ClientMessage::CreateThread { channel_id, name, message_id, tags } => {
             crate::threads::create(state, user_id, channel_id, name, message_id, tags).await;
         }
-        ClientMessage::UpdateThread { thread_id, name, archived, locked, tags } => {
-            crate::threads::update(state, user_id, thread_id, name, archived, locked, tags).await;
+        ClientMessage::UpdateThread { thread_id, name, archived, locked, tags, auto_archive_minutes } => {
+            crate::threads::update(state, user_id, thread_id, name, archived, locked, tags, auto_archive_minutes).await;
         }
         ClientMessage::DeleteThread { thread_id } => {
             crate::threads::delete(state, user_id, thread_id).await;
+        }
+        ClientMessage::JoinThread { thread_id } => {
+            crate::threads::set_membership(state, user_id, thread_id, true).await;
+        }
+        ClientMessage::LeaveThread { thread_id } => {
+            crate::threads::set_membership(state, user_id, thread_id, false).await;
         }
         ClientMessage::ListEvents { server_id } => {
             crate::community::list(state, user_id, server_id).await;
@@ -2575,6 +3006,13 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 automod: Default::default(),
                 threads: Vec::new(),
                 member_timeouts: HashMap::new(),
+                member_nicks: HashMap::new(),
+                member_profiles: HashMap::new(),
+                emojis: Vec::new(),
+                invites_paused: false,
+                rules_text: None,
+                custom_invite_slug: None,
+                temporary_members: Vec::new(),
             };
 
             // Mensagem de boas-vindas no primeiro canal de texto comum (não no de anúncios).
@@ -2607,6 +3045,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 mentions: MessageMentions::default(),
                 poll: None,
                 author_kind: crate::models::AuthorKind::System,
+                embeds: Vec::new(),
+                forward: None,
             };
 
             for ch in &text_channels {
@@ -2625,57 +3065,192 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 expires_at: None,
                 max_uses: None,
                 uses: 0,
+                channel_id: None,
+                temporary: false,
+                revoked_at: None,
+                revoked_by: None,
+                last_used_at: None,
             });
 
             let history = st.public_chat_history_for(&me_lower);
-            st.send_to(user_id, ServerMessage::ServerCreated { server: srv, history });
+            st.send_to(
+                user_id,
+                ServerMessage::ServerCreated {
+                    server: srv,
+                    history,
+                    default_channel_id: None,
+                },
+            );
             st.send_servers_sync_to_username(&me_lower);
         }
 
-        ClientMessage::JoinServerByInvite { invite_code } => {
+        ClientMessage::JoinServerByInvite {
+            invite_code,
+            accepted_rules,
+        } => {
             let mut st = state.write().await;
-            let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
+            let now = crate::auth::now_ms();
+            if !st.rates.entry(user_id.to_string()).or_default().allow_invite_join(now) {
+                st.feedback(user_id, false, "join_invite", "Muitas tentativas de entrada por convite. Aguarde um momento.");
+                return;
+            }
+            let Some(me) = st.users.get(user_id).cloned() else {
                 return;
             };
-            let (invite, srv_id) = match st.resolve_invite(&invite_code) {
+            let me_lower = me.username.to_lowercase();
+            let (invite, srv_id, already_member, requires_rules) = match st.resolve_invite_detailed(&invite_code) {
                 Ok((inv, srv)) => {
                     if srv.is_banned(&me_lower) {
-                        st.feedback(user_id, false, "join_invite", "Você foi banido deste servidor e não pode entrar novamente.");
+                        st.feedback(user_id, false, "join_invite", "Você não pode entrar neste servidor.");
                         return;
                     }
+                    let already = srv.is_member(&me_lower);
+                    let needs_rules = srv.rules_text.as_deref().is_some_and(|r| !r.trim().is_empty());
                     let sid = srv.id.clone();
-                    (inv, sid)
+                    (inv, sid, already, needs_rules)
                 }
-                Err(msg) => {
+                Err((_kind, msg)) => {
                     st.feedback(user_id, false, "join_invite", msg);
                     return;
                 }
             };
 
-            let now = crate::auth::now_ms();
-            let joined_now = st.find_server_mut(&srv_id).is_some_and(|srv| {
-                if srv.is_member(&me_lower) {
-                    return false;
+            if !already_member && requires_rules && !accepted_rules {
+                st.feedback(
+                    user_id,
+                    false,
+                    "join_invite_rules",
+                    "Leia e aceite as regras do servidor antes de entrar.",
+                );
+                return;
+            }
+
+            let joined_now = if already_member {
+                false
+            } else {
+                st.find_server_mut(&srv_id).is_some_and(|srv| {
+                    if srv.is_member(&me_lower) {
+                        return false;
+                    }
+                    srv.members.push(me_lower.clone());
+                    srv.member_joined_at.insert(me_lower.clone(), now);
+                    if invite.temporary && !srv.temporary_members.iter().any(|m| m == &me_lower) {
+                        srv.temporary_members.push(me_lower.clone());
+                    }
+                    true
+                })
+            };
+
+            let target_channel_id = st.find_server(&srv_id).and_then(|srv| {
+                if let Some(ref cid) = invite.channel_id {
+                    if let Some(ch) = srv.find_channel(cid) {
+                        if srv.channel_permissions(&me_lower, &ch.id).view_channel {
+                            return Some(ch.id.clone());
+                        }
+                    }
                 }
-                srv.members.push(me_lower.clone());
-                srv.member_joined_at.insert(me_lower.clone(), now);
-                true
+                srv.text_channels
+                    .iter()
+                    .find(|c| c.kind == ChannelKind::Text && srv.channel_permissions(&me_lower, &c.id).view_channel)
+                    .or_else(|| srv.text_channels.iter().find(|c| srv.channel_permissions(&me_lower, &c.id).view_channel))
+                    .map(|c| c.id.clone())
             });
+
             if joined_now {
-                // Só conta uso quando alguém realmente entrou.
-                let mut used = invite;
-                used.uses += 1;
+                // Só conta uso quando a entrada realmente foi concluída.
+                let mut used = invite.clone();
+                used.uses = used.uses.saturating_add(1);
+                used.last_used_at = Some(now);
                 st.register_invite(used);
                 st.save_servers();
+                crate::moderation::audit(
+                    &st,
+                    &srv_id,
+                    &me_lower,
+                    "member_join_invite",
+                    Some(&invite.code),
+                    invite.temporary.then(|| "associação temporária".to_string()),
+                );
+
+                // Mensagem de sistema de entrada no canal de destino (ou canal padrão de texto).
+                let welcome_ch = target_channel_id
+                    .as_deref()
+                    .and_then(|cid| {
+                        st.find_server(&srv_id).and_then(|srv| {
+                            srv.find_channel(cid)
+                                .filter(|c| c.kind.accepts_messages())
+                                .map(|c| c.id.clone())
+                        })
+                    })
+                    .or_else(|| {
+                        st.find_server(&srv_id).and_then(|srv| {
+                            srv.text_channels
+                                .iter()
+                                .find(|c| c.kind == ChannelKind::Text)
+                                .or_else(|| srv.text_channels.first())
+                                .map(|c| c.id.clone())
+                        })
+                    });
+                if let Some(wch) = welcome_ch {
+                    let display = me
+                        .display_name
+                        .clone()
+                        .filter(|d| !d.is_empty())
+                        .unwrap_or_else(|| me.username.clone());
+                    let join_msg = ChatMessage {
+                        id: Uuid::new_v4().to_string(),
+                        channel_id: wch,
+                        author_id: "system".into(),
+                        author_name: "Sancord".into(),
+                        author_color: "#5865F2".into(),
+                        author_avatar: Some("/logo.png".into()),
+                        content: format!("**{}** entrou no servidor.", display),
+                        image_url: None,
+                        reply_to: None,
+                        reactions: HashMap::new(),
+                        edited: false,
+                        pinned: false,
+                        timestamp: Local::now().format("%H:%M").to_string(),
+                        created_at: st.next_message_ts(),
+                        nonce: None,
+                        attachments: Vec::new(),
+                        mentions: MessageMentions::default(),
+                        poll: None,
+                        author_kind: crate::models::AuthorKind::System,
+                        embeds: Vec::new(),
+                        forward: None,
+                    };
+                    st.insert_message(join_msg.clone());
+                    st.broadcast_to_server(
+                        &srv_id,
+                        ServerMessage::ServerMemberJoined {
+                            server_id: srv_id.clone(),
+                            username: me.username.clone(),
+                            display_name: display,
+                            invite_code: invite.code.clone(),
+                            message: join_msg,
+                        },
+                    );
+                }
             }
 
             let Some(srv) = st.find_server(&srv_id).cloned() else {
                 return;
             };
             let history = st.public_chat_history_for(&me_lower);
-            st.send_to(user_id, ServerMessage::ServerCreated { server: srv.clone(), history });
+            st.send_to(
+                user_id,
+                ServerMessage::ServerCreated {
+                    server: srv.clone(),
+                    history,
+                    default_channel_id: target_channel_id,
+                },
+            );
             st.send_servers_sync_to_username(&me_lower);
             st.broadcast_to_server(&srv_id, ServerMessage::ServerUpdated { server: srv });
+            if joined_now {
+                broadcast_invites_list(&mut st, &srv_id, Some(user_id));
+            }
         }
 
         ClientMessage::LeaveServer { server_id } => {
@@ -2704,8 +3279,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     return;
                 }
                 srv.members.retain(|m| m != &me_lower);
+                srv.temporary_members.retain(|m| m != &me_lower);
                 srv.member_roles.remove(&me_lower);
                 srv.member_joined_at.remove(&me_lower);
+                srv.member_nicks.remove(&me_lower);
+                srv.member_profiles.remove(&me_lower);
                 srv.clone()
             };
             st.save_servers();
@@ -2729,6 +3307,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             icon_color,
             regenerate_invite,
             is_community,
+            rules_text,
         } => {
             let clean_name = clean_display_name(&name, 40);
             if clean_name.chars().count() < 2 {
@@ -2784,19 +3363,23 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 if let Some(c) = is_community {
                     srv.is_community = c;
                 }
+                if let Some(rules) = rules_text {
+                    let clean: String = rules.trim().chars().take(1000).collect();
+                    srv.rules_text = (!clean.is_empty()).then_some(clean);
+                }
                 srv.clone()
             };
             crate::moderation::audit(&st, &server_id, &me_lower, "server_update", None, regenerate_invite.then(|| "novo convite padrão".to_string()));
 
             if regenerate_invite {
-                // Troca o convite padrão: o antigo deixa de funcionar.
+                // Troca o convite padrão: o antigo é marcado como revogado (nunca reutilizado).
                 let old = updated_srv.invite_code.clone();
                 let new_code = st.generate_invite_code();
                 if let Some(srv) = st.find_server_mut(&server_id) {
                     srv.invite_code = new_code.clone();
                 }
                 st.save_servers();
-                st.remove_invite(&old);
+                st.revoke_invite(&old, &me_lower);
                 st.register_invite(Invite {
                     code: new_code,
                     server_id: server_id.clone(),
@@ -2805,7 +3388,13 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     expires_at: None,
                     max_uses: None,
                     uses: 0,
+                    channel_id: None,
+                    temporary: false,
+                    revoked_at: None,
+                    revoked_by: None,
+                    last_used_at: None,
                 });
+                broadcast_invites_list(&mut st, &server_id, None);
             }
             let updated_srv = st.find_server(&server_id).cloned().unwrap_or(updated_srv);
 
@@ -2847,7 +3436,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             }
 
             let removed_srv = st.servers.remove(pos);
-            for ch in &removed_srv.text_channels {
+            for ch in removed_srv.text_channels.iter().chain(removed_srv.voice_channels.iter()) {
                 crate::integrations::remove_channel(&mut st, &ch.id);
                 st.delete_channel_history(&ch.id);
             }
@@ -2875,9 +3464,16 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         ClientMessage::InviteFriendToServer {
             server_id,
             target_username,
+            invite_code,
+            channel_id,
         } => {
             let target_lower = target_username.trim().to_lowercase();
             let mut st = state.write().await;
+            let now = crate::auth::now_ms();
+            if !st.rates.entry(user_id.to_string()).or_default().allow_invite_dm(now) {
+                st.feedback(user_id, false, "invite_dm", "Muitos convites enviados em sequência. Aguarde um momento.");
+                return;
+            }
             let Some(me) = st.users.get(user_id).cloned() else {
                 return;
             };
@@ -2889,9 +3485,42 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             let Some(srv) = st.find_server(&server_id).cloned() else {
                 return;
             };
-            if !srv.is_member(&me_lower) || !srv.effective_permissions(&me_lower).create_invites {
+            if !srv.is_member(&me_lower) {
                 return;
             }
+            let target_channel = channel_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|c| !c.is_empty() && srv.find_channel(c).is_some())
+                .map(str::to_string);
+            let allowed = if let Some(ref cid) = target_channel {
+                let cp = srv.channel_permissions(&me_lower, cid);
+                cp.view_channel && cp.create_invites
+            } else {
+                srv.effective_permissions(&me_lower).create_invites
+            };
+            if !allowed {
+                st.feedback(user_id, false, "invite_dm", "Você não tem permissão para criar convites neste servidor.");
+                return;
+            }
+
+            // Usa o código informado (se for válido para este servidor), senão usa o convite padrão.
+            let chosen_code = invite_code
+                .as_deref()
+                .map(ServerState::extract_invite_code)
+                .filter(|c| {
+                    st.invites
+                        .get(c)
+                        .is_some_and(|inv| inv.server_id == srv.id && inv.invalid_status(now).is_none())
+                })
+                .unwrap_or_else(|| {
+                    if let Some(cid) = target_channel {
+                        let inv = st.create_invite(&srv.id, &me_lower, Some(7 * 86400), None, Some(cid), false);
+                        inv.code
+                    } else {
+                        srv.invite_code.clone()
+                    }
+                });
 
             let dm_id = ServerState::make_dm_id(&me_lower, &target_lower);
             for p in [&me_lower, &target_lower] {
@@ -2910,8 +3539,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 author_color: me.avatar_color.clone(),
                 author_avatar: me.avatar_url.clone(),
                 content: format!(
-                    "🎟️ Convite para entrar no servidor **{}** [[INVITE:{}:{}]]",
-                    srv.name, srv.invite_code, srv.name
+                    "Convite para entrar no servidor **{}** [[INVITE:{}:{}]]",
+                    srv.name, chosen_code, srv.name
                 ),
                 image_url: None,
                 reply_to: None,
@@ -2925,6 +3554,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 mentions: MessageMentions::default(),
                 poll: None,
                 author_kind: crate::models::AuthorKind::User,
+                embeds: Vec::new(),
+                forward: None,
             };
 
             st.insert_message(invite_msg.clone());
@@ -3165,6 +3796,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     srv.member_roles.remove(&target_lower);
                 } else {
                     srv.member_roles.insert(target_lower.clone(), valid_ids);
+                    // Ao receber um cargo, membro temporário vira membro permanente.
+                    srv.temporary_members.retain(|m| m != &target_lower);
                 }
                 (srv.clone(), names)
             };
@@ -3208,8 +3841,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     return;
                 }
                 srv.members.retain(|m| m != &target_lower);
+                srv.temporary_members.retain(|m| m != &target_lower);
                 srv.member_roles.remove(&target_lower);
                 srv.member_joined_at.remove(&target_lower);
+                srv.member_nicks.remove(&target_lower);
+                srv.member_profiles.remove(&target_lower);
                 (srv.clone(), srv.name.clone())
             };
 
@@ -3242,6 +3878,38 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             match crate::timeouts::apply(&mut st, user_id, &server_id, &target_username, duration_secs, reason.as_deref(), crate::auth::now_ms()) {
                 Ok(msg) => st.feedback(user_id, true, "timeout_member", msg),
                 Err(msg) => st.feedback(user_id, false, "timeout_member", msg),
+            }
+        }
+
+        ClientMessage::CreateServerEmoji { server_id, name, attachment_id } => {
+            let mut st = state.write().await;
+            match crate::emojis::create(&mut st, user_id, &server_id, &name, &attachment_id) {
+                Ok(msg) => st.feedback(user_id, true, "server_emoji", msg),
+                Err(msg) => st.feedback(user_id, false, "server_emoji", msg),
+            }
+        }
+
+        ClientMessage::RenameServerEmoji { server_id, emoji_id, name } => {
+            let mut st = state.write().await;
+            match crate::emojis::rename(&mut st, user_id, &server_id, &emoji_id, &name) {
+                Ok(msg) => st.feedback(user_id, true, "server_emoji", msg),
+                Err(msg) => st.feedback(user_id, false, "server_emoji", msg),
+            }
+        }
+
+        ClientMessage::DeleteServerEmoji { server_id, emoji_id } => {
+            let mut st = state.write().await;
+            match crate::emojis::delete(&mut st, user_id, &server_id, &emoji_id) {
+                Ok(msg) => st.feedback(user_id, true, "server_emoji", msg),
+                Err(msg) => st.feedback(user_id, false, "server_emoji", msg),
+            }
+        }
+
+        ClientMessage::SetMemberNickname { server_id, target_username, nickname } => {
+            let mut st = state.write().await;
+            match crate::nicknames::apply(&mut st, user_id, &server_id, &target_username, nickname.as_deref()) {
+                Ok(msg) => st.feedback(user_id, true, "member_nick", msg),
+                Err(msg) => st.feedback(user_id, false, "member_nick", msg),
             }
         }
 
@@ -3281,8 +3949,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     return;
                 }
                 srv.members.retain(|m| m != &target_lower);
+                srv.temporary_members.retain(|m| m != &target_lower);
                 srv.member_roles.remove(&target_lower);
                 srv.member_joined_at.remove(&target_lower);
+                srv.member_nicks.remove(&target_lower);
+                srv.member_profiles.remove(&target_lower);
                 if !srv.banned_usernames.contains(&target_lower) {
                     srv.banned_usernames.push(target_lower.clone());
                 }
@@ -3439,6 +4110,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 if !srv.members.contains(&target_lower) {
                     srv.members.push(target_lower.clone());
                 }
+                srv.temporary_members.retain(|m| m != &target_lower);
                 srv.owner_username = target_lower.clone();
                 if let Some(founder_role_id) = srv
                     .roles
@@ -3899,6 +4571,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                             *m = new_lower.clone();
                         }
                     }
+                    for m in &mut srv.temporary_members {
+                        if m == &old_lower {
+                            *m = new_lower.clone();
+                        }
+                    }
                     if let Some(roles) = srv.member_roles.remove(&old_lower) {
                         srv.member_roles.insert(new_lower.clone(), roles);
                     }
@@ -3924,6 +4601,12 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     }
                     if let Some(t) = srv.member_joined_at.remove(&old_lower) {
                         srv.member_joined_at.insert(new_lower.clone(), t);
+                    }
+                    if let Some(n) = srv.member_nicks.remove(&old_lower) {
+                        srv.member_nicks.insert(new_lower.clone(), n);
+                    }
+                    if let Some(profile) = srv.member_profiles.remove(&old_lower) {
+                        srv.member_profiles.insert(new_lower.clone(), profile);
                     }
                 }
                 let mut updated_prefs = Vec::new();
@@ -4123,5 +4806,14 @@ async fn cleanup_disconnected_user(user_id: &str, state: &SharedState) {
         };
         st.broadcast(sync_msg);
         st.broadcast_friends_sync_all();
+
+        // Associação temporária: remove o usuário de servidores onde entrou por convite temporário
+        // caso não tenha recebido nenhum cargo e não tenha outra sessão ativa.
+        let removed_lower = removed_user.username.to_lowercase();
+        let updated_servers = st.cleanup_temporary_members_for(&removed_lower);
+        for srv in updated_servers {
+            let sid = srv.id.clone();
+            st.broadcast_to_server(&sid, ServerMessage::ServerUpdated { server: srv });
+        }
     }
 }

@@ -1,6 +1,6 @@
 //! Projeção por destinatário na última fronteira de saída do WebSocket.
 //! Uma resposta de consulta antiga também é revalidada aqui após revogações.
-use crate::models::{ServerMessage, UserInfo};
+use crate::models::{GuildServer, ServerMessage, UserInfo};
 use crate::state::ServerState;
 
 impl ServerState {
@@ -168,6 +168,7 @@ impl ServerState {
     }
 
     fn project_user_voice(&self, recipient: &str, user: &mut UserInfo) {
+        crate::profile_sharing::project_user(self, recipient, user);
         if user
             .voice_channel_id
             .as_ref()
@@ -179,6 +180,13 @@ impl ServerState {
             user.camera_stream_id = None;
             user.screen_stream_id = None;
             user.stream_quality = None;
+        }
+    }
+
+    fn project_server_profile(&self, recipient: &str, server: &mut GuildServer) {
+        *server = server.visible_to(recipient);
+        for (owner, profile) in &mut server.member_profiles {
+            crate::profile_sharing::project_member_profile(self, recipient, owner, profile);
         }
     }
 
@@ -197,7 +205,7 @@ impl ServerState {
             } => {
                 servers.retain(|s| s.is_member(recipient));
                 for srv in servers {
-                    *srv = srv.visible_to(recipient);
+                    self.project_server_profile(recipient, srv);
                 }
                 for channels in [text_channels, voice_channels] {
                     channels.retain(|ch| self.can_view_channel(recipient, &ch.id));
@@ -222,17 +230,17 @@ impl ServerState {
             ServersSync { servers } => {
                 servers.retain(|s| s.is_member(recipient));
                 for srv in servers {
-                    *srv = srv.visible_to(recipient);
+                    self.project_server_profile(recipient, srv);
                 }
             }
-            ServerCreated { server, history }
+            ServerCreated { server, history, .. }
             | ServerAccessUpdated {
                 server, history, ..
             } => {
                 if !server.is_member(recipient) {
                     return false;
                 }
-                *server = server.visible_to(recipient);
+                self.project_server_profile(recipient, server);
                 history.retain(|ch, _| self.can_read_text_channel(recipient, ch));
                 if let ServerAccessUpdated { read_states, .. } = msg {
                     read_states.retain(|r| self.can_view_channel(recipient, &r.channel_id));
@@ -242,7 +250,18 @@ impl ServerState {
                 if !server.is_member(recipient) {
                     return false;
                 }
-                *server = server.visible_to(recipient);
+                self.project_server_profile(recipient, server);
+            }
+            ServerMemberJoined { message, .. } => {
+                return self.can_view_channel(recipient, &message.channel_id);
+            }
+            ServerProfileUpdated { server_id, username, profile } => {
+                if !self.find_server(server_id).is_some_and(|s| s.is_member(recipient)) {
+                    return false;
+                }
+                if let Some(profile) = profile {
+                    crate::profile_sharing::project_member_profile(self, recipient, username, profile);
+                }
             }
             ChannelCreated { channel, .. } => {
                 if !self.can_view_channel(recipient, &channel.id) {
@@ -286,11 +305,14 @@ impl ServerState {
                 }
             }
             UserTyping { channel_id, .. }
-            | PeerJoinedVoice { channel_id, .. }
             | PeerLeftVoice { channel_id, .. } => {
                 if !self.can_view_channel(recipient, channel_id) {
                     return false;
                 }
+            }
+            PeerJoinedVoice { channel_id, peer } => {
+                if !self.can_view_channel(recipient, channel_id) { return false; }
+                self.project_user_voice(recipient, peer);
             }
             ReadStateUpdated { state } => {
                 if !self.can_view_channel(recipient, &state.channel_id) {
@@ -312,31 +334,27 @@ impl ServerState {
                 incoming_requests,
                 outgoing_requests,
                 dm_conversations,
+                message_requests,
+                blocked,
+                groups,
                 ..
             } => {
                 for friend in friends
                     .iter_mut()
                     .chain(incoming_requests)
                     .chain(outgoing_requests)
+                    .chain(blocked)
                     .chain(dm_conversations.iter_mut().map(|c| &mut c.peer))
+                    .chain(message_requests.iter_mut().map(|c| &mut c.peer))
+                    .chain(groups.iter_mut().flat_map(|group| &mut group.members))
                 {
-                    if friend
-                        .voice_channel_id
-                        .as_ref()
-                        .is_some_and(|ch| !self.can_view_channel(recipient, ch))
-                    {
-                        friend.voice_channel_id = None;
-                    }
+                    crate::profile_sharing::project_friend(self, recipient, friend);
                 }
             }
-            DmOpened { peer, .. } => {
-                if peer
-                    .voice_channel_id
-                    .as_ref()
-                    .is_some_and(|ch| !self.can_view_channel(recipient, ch))
-                {
-                    peer.voice_channel_id = None;
-                }
+            DmOpened { peer, .. } => crate::profile_sharing::project_friend(self, recipient, peer),
+            UserProfile { user, mutual_friends, .. } => {
+                crate::profile_sharing::project_friend(self, recipient, user);
+                for friend in mutual_friends { crate::profile_sharing::project_friend(self, recipient, friend); }
             }
             _ => {}
         }
@@ -360,6 +378,7 @@ impl ServerState {
             .map(|acc| {
                 srv.text_channels
                     .iter()
+                    .chain(srv.voice_channels.iter())
                     .filter(|c| self.can_view_channel(&lower, &c.id))
                     .map(|ch| {
                         let state = self.read_state(&acc.id, &ch.id);

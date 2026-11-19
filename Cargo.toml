@@ -1,6 +1,6 @@
 [package]
 name = "sancord"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 # BinÃ¡rios declarados explicitamente: `src/bin/capture_bridge.rs` Ã© um mÃ³dulo do
 # SancordApp, nÃ£o um programa (a detecÃ§Ã£o automÃ¡tica o tratava como binÃ¡rio sem `main`).
