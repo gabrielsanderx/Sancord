@@ -914,6 +914,9 @@ function storeSession(token, username, remember) {
     const store = remember ? localStorage : sessionStorage;
     store.setItem(SancordNet.sessionKey("sancord_token"), token);
     store.setItem(SancordNet.sessionKey("sancord_username"), username || "");
+    if (typeof SancordSelfProfileMenu !== "undefined" && SancordSelfProfileMenu.registerSavedAccount) {
+      SancordSelfProfileMenu.registerSavedAccount({ token, username, remember });
+    }
   } catch (_) {}
 }
 
@@ -1310,9 +1313,22 @@ async function handleServerMessage(msg) {
       resetCollectionOnAccountChange();
       resetProfileSharing();
       try {
-        // Mantém o nome salvo em sincronia (usado só para exibição).
-        const store = localStorage.getItem(SancordNet.sessionKey("sancord_token")) ? localStorage : sessionStorage;
+        // Mantém o nome salvo em sincronia (usado só para exibição) e registra no seletor de contas.
+        const remembered = Boolean(localStorage.getItem(SancordNet.sessionKey("sancord_token")));
+        const store = remembered ? localStorage : sessionStorage;
+        const curTok = getStoredToken();
         store.setItem(SancordNet.sessionKey("sancord_username"), payload.user?.username || "");
+        if (curTok && payload.user?.username && typeof SancordSelfProfileMenu !== "undefined") {
+          SancordSelfProfileMenu.registerSavedAccount({
+            id: payload.user.id,
+            username: payload.user.username,
+            display_name: payload.user.display_name,
+            avatar_color: payload.user.avatar_color,
+            avatar_url: payload.user.avatar_url,
+            token: curTok,
+            remember: remembered,
+          });
+        }
       } catch (_) {}
       state.servers = payload.servers || [];
       const activeSrv =
@@ -4158,7 +4174,8 @@ function updateSelfProfileUI() {
     selfStatusText.textContent = "🔊 Em voz";
     selfStatusText.classList.add("in-voice-txt");
   } else {
-    selfStatusText.textContent = state.selfUser.custom_status || STATUS_LABELS[sk] || "Online";
+    const customTxt = typeof customStatusText === "function" ? customStatusText(state.selfUser) : state.selfUser.custom_status;
+    selfStatusText.textContent = customTxt || STATUS_LABELS[sk] || "Online";
     selfStatusText.classList.remove("in-voice-txt");
   }
 
@@ -4172,6 +4189,20 @@ function updateSelfProfileUI() {
   }
   if (settingsNavUsername) {
     settingsNavUsername.textContent = state.selfUser.username;
+  }
+  if (typeof SancordSelfProfileMenu !== "undefined") {
+    const curTok = getStoredToken();
+    if (curTok && state.selfUser.username) {
+      SancordSelfProfileMenu.registerSavedAccount({
+        id: state.selfUser.id,
+        username: state.selfUser.username,
+        display_name: state.selfUser.display_name,
+        avatar_color: state.selfUser.avatar_color,
+        avatar_url: state.selfUser.avatar_url,
+        token: curTok,
+      });
+    }
+    SancordSelfProfileMenu.refreshIfOpen();
   }
 }
 
@@ -4453,9 +4484,7 @@ avatarCropApplyBtn?.addEventListener("click", async () => {
   }
 });
 
-selfAvatar?.addEventListener("click", () => {
-  avatarFileInput?.click();
-});
+// Clicar no avatar do painel inferior abre o Self Profile Menu (nunca abre seletor de arquivo direto).
 
 settingsChangeAvatarBtn?.addEventListener("click", () => {
   avatarFileInput?.click();
@@ -5209,6 +5238,10 @@ async function openRecoverPasswordDialog() {
 document.getElementById("open-recover-password-btn")?.addEventListener("click", openRecoverPasswordDialog);
 
 function logoutAccount() {
+  if (typeof closeSelfProfileMenu === "function") closeSelfProfileMenu();
+  if (state.selfUser?.username && typeof SancordSelfProfileMenu !== "undefined") {
+    SancordSelfProfileMenu.removeSavedAccount(state.selfUser.username);
+  }
   leaveVoiceChannel();
   closeSettingsModal();
   const token = getStoredToken();
@@ -6686,10 +6719,19 @@ document.querySelectorAll(".settings-nav-item[data-settings-tab]").forEach((btn)
   btn.addEventListener("click", () => switchSettingsTab(btn.dataset.settingsTab));
 });
 
-openSettingsBtn?.addEventListener("click", () => openSettingsModal("account"));
-selfProfileTrigger?.addEventListener("click", (e) => {
-  if (e.target === selfAvatar || selfAvatar?.contains(e.target)) return;
+openSettingsBtn?.addEventListener("click", () => {
+  if (typeof closeSelfProfileMenu === "function") closeSelfProfileMenu();
   openSettingsModal("account");
+});
+selfProfileTrigger?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (typeof toggleSelfProfileMenu === "function") toggleSelfProfileMenu();
+});
+selfProfileTrigger?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    if (typeof toggleSelfProfileMenu === "function") toggleSelfProfileMenu();
+  }
 });
 closeSettingsBtn?.addEventListener("click", closeSettingsModal);
 settingsModal?.addEventListener("click", (e) => {

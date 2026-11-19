@@ -1,5 +1,11 @@
 # Histórico de versões
 
+## 0.2.5
+
+- Novo **Self Profile Menu** (`static/js/self-profile-menu.js`) no painel do próprio usuário no canto inferior esquerdo: clicar no avatar, nome ou status abre um cartão rápido ancorado acima do dock em vez de ir direto para Configurações, preservando Engrenagem (`⚙`), Microfone (`🎙`) e Fone (`🎧`) independentes.
+- Cabeçalho do Self Profile Menu renderizado com o sistema real de perfil (`SELF_PROFILE_MENU`), exibindo banner, avatar, decoração, presença, estilo de nome, `@username`, insígnias reais, tema e moldura com abertura instantânea a partir do cache.
+- Ações rápidas com ícones SVG do Sancord, navegação por teclado (`↑`, `↓`, `→`, `←`, `Enter`, `Esc`) e submenus com atraso de intenção no hover e fixação ao clicar: **Editar perfil**, **Status** (`Online`, `Ausente`, `Não perturbe`, `Invisível` em tempo real + modal rápido de **Status personalizado** com emoji e prazo), **Insígnias** (apenas badges reais possuídos), **Minha coleção** (atalhos diretos para cosméticos e presets), **Mudar de conta** (seletor multi-conta com sessões isoladas por servidor) e **Copiar ID do usuário** condicionado ao Modo Desenvolvedor.
+
 ## 0.2.4
 
 - Novo ícone do aplicativo Sancord ("Diálogo em S", `icon.ico`, `static/sancord-icon.svg`, `static/logo.png` e pacote de marca em `branding/`).

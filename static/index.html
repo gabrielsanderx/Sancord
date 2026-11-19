@@ -245,9 +245,9 @@
         <div class="user-profile-bar" id="self-user-profile-bar">
           <input type="file" id="avatar-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/*" class="hidden" />
           <input type="file" id="banner-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/*" class="hidden" />
-          <div class="user-info" id="self-profile-trigger" title="Clique para personalizar perfil ou alterar status">
+          <div class="user-info" id="self-profile-trigger" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-controls="self-profile-menu" title="Perfil e status">
             <div class="avatar-status-wrap" id="self-avatar-deco">
-              <div id="self-avatar" class="avatar editable-avatar" title="Trocar Foto ou GIF de Perfil">?</div>
+              <div id="self-avatar" class="avatar">?</div>
               <span id="self-status-dot" class="status-badge online"></span>
             </div>
             <div class="user-meta">
@@ -3893,6 +3893,7 @@
   <script src="/js/settings-center.js?v=2"></script>
   <!-- Editor visual de perfil: lateral com subeditores e perfil completo ao vivo. -->
   <script src="/js/profile-editor.js?v=1"></script>
+  <script src="/js/self-profile-menu.js?v=1"></script>
   <script src="/js/updater.js?v=1"></script>
   <script src="/js/composer.js?v=1"></script>
   <script src="/js/stickers.js?v=1"></script>

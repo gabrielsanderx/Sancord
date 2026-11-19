@@ -45,6 +45,7 @@ pub fn response(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/js/profile-sharing.js" => (include_bytes!("../../static/js/profile-sharing.js"), "text/javascript; charset=utf-8"),
         "/js/settings-center.js" => (include_bytes!("../../static/js/settings-center.js"), "text/javascript; charset=utf-8"),
         "/js/profile-editor.js" => (include_bytes!("../../static/js/profile-editor.js"), "text/javascript; charset=utf-8"),
+        "/js/self-profile-menu.js" => (include_bytes!("../../static/js/self-profile-menu.js"), "text/javascript; charset=utf-8"),
         "/js/updater.js" => (include_bytes!("../../static/js/updater.js"), "text/javascript; charset=utf-8"),
         "/logo.png" => (include_bytes!("../../static/logo.png"), "image/png"),
         "/sancord-icon.svg" => (include_bytes!("../../static/sancord-icon.svg"), "image/svg+xml"),

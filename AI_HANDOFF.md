@@ -1530,4 +1530,19 @@ Implementação local sobre as fontes da v0.2.3. O cliente Windows continua carr
 - **Instalado no atalho `D:\Sancord\Sancord.exe`:**
   - SHA-256: `ADC22819FB8791F17462407B916AED0872BD86E33A065F968B82093F7014428B`
   - Tamanho: `9.871.360` bytes (`D:\Sancord\Sancord-before-icon.exe` e `D:\Sancord\SancordServer.exe` `v0.2.3` preservados intactos).
-- Publicação da `v0.2.4` no GitHub continua aguardando autorização explícita do usuário.
+### Atualização 19/11/2026 19:43: Sancord v0.2.4 publicado oficialmente no GitHub
+- ✅ Atalho da área de trabalho (`C:\Users\gabri\Desktop\Sancord.lnk`) atualizado para `IconLocation = D:\Sancord\icon.ico,0` + flush do cache de ícones do Windows (`SHChangeNotify` + `ie4uinit.exe -show`).
+- ✅ **Commit na `main`:** `8db77453ffccda5e9a09a4ace4db83deba1b8c69` (53 alterados, 51 novos, 0 removidos; `Cargo.toml`, `Cargo.lock` e `CHANGELOG.md` em `0.2.4`; `sancord-release validate v0.2.4` OK; `393` testes aprovados).
+- ✅ **Tag e Release oficial (`Latest`):** `v0.2.4` — https://github.com/gabrielsanderx/Sancord/releases/tag/v0.2.4
+  - GitHub Actions `Stable Windows release` run `44628337277`: `tests`, `package`, `sign`, `verify-package` (HTTPS assinado) e `publish` todos aprovados (`0` falhas).
+  - Artefatos publicados: `Sancord.exe` (`9.748.480` B), `SancordServer.exe` (`14.701.568` B), `Sancord-0.2.4-windows-x64.zip` (`4.395.704` B), `sancord-update.json` (`2.155` B) e `sancord-update.sig` (`128` B).
+- **Produção local:** `D:\Sancord\SancordServer.exe` ainda segue na `v0.2.3` (porta `3000`, `data/sancord.db` esquema `v19`) aguardando autorização caso o usuário queira migrar o host local para a `v0.2.4` oficial (com backup prévio antes da migração `v19 → v21`).
+### Atualização 19/11/2026 19:55: Self Profile Menu no painel inferior (local, pós-v0.2.4)
+- ✅ **Self Profile Menu (`static/js/self-profile-menu.js`, `static/index.html`, `static/app.js`, `static/ui.css`, `src/bin/desktop_assets.rs`):**
+  - Removida a abertura direta de Configurações / file picker ao clicar no avatar/nome do painel inferior (`#self-profile-trigger` / `#self-avatar`); agora alterna o menu rápido `#self-profile-menu` ancorado acima do dock (`328 px`, reposicionado no resize, animação `120ms` fade+translate).
+  - Engrenagem (`⚙`), Microfone (`🎙`) e Fone (`🎧`) permanecem independentes; hover sutil apenas sobre `#self-profile-trigger`.
+  - Cabeçalho reutiliza `renderProfileCardIdentity(..., "SELF_PROFILE_MENU")` com dados em cache (abertura instantânea, efeito pesado desativado neste contexto, sincronizado em realtime via `updateSelfProfileUI`).
+  - Ações reais com ícones SVG do Sancord (`SancordIcons`): **Editar perfil** (abre `Configurações → Perfis`), **Status ›** (`Online`, `Ausente`, `Não perturbe`, `Invisível` em realtime + modal rápido **Definir status personalizado** + **Limpar status personalizado**), **Insígnias ›** (exibida apenas se a conta possuir badges reais), **Minha coleção ›** (atalhos diretos para decorações, molduras, efeitos, placas, estilos de nome e coleção/presets), **Mudar de conta ›** (seletor multi-conta com tokens isolados por origem, `Adicionar conta` e `Sair de todas as contas`) e **Copiar ID do usuário** (visível somente com Modo Desenvolvedor ativo, com feedback `ID copiado ✓`). Sem botões mortos (`Clipes`/`Orbs`).
+  - Navegação completa por teclado (`↑`, `↓`, `→`, `←`, `Enter`, `Esc`), clique fora e clique repetido fecham o menu.
+- **Testes:** `219/219` frontend (incluindo novo `tests/frontend-self-profile-menu.test.cjs`) + `9/9` `SancordApp` aprovados; QA visual no WebView2 (`1366×768`) aprovado com `0` erros de console.
+- **Instalado no atalho `D:\Sancord\Sancord.exe`:** SHA-256 `76BC26229AF3AF4DBB8A5E602AA851715DACB16B2A73751A5546944CE3CD1733` (`9.920.000` bytes; inclui correção do traço do status `Não perturbe` e fixação/atraso de intenção nos submenus). Aguardando eventuais modificações extras do usuário antes de subir a próxima versão ao GitHub.
