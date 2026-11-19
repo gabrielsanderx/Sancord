@@ -48,6 +48,16 @@ async fn main() {
         }
     });
 
+    let schedule_state = shared_state.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            sancord::scheduled::publish_due(&schedule_state, sancord::auth::now_ms()).await;
+        }
+    });
+
     let app = sancord::build_router(shared_state);
 
     let listener = match tokio::net::TcpListener::bind(bind).await {

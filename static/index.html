@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sancord</title>
   <link rel="icon" type="image/svg+xml" href="/sancord-icon.svg" />
-  <link rel="stylesheet" href="/styles.css?v=20" />
+  <link rel="stylesheet" href="/styles.css?v=21" />
   <!-- Design system e refatoração visual: camada final, depois de styles.css. -->
-  <link rel="stylesheet" href="/ui.css?v=13" />
+  <link rel="stylesheet" href="/ui.css?v=16" />
 </head>
 <body>
   <!-- Modal de Autenticação (Criar Conta / Entrar) -->
@@ -200,28 +200,24 @@
         <div id="voice-connection-panel" class="voice-connection-panel hidden">
           <div class="voice-status-top">
             <div class="voice-status-left">
-              <div id="voice-signal-box" class="voice-signal-box" title="Qualidade do Sinal">
+              <button type="button" id="voice-signal-box" class="voice-signal-box" title="Detalhes da conexão" aria-label="Detalhes da conexão" aria-expanded="false" aria-controls="voice-connection-details">
                 <svg data-ui-icon="signal" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 18c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm-4.9-2.3l1.4 1.4C9.5 16.4 10.7 16 12 16s2.5.4 3.5 1.1l1.4-1.4C15.5 14.6 13.8 14 12 14s-3.5.6-4.9 1.7zm-2.8-2.8l1.4 1.4C7.4 12.9 9.6 12 12 12s4.6.9 6.3 2.3l1.4-1.4C17.6 11 14.9 10 12 10s-5.6 1-7.7 2.9zM1.5 10.1l1.4 1.4C5.4 9.3 8.5 8 12 8s6.6 1.3 9.1 3.5l1.4-1.4C19.6 7.5 16 6 12 6S4.4 7.5 1.5 10.1z"/>
                 </svg>
-              </div>
+              </button>
               <div class="voice-status-info">
                 <div class="voice-connected-label" id="voice-signal-label">
                   <span>Voz conectada</span>
                   <span id="voice-call-timer" class="voice-call-timer">00:00</span>
                 </div>
-                <div id="active-voice-channel-name" class="voice-channel-sub">CALL / Sala Geral</div>
+                <button type="button" id="active-voice-channel-name" class="voice-channel-sub" title="Abrir chamada" aria-controls="voice-stage"></button>
+                <div id="voice-connection-scope" class="voice-connection-scope"></div>
               </div>
             </div>
             <div class="voice-top-actions">
               <button type="button" id="quick-krisp-btn" class="icon-btn active-ok" title="Supressão de Ruído (Ativo)">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M4 10h2v4H4v-4zm4-4h2v12H8V6zm4-3h2v18h-2V3zm4 4h2v10h-2V7zm4 3h2v4h-2v-4z"/>
-                </svg>
-              </button>
-              <button type="button" id="leave-voice-btn" class="icon-btn danger" title="Desconectar">
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.956.956 0 0 1-.29-.7c0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28a11.27 11.27 0 0 0-2.67-1.85.996.996 0 0 1-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
                 </svg>
               </button>
             </div>
@@ -232,15 +228,17 @@
               <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
               </svg>
-              <span id="camera-btn-label" class="sr-only">Vídeo</span>
+              <span id="camera-btn-label">Vídeo</span>
             </button>
             <button type="button" id="share-screen-btn" class="voice-action-btn" title="Compartilhar Tela">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H8v2h8v-2h-2v-2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zm-5-7l-4-4v3H8v2h4v3l4-4z"/>
               </svg>
-              <span id="screen-btn-label" class="sr-only">Tela</span>
+              <span id="screen-btn-label">Tela</span>
             </button>
+            <button type="button" id="leave-voice-btn" class="voice-action-btn voice-disconnect" title="Desconectar" aria-label="Desconectar"><svg data-ui-icon="disconnect" aria-hidden="true"></svg></button>
           </div>
+          <section id="voice-connection-details" class="voice-connection-details hidden" role="dialog" aria-label="Qualidade da conexão"></section>
         </div>
 
         <!-- Barra Inferior do Usuário Atual estilo Discord -->
@@ -444,9 +442,10 @@
         <div class="stage-header">
           <span id="stage-title">Em chamada: Sala Geral</span>
           <span class="stage-hint">Duplo clique na transmissão para Tela Cheia</span>
-          <button id="stage-open-voice-chat-btn" type="button" class="btn-secondary small-btn" title="Abrir chat de texto deste canal de voz">💬 Chat da sala</button>
+          <button id="stage-open-voice-chat-btn" type="button" class="btn-secondary small-btn" title="Abrir chat de texto deste canal de voz"><svg data-ui-icon="chat" aria-hidden="true"></svg> Chat da sala</button>
         </div>
         <div id="stage-grid" class="stage-grid"></div>
+        <div id="private-stage-controls" class="private-stage-controls hidden" role="group" aria-label="Controles da chamada privada"></div>
       </section>
 
       <!-- Área de Mensagens do Chat -->
@@ -480,7 +479,7 @@
         <div id="composer-attachments" class="composer-attachments hidden" aria-live="polite"></div>
         <!-- Barra de Resposta (Reply) -->
         <div id="reply-preview-bar" class="reply-preview-bar hidden">
-          <span id="reply-preview-text">Respondendo a ...</span>
+          <button type="button" id="reply-preview-text" class="reply-preview-link">Respondendo a ...</button>
           <span class="reply-preview-actions">
             <button type="button" id="reply-mention-toggle" class="reply-mention-toggle is-on" aria-pressed="true">@ ATIVADO</button>
             <button type="button" id="cancel-reply-btn" class="icon-btn" title="Cancelar resposta">✕</button>
@@ -497,9 +496,16 @@
         <!-- Modo lento do canal (contagem regressiva da própria pessoa) -->
         <div id="slowmode-indicator" class="slowmode-indicator hidden" aria-live="polite"></div>
 
+        <p id="composer-readonly" class="composer-readonly hidden" role="status"></p>
+        <button type="button" id="composer-schedule-summary" class="composer-schedule-summary hidden" aria-expanded="false" aria-controls="composer-schedule-panel"></button>
+        <section id="composer-schedule-panel" class="composer-schedule-panel hidden" role="dialog" aria-labelledby="schedule-panel-title">
+          <div><strong id="schedule-panel-title">Mensagens agendadas</strong><button type="button" class="icon-btn" data-close-schedule aria-label="Fechar agendamentos"><svg data-ui-icon="close" aria-hidden="true"></svg></button></div>
+          <p data-empty-schedule>Nenhuma mensagem agendada.</p><ul></ul>
+        </section>
+        <div id="composer-voice-recorder" class="voice-recorder hidden" role="region" aria-label="Mensagem de voz"></div>
         <form id="chat-form">
           <input type="file" id="image-file-input" multiple class="hidden" />
-          <button type="button" id="attach-image-btn" class="attach-btn" title="Enviar arquivos (ou arraste, ou Ctrl+V)">
+          <button type="button" id="attach-image-btn" class="attach-btn" title="Ações da mensagem" aria-label="Ações da mensagem" aria-haspopup="menu" aria-expanded="false">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/>
             </svg>
@@ -514,20 +520,23 @@
             aria-autocomplete="list"
             aria-controls="composer-autocomplete"
           ></textarea>
-          <button type="button" id="poll-create-btn" class="attach-btn" title="Criar enquete">📊</button>
           <div class="emoji-picker-anchor gif-picker-anchor">
             <button type="button" id="gif-picker-btn" class="attach-btn gif-btn" title="GIFs" aria-label="GIFs" aria-haspopup="dialog" aria-expanded="false">GIF</button>
             <div id="gif-popover" class="emoji-popover gif-popover hidden" role="dialog" aria-label="GIFs"></div>
           </div>
+          <div class="emoji-picker-anchor hidden">
+            <button type="button" id="sticker-picker-btn" class="attach-btn" title="Figurinhas" aria-label="Figurinhas" aria-haspopup="dialog" aria-controls="sticker-popover" aria-expanded="false" data-ui-icon="sticker"></button>
+            <div id="sticker-popover" class="emoji-popover sticker-popover hidden" role="dialog" aria-label="Figurinhas"></div>
+          </div>
           <div class="emoji-picker-anchor">
-            <button type="button" id="emoji-picker-btn" class="attach-btn emoji-btn" title="Inserir Emoji">
+            <button type="button" id="emoji-picker-btn" class="attach-btn emoji-btn" title="Emojis" aria-label="Emojis" aria-haspopup="dialog" aria-expanded="false">
               <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
               </svg>
             </button>
-            <div id="emoji-popover" class="emoji-popover hidden"></div>
+            <div id="emoji-popover" class="emoji-popover hidden" role="dialog" aria-label="Emojis"></div>
           </div>
-          <button type="submit" class="send-btn" title="Enviar Mensagem">
+          <button type="submit" class="send-btn" title="Enviar mensagem" aria-label="Enviar mensagem">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
             </svg>
@@ -540,17 +549,17 @@
       <!-- Sobreposição ao arrastar arquivos para o chat -->
       <div id="chat-drop-overlay" class="chat-drop-overlay hidden" aria-hidden="true">
         <div class="chat-drop-card">
-          <strong>Solte para enviar</strong>
+          <strong>Solte para anexar</strong>
           <span id="chat-drop-target">Os arquivos serão anexados à sua mensagem.</span>
         </div>
       </div>
       </div>
     </main>
 
-    <!-- Barra Lateral Direita: Membros Online / Perfil DM -->
+    <!-- Barra Lateral Direita: Membros do Servidor / Perfil DM -->
     <aside class="members-sidebar" id="members-sidebar">
       <div id="server-members-panel">
-        <div class="section-title" id="online-count-title">ONLINE — 0</div>
+        <div class="section-title hidden" id="online-count-title"></div>
         <ul id="members-list" class="members-list"></ul>
       </div>
       <div id="dm-peer-panel" class="dm-peer-panel hidden"></div>
@@ -673,7 +682,10 @@
 
       <div class="settings-main-col">
         <header class="settings-topbar">
-          <span id="settings-topbar-title">Minha Conta</span>
+          <div class="settings-topbar-left">
+            <button type="button" id="pe-nav-toggle" class="pe-topbar-nav-btn" aria-expanded="true" title="Mostrar ou ocultar menu de configurações" aria-label="Alternar menu de configurações">☰</button>
+            <span id="settings-topbar-title">Minha Conta</span>
+          </div>
           <div class="settings-close-wrap">
             <button type="button" id="close-settings-btn" class="settings-close-btn" title="Fechar (ESC)" aria-label="Fechar configurações">✕</button>
             <span class="settings-esc-hint" aria-hidden="true">ESC</span>
@@ -916,8 +928,9 @@
 
           <!-- PÁGINA: Perfis (Global + Perfis por Servidor) -->
           <div id="settings-tab-profile" class="settings-panel settings-profile-panel hidden">
-            <h2>Perfis</h2>
-            <div class="settings-pill-tabs" role="tablist" aria-label="Tipo de perfil">
+            <h2 class="sr-only">Perfis</h2>
+            <!-- A troca entre perfil principal e perfis por servidor fica no seletor do editor. -->
+            <div class="settings-pill-tabs pe-legacy-tabs" role="tablist" aria-label="Tipo de perfil">
               <button type="button" class="settings-pill-tab active" data-profile-subtab="global" role="tab" aria-selected="true">Perfil global</button>
               <button type="button" class="settings-pill-tab" data-profile-subtab="server" role="tab" aria-selected="false">Perfis por servidor</button>
             </div>
@@ -936,6 +949,8 @@
                   <select id="settings-server-profile-select" class="settings-select"></select>
                 </div>
                 <div id="settings-server-profile-summary" class="profile-editor-card" style="margin-top:12px;"></div>
+                <button id="settings-server-profile-compare" class="btn-secondary small-btn" type="button" aria-pressed="false">Comparar com perfil principal</button>
+                <div id="settings-server-profile-preview" class="compact-profile-preview profile-card hidden"></div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
                   <button type="button" id="settings-server-profile-edit-btn" class="btn-primary small-btn">Editar perfil deste servidor</button>
                   <button type="button" id="settings-server-profile-nick-btn" class="btn-secondary small-btn">Alterar apelido neste servidor</button>
@@ -943,98 +958,103 @@
               </section>
             </div>
 
-            <div id="profile-subtab-global" class="profile-customizer-grid">
-              <!-- Coluna Esquerda: Todos os Controles Visuais estilo Discord -->
-              <div class="profile-customizer-controls">
-                <div class="settings-grid-2">
-                  <div class="settings-field">
-                    <label for="settings-status-select">STATUS ONLINE</label>
-                    <select id="settings-status-select" class="settings-select">
-                      <option value="online">🟢 Online</option>
-                      <option value="idle">🌙 Ausente</option>
-                      <option value="dnd">⛔ Não Perturbe</option>
-                      <option value="invisible">⚫ Invisível</option>
-                    </select>
-                  </div>
-                  <div class="settings-field">
-                    <label for="settings-custom-status">STATUS PERSONALIZADO</label>
-                    <input type="text" id="settings-custom-status" maxlength="60" placeholder="Ex: Jogando CS2, Ouvindo música..." />
-                  </div>
-                </div>
+            <div id="profile-subtab-global" class="pe-shell">
+              <!-- Coluna 1: editor compacto. Cada item abre o próprio subeditor; a prévia continua visível. -->
+              <aside class="pe-sidebar" aria-label="Editor de perfil">
+                <div class="pe-view" data-pe-view="home">
+                  <label class="sr-only" for="pe-profile-target">Perfil em edição</label>
+                  <select id="pe-profile-target" class="pe-target-select">
+                    <option value="global">Perfil principal</option>
+                  </select>
 
-                <div class="settings-grid-2">
-                  <div class="settings-field">
-                    <label for="settings-display-name">NOME DE EXIBIÇÃO</label>
-                    <input type="text" id="settings-display-name" maxlength="32" placeholder="Como seus amigos veem você" />
-                  </div>
-                  <div class="settings-field">
-                    <label for="settings-pronouns">PRONOMES</label>
-                    <input type="text" id="settings-pronouns" maxlength="40" placeholder="Ex: ele/dele, ela/dela" />
-                  </div>
-                </div>
+                  <section class="pe-section">
+                    <h3 class="pe-section-title">Placa de identificação</h3>
+                    <button type="button" id="open-nameplate-picker-btn" class="nameplate-trigger-box pe-row-card" title="Escolher placa de identificação">
+                      <span class="nameplate-trigger-left">
+                        <span id="nameplate-mini-avatar" class="avatar-small">?</span>
+                        <span id="nameplate-current-label" class="nameplate-pill-preview">Sem placa</span>
+                      </span>
+                      <span class="cust-plus-circle" aria-hidden="true">+</span>
+                    </button>
+                  </section>
 
-                <div class="settings-grid-2">
-                  <div class="settings-field">
-                    <label for="settings-status-emoji">EMOJI DO STATUS</label>
-                    <input type="text" id="settings-status-emoji" maxlength="8" placeholder="Ex: 🎮" />
-                  </div>
-                  <div class="settings-field">
-                    <label for="settings-status-expiry">LIMPAR STATUS APÓS</label>
-                    <select id="settings-status-expiry" class="settings-select">
-                      <option value="keep">Manter o prazo atual</option>
-                      <option value="0">Nunca</option>
-                      <option value="1800">30 minutos</option>
-                      <option value="3600">1 hora</option>
-                      <option value="14400">4 horas</option>
-                      <option value="86400">Hoje (24 horas)</option>
-                      <option value="604800">7 dias</option>
-                    </select>
-                  </div>
-                </div>
-
-                <!-- Placa de identificação -->
-                <div class="cust-block">
-                  <div class="cust-label">Placa de identificação</div>
-                  <button type="button" id="open-nameplate-picker-btn" class="nameplate-trigger-box" title="Escolher placa de identificação">
-                    <div class="nameplate-trigger-left">
-                      <div id="nameplate-mini-avatar" class="avatar-small">?</div>
-                      <span id="nameplate-current-label" class="nameplate-pill-preview">Sem placa</span>
+                  <section class="pe-section">
+                    <h3 class="pe-section-title">Avatar e decorações</h3>
+                    <div class="pe-tiles">
+                      <button type="button" id="settings-change-avatar-btn" class="pe-tile" title="Alterar avatar (imagem ou GIF)">
+                        <span class="pe-tile-visual">
+                          <span id="settings-avatar-preview" class="avatar large-avatar editable-avatar">?</span>
+                        </span>
+                        <span class="pe-tile-caption">Avatar</span>
+                        <span id="settings-remove-avatar-btn" class="cust-avatar-remove hidden" role="button" tabindex="0" title="Remover avatar (volta às iniciais)">✕</span>
+                      </button>
+                      <button type="button" id="open-decoration-picker-btn" class="pe-tile" title="Escolher decoração do avatar">
+                        <span class="pe-tile-visual">
+                          <span id="settings-deco-preview-wrap" class="avatar-deco-wrap large-deco">
+                            <span id="settings-deco-preview-avatar" class="avatar large-avatar">?</span>
+                          </span>
+                        </span>
+                        <span class="pe-tile-caption" id="settings-deco-label">Decoração</span>
+                      </button>
                     </div>
-                    <span class="cust-plus-circle">+</span>
-                  </button>
+                  </section>
+
+                  <section class="pe-section">
+                    <h3 class="pe-section-title">Estilo do nome exibido</h3>
+                    <button type="button" class="pe-row-card pe-name-card" data-pe-open="name" title="Editar fonte, efeito e cores do nome">
+                      <span id="settings-name-showcase" class="styled-name">Usuário</span>
+                      <span class="pe-chevron" aria-hidden="true">›</span>
+                    </button>
+                  </section>
+
+                  <section class="pe-section">
+                    <h3 class="pe-section-title">Tema e faixa</h3>
+                    <div class="pe-tiles">
+                      <button type="button" id="cust-theme-preview-box" class="pe-tile pe-theme-tile" data-pe-open="theme" title="Editar cores do tema">
+                        <span class="pe-tile-visual"></span>
+                        <span class="pe-tile-caption">Tema</span>
+                      </button>
+                      <button type="button" id="cust-banner-preview-box" class="pe-tile pe-banner-tile" data-pe-open="banner" title="Editar a faixa (banner)">
+                        <span class="pe-tile-visual"></span>
+                        <span class="pe-tile-caption" id="settings-banner-btn-label">Faixa</span>
+                      </button>
+                    </div>
+                  </section>
+
+                  <section class="pe-section">
+                    <h3 class="pe-section-title">Efeitos de perfil e molduras</h3>
+                    <div class="pe-tiles">
+                      <button type="button" id="open-effect-picker-btn" class="pe-tile" title="Escolher efeito de perfil">
+                        <span class="pe-tile-visual pe-effect-visual"><span class="cust-plus-circle" aria-hidden="true">+</span></span>
+                        <span class="pe-tile-caption" id="settings-effect-label">Efeito</span>
+                      </button>
+                      <button type="button" id="open-deco-quick-btn" class="pe-tile" title="Escolher moldura do perfil">
+                        <span class="pe-tile-visual pe-frame-visual"><span class="cust-plus-circle" aria-hidden="true">+</span></span>
+                        <span class="pe-tile-caption" id="settings-frame-label">Moldura</span>
+                      </button>
+                    </div>
+                  </section>
+
+                  <section class="pe-section pe-links">
+                    <h3 class="pe-section-title">Sobre você</h3>
+                    <button type="button" class="pe-row-link" data-pe-open="about"><span>Nome, pronomes e bio</span><span class="pe-chevron" aria-hidden="true">›</span></button>
+                    <button type="button" class="pe-row-link" data-pe-open="status"><span>Status</span><span class="pe-chevron" aria-hidden="true">›</span></button>
+                    <button type="button" class="pe-row-link" data-pe-open="collection"><span>Minha coleção e presets</span><span class="pe-chevron" aria-hidden="true">›</span></button>
+                  </section>
                 </div>
 
-                <!-- Avatar e decorações (2 cards quadrados idênticos ao Discord) -->
-                <div class="cust-block">
-                  <div class="cust-label">Avatar e decorações</div>
-                  <div class="cust-two-squares">
-                    <button type="button" id="settings-change-avatar-btn" class="cust-square-card" title="Alterar Avatar / GIF">
-                      <div class="cust-square-visual">
-                        <div id="settings-avatar-preview" class="avatar large-avatar editable-avatar">?</div>
-                      </div>
-                      <span class="cust-square-caption">Foto / GIF</span>
-                      <span id="settings-remove-avatar-btn" class="cust-avatar-remove hidden" role="button" tabindex="0" title="Remover avatar (volta às iniciais)">✕</span>
-                    </button>
-                    <button type="button" id="open-decoration-picker-btn" class="cust-square-card" title="Escolher decoração do avatar">
-                      <div class="cust-square-visual">
-                        <div id="settings-deco-preview-wrap" class="avatar-deco-wrap large-deco">
-                          <div id="settings-deco-preview-avatar" class="avatar large-avatar">?</div>
-                        </div>
-                      </div>
-                      <span class="cust-square-caption" id="settings-deco-label">Moldura</span>
-                    </button>
+                <!-- Subeditores -->
+                <div class="pe-view hidden" data-pe-view="name" data-pe-title="Estilo do nome">
+                  <div class="pe-subtabs" role="tablist" aria-label="Opções do nome">
+                    <button type="button" class="active" data-pe-name-tab="fonts" role="tab" aria-selected="true">Fontes</button>
+                    <button type="button" data-pe-name-tab="effects" role="tab" aria-selected="false">Efeitos</button>
+                    <button type="button" data-pe-name-tab="colors" role="tab" aria-selected="false">Cores</button>
                   </div>
-                </div>
-
-                <!-- Estilo do nome exibido -->
-                <div class="cust-block">
-                  <div class="cust-label-row">
-                    <span>Estilo do nome exibido</span>
+                  <div class="pe-name-panel" data-pe-name-panel="fonts effects">
+                    <p class="pe-hint">Passe o mouse para ver no perfil. Clique para usar.</p>
+                    <div id="settings-name-style-samples" class="profile-name-style-samples pe-name-samples" aria-label="Estilos do nome"></div>
                   </div>
-                  <div class="cust-sub-hint">Escolha o estilo e as cores do seu nome.</div>
-                  <div class="name-style-showcase-box">
-                    <span id="settings-name-showcase" class="styled-name">Usuário</span>
-                  </div>
+                  <div class="pe-name-panel hidden" data-pe-name-panel="colors">
                   <div class="name-style-controls-row">
                     <select id="settings-name-style-select" class="settings-select" aria-label="Estilo do nome" style="flex: 1;">
                       <option value="default">Fonte Padrão Limpa</option>
@@ -1067,11 +1087,21 @@
                       <option value="radial">Radial</option>
                     </select>
                   </div>
+                  </div>
                 </div>
 
-                <!-- Tema do perfil (Perfil P1): sólido ou gradiente, direção e destaque -->
-                <div class="cust-block">
-                  <div class="cust-label">Tema do perfil</div>
+                <div class="pe-view hidden" data-pe-view="theme" data-pe-title="Tema do perfil">
+                  <p class="pe-hint">As cores valem para o seu perfil e o mural. O contraste do texto se ajusta sozinho.</p>
+                  <div class="pe-field-row">
+                    <label class="name-color-pill" title="Cor primária">
+                      <input type="color" id="settings-theme-primary" value="#5c1726" />
+                      <span>Primária</span>
+                    </label>
+                    <label class="name-color-pill" title="Cor secundária">
+                      <input type="color" id="settings-theme-accent" value="#111214" />
+                      <span>Secundária</span>
+                    </label>
+                  </div>
                   <div class="theme-controls-row">
                     <div class="theme-mode-toggle" role="radiogroup" aria-label="Tipo do tema">
                       <label><input type="radio" name="theme-mode" value="solid" /> Sólido</label>
@@ -1090,50 +1120,41 @@
                       <span>Destaque</span>
                     </label>
                   </div>
-                  <div class="cust-sub-hint">O contraste do texto do cartão se ajusta sozinho às cores escolhidas.</div>
                 </div>
 
-                <!-- Tema e faixa (2 cores + Banner Imagem/GIF) -->
-                <div class="cust-block">
-                  <div class="cust-label">Cores e banner</div>
-                  <div class="cust-two-squares">
-                    <div class="cust-theme-card" id="cust-theme-preview-box">
-                      <label class="theme-swatch-btn" title="Cor Primária do Tema">
-                        <input type="color" id="settings-theme-primary" value="#5c1726" />
-                      </label>
-                      <label class="theme-swatch-btn" title="Cor Secundária do Tema">
-                        <input type="color" id="settings-theme-accent" value="#111214" />
-                      </label>
-                    </div>
-                    <div class="cust-banner-card" id="cust-banner-preview-box" title="Clique para enviar Banner (PNG, JPG ou GIF)">
-                      <button type="button" id="settings-change-banner-btn" class="cust-banner-click-area">
-                        <span id="settings-banner-btn-label">+ Enviar Banner / GIF</span>
-                      </button>
-                      <button type="button" id="settings-remove-banner-btn" class="cust-banner-remove hidden" title="Remover Banner">✕</button>
-                    </div>
+                <div class="pe-view hidden" data-pe-view="banner" data-pe-title="Faixa do perfil">
+                  <div id="pe-banner-preview" class="pe-banner-preview" aria-hidden="true"></div>
+                  <p class="pe-hint">PNG, JPG ou GIF. O editor de recorte permite reposicionar e dar zoom.</p>
+                  <div class="pe-actions">
+                    <button type="button" id="settings-change-banner-btn" class="btn-primary small-btn">Enviar imagem</button>
+                    <button type="button" id="pe-banner-reposition" class="btn-secondary small-btn">Reposicionar e zoom</button>
+                    <button type="button" id="settings-remove-banner-btn" class="btn-secondary small-btn hidden" title="Remover banner">Remover</button>
                   </div>
                 </div>
 
-                <!-- Efeitos de perfil e molduras -->
-                <div class="cust-block">
-                  <div class="cust-label">Efeitos de perfil e molduras</div>
-                  <div class="cust-two-squares">
-                    <button type="button" id="open-effect-picker-btn" class="cust-square-card effect-card-btn" title="Escolher Efeito Animado de Perfil">
-                      <div class="effect-card-silhouette">
-                        <span class="cust-plus-circle">+</span>
-                      </div>
-                      <span class="cust-square-caption" id="settings-effect-label">Efeito: Nenhum</span>
-                    </button>
-                    <button type="button" id="open-deco-quick-btn" class="cust-square-card effect-card-btn" title="Escolher moldura do cartão de perfil">
-                      <div class="effect-card-silhouette bordered">
-                        <span class="cust-plus-circle">+</span>
-                      </div>
-                      <span class="cust-square-caption" id="settings-frame-label">Moldura</span>
-                    </button>
-                  </div>
+                <div class="pe-view hidden" data-pe-view="decoration" data-pe-title="Decorações de avatar">
+                  <div class="pe-gallery" data-pe-gallery="avatar_decoration"></div>
+                </div>
+                <div class="pe-view hidden" data-pe-view="frame" data-pe-title="Molduras de perfil">
+                  <div class="pe-gallery" data-pe-gallery="profile_frame"></div>
+                </div>
+                <div class="pe-view hidden" data-pe-view="effect" data-pe-title="Efeitos de perfil">
+                  <div class="pe-actions"><button type="button" class="btn-secondary small-btn" data-pe-replay>↻ Reproduzir novamente</button></div>
+                  <div class="pe-gallery pe-list" data-pe-list="effect"></div>
+                </div>
+                <div class="pe-view hidden" data-pe-view="nameplate" data-pe-title="Placas de identificação">
+                  <div class="pe-gallery pe-list" data-pe-list="nameplate"></div>
                 </div>
 
-                <!-- Bio / Sobre mim -->
+                <div class="pe-view hidden" data-pe-view="about" data-pe-title="Nome, pronomes e bio">
+                  <div class="settings-field">
+                    <label for="settings-display-name">NOME DE EXIBIÇÃO</label>
+                    <input type="text" id="settings-display-name" maxlength="32" placeholder="Como seus amigos veem você" />
+                  </div>
+                  <div class="settings-field">
+                    <label for="settings-pronouns">PRONOMES</label>
+                    <input type="text" id="settings-pronouns" maxlength="40" placeholder="Ex: ele/dele, ela/dela" />
+                  </div>
                 <div class="settings-field">
                   <div class="slider-label-row">
                     <label for="settings-bio-input">SOBRE MIM (BIO)</label>
@@ -1141,6 +1162,45 @@
                   </div>
                   <textarea id="settings-bio-input" maxlength="300" rows="4" placeholder="Conte algo sobre você. Aceita **negrito**, *itálico*, links e emoji."></textarea>
                 </div>
+                </div>
+
+                <div class="pe-view hidden" data-pe-view="status" data-pe-title="Status">
+                <div class="settings-grid-2">
+                  <div class="settings-field">
+                    <label for="settings-status-select">STATUS ONLINE</label>
+                    <select id="settings-status-select" class="settings-select">
+                      <option value="online">🟢 Online</option>
+                      <option value="idle">🌙 Ausente</option>
+                      <option value="dnd">⛔ Não Perturbe</option>
+                      <option value="invisible">⚫ Invisível</option>
+                    </select>
+                  </div>
+                  <div class="settings-field">
+                    <label for="settings-custom-status">STATUS PERSONALIZADO</label>
+                    <input type="text" id="settings-custom-status" maxlength="60" placeholder="Ex: Jogando CS2, Ouvindo música..." />
+                  </div>
+                </div>
+                <div class="settings-grid-2">
+                  <div class="settings-field">
+                    <label for="settings-status-emoji">EMOJI DO STATUS</label>
+                    <input type="text" id="settings-status-emoji" maxlength="8" placeholder="Ex: 🎮" />
+                  </div>
+                  <div class="settings-field">
+                    <label for="settings-status-expiry">LIMPAR STATUS APÓS</label>
+                    <select id="settings-status-expiry" class="settings-select">
+                      <option value="keep">Manter o prazo atual</option>
+                      <option value="0">Nunca</option>
+                      <option value="1800">30 minutos</option>
+                      <option value="3600">1 hora</option>
+                      <option value="14400">4 horas</option>
+                      <option value="86400">Hoje (24 horas)</option>
+                      <option value="604800">7 dias</option>
+                    </select>
+                  </div>
+                </div>
+                </div>
+
+                <div class="pe-view hidden" data-pe-view="collection" data-pe-title="Minha coleção">
                 <section class="profile-collection-settings" aria-labelledby="collection-title">
                   <h3 id="collection-title">Minha Coleção</h3>
                   <button id="open-profile-collection" type="button" class="btn-secondary small-btn" aria-controls="profile-collection-panel" aria-expanded="false">Abrir coleção</button>
@@ -1194,6 +1254,9 @@
                     </div>
                   </div>
                 </section>
+                </div>
+
+                <div class="pe-view hidden" data-pe-view="board" data-pe-title="Gerenciar mural">
                 <section class="profile-board-settings" aria-labelledby="board-settings-title">
                   <h3 id="board-settings-title">Mural do perfil</h3>
                   <button id="open-board-editor" type="button" class="btn-secondary small-btn" aria-controls="board-editor" aria-expanded="false">Editar mural</button>
@@ -1227,47 +1290,111 @@
                     </div>
                   </div>
                 </section>
-              </div>
-
-              <!-- Coluna Direita: Prévia Ao Vivo estilo Discord -->
-              <div class="profile-customizer-preview-col">
-                <div class="cust-preview-heading">PRÉVIA</div>
-                <div class="profile-context-tabs" role="tablist" aria-label="Onde ver a prévia">
-                  <button type="button" class="active" data-profile-context="popout" role="tab">Perfil completo</button>
-                  <button type="button" data-profile-context="compact" role="tab">Cartão rápido</button>
-                  <button type="button" data-profile-context="chat" role="tab">Chat</button>
-                  <button type="button" data-profile-context="members" role="tab">Membros</button>
-                  <button type="button" data-profile-context="dm" role="tab">DM</button>
-                  <button type="button" data-profile-context="panel" role="tab">Painel inferior</button>
                 </div>
-                <div id="profile-context-preview" class="profile-context-preview hidden" aria-live="polite"></div>
-                <button type="button" class="btn-secondary small-btn profile-effect-replay" data-replay-profile-effect="preview-effect-layer" disabled>Reproduzir efeito</button>
-                <div id="live-profile-preview-card" class="profile-card preview-mode">
+              </aside>
+
+              <!-- Colunas 2 e 3: o mesmo cartão de perfil completo que as outras pessoas abrem. -->
+              <div class="pe-stage profile-customizer-preview-col">
+                <div id="live-profile-preview-card" class="profile-card profile-modal-2col preview-mode pe-profile">
                   <div id="preview-effect-layer" class="profile-effect-layer" aria-hidden="true"></div>
-                  <div id="preview-card-banner" class="profile-card-banner"></div>
-                  <div class="profile-card-body">
-                    <div class="profile-card-avatar-wrap" id="preview-deco-wrap">
-                      <div id="preview-card-avatar" class="avatar large-avatar">?</div>
-                      <span id="preview-card-status-dot" class="status-badge online"></span>
+                  <div class="profile-modal-left pe-center">
+                    <div id="preview-card-banner" class="profile-card-banner"></div>
+                    <div class="pe-preview-tools">
+                      <button type="button" id="profile-preview-replay" class="pe-tool-btn" title="Reproduzir o efeito novamente">↻</button>
+                      <button type="button" id="pe-context-toggle" class="pe-tool-btn" aria-haspopup="dialog" aria-expanded="false">Pré-visualizar em ▾</button>
+                      <button type="button" id="pe-mural-toggle" class="pe-tool-btn" aria-pressed="true" title="Ocultar ou mostrar o mural">Mural</button>
                     </div>
-                    <div class="profile-nameplate-wrap"><h3 id="preview-card-name" class="styled-name">Usuário</h3></div>
-                    <div id="preview-card-badges" class="profile-badges hidden" aria-label="Badges"></div>
-                    <div id="preview-card-custom-status" class="profile-card-custom-status">Online</div>
-                    <div class="profile-card-section">
-                      <label>SOBRE MIM</label>
-                      <p id="preview-card-bio">Nenhuma biografia definida.</p>
+                    <div class="profile-modal-left-body">
+                      <div class="profile-card-avatar-wrap" id="preview-deco-wrap">
+                        <div id="preview-card-avatar" class="avatar large-avatar">?</div>
+                        <span id="preview-card-status-dot" class="status-badge online"></span>
+                      </div>
+                      <div class="profile-nameplate-wrap"><h3 id="preview-card-name" class="styled-name">Usuário</h3></div>
+                      <div id="preview-card-badges" class="profile-badges hidden" aria-label="Selos"></div>
+                      <div class="profile-card-handle-row">
+                        <span id="preview-card-handle" class="profile-card-handle"></span>
+                        <button type="button" id="pe-add-pronouns" class="pe-placeholder-link hidden" data-pe-open="about">Adicionar pronomes</button>
+                      </div>
+                      <div id="preview-card-custom-status" class="profile-card-custom-status">Online</div>
+                      <div class="profile-card-actions pe-preview-actions" aria-label="Ações do perfil (prévia)">
+                        <button type="button" class="btn-primary small-btn profile-card-msg-btn" disabled>💬 Mensagem</button>
+                        <button type="button" class="profile-card-icon-btn" disabled aria-label="Amizade">👥</button>
+                        <button type="button" class="profile-card-icon-btn" disabled aria-label="Mais opções">⋯</button>
+                      </div>
+                      <div class="profile-card-info-stack">
+                        <div class="profile-info-block">
+                          <label>MEMBRO DESDE</label>
+                          <p id="pe-member-since">Membro do Sancord</p>
+                        </div>
+                        <div class="profile-info-block">
+                          <label>SOBRE MIM</label>
+                          <p id="preview-card-bio">Nenhuma biografia definida.</p>
+                          <button type="button" id="pe-add-bio" class="pe-placeholder-link hidden" data-pe-open="about">Adicionar uma bio</button>
+                        </div>
+                        <div id="pe-links-wrap" class="profile-info-block hidden">
+                          <label>CONEXÕES</label>
+                          <ul id="pe-links" class="profile-public-links"></ul>
+                        </div>
+                        <div class="profile-info-block pe-note-block">
+                          <label>NOTA (VISÍVEL APENAS PARA VOCÊ)</label>
+                          <p class="pe-note-hint">As notas ficam nos perfis das outras pessoas.</p>
+                        </div>
+                      </div>
                     </div>
                   </div>
+                  <div class="profile-modal-right pe-mural">
+                    <div class="profile-modal-right-top">
+                      <div class="profile-modal-tabs" role="tablist" aria-label="Mural e atividade">
+                        <button type="button" class="profile-tab-btn active" data-pe-tab="board" role="tab" aria-selected="true">Mural</button>
+                        <button type="button" class="profile-tab-btn" data-pe-tab="activity" role="tab" aria-selected="false">Atividade</button>
+                      </div>
+                      <div class="pe-mural-head-actions">
+                        <button type="button" class="pe-tool-btn" data-pe-open="board">Gerenciar</button>
+                        <button type="button" id="pe-mural-close" class="pe-tool-btn pe-mural-close-btn" title="Ocultar mural" aria-label="Ocultar mural">✕</button>
+                      </div>
+                    </div>
+                    <div class="profile-modal-right-content">
+                      <div data-pe-panel="board">
+                        <p id="pe-board-status" class="settings-hint-text" role="status"></p>
+                        <div id="pe-board-widgets" class="profile-board-widgets" aria-live="polite"></div>
+                        <div class="pe-widget-grid" id="pe-widget-shortcuts"></div>
+                        <button type="button" id="pe-all-widgets" class="pe-placeholder-link">Ver todos os widgets</button>
+                      </div>
+                      <div data-pe-panel="activity" class="hidden">
+                        <div id="pe-activity-list"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="pe-context-popover" class="pe-context-popover hidden" role="dialog" aria-label="Pré-visualizar em outros lugares">
+                  <div class="pe-context-head">
+                    <div class="profile-context-tabs" role="tablist" aria-label="Onde ver a prévia">
+                      <button type="button" class="active" data-profile-context="compact" role="tab">Cartão rápido</button>
+                      <button type="button" data-profile-context="chat" role="tab">Mensagem</button>
+                      <button type="button" data-profile-context="members" role="tab">Lista de membros</button>
+                      <button type="button" data-profile-context="dm" role="tab">DM</button>
+                      <button type="button" data-profile-context="panel" role="tab">Painel inferior</button>
+                    </div>
+                    <button type="button" class="pe-tool-btn" id="pe-context-close" aria-label="Fechar prévia">✕</button>
+                  </div>
+                  <div class="profile-preview-tools">
+                    <label for="profile-preview-theme">Tema da prévia</label>
+                    <select id="profile-preview-theme" class="settings-select">
+                      <option value="auto">Tema do app</option><option value="dark">Escuro</option><option value="light">Claro</option>
+                    </select>
+                  </div>
+                  <div id="profile-context-preview" class="profile-context-preview" aria-live="polite"></div>
                 </div>
               </div>
             </div>
 
             <!-- Barra Flutuante de Alterações Não Salvas (estilo Discord) -->
             <div id="unsaved-profile-bar" class="unsaved-changes-bar hidden">
-              <span class="unsaved-changes-text">Não se esqueça de salvar suas alterações!</span>
+              <span class="unsaved-changes-text">Você tem alterações de perfil não salvas.</span>
               <div class="unsaved-changes-actions">
                 <button type="button" id="reset-profile-draft-btn" class="unsaved-reset-btn">Redefinir</button>
-                <button type="button" id="save-profile-btn" class="btn-primary unsaved-save-btn">Salvar</button>
+                <button type="button" id="save-profile-btn" class="btn-primary unsaved-save-btn">Salvar alterações</button>
               </div>
             </div>
           </div>
@@ -2117,6 +2244,9 @@
                 <label><input type="checkbox" class="native-checkbox" id="appearance-show-profile-nameplates" /> Placas de nome</label>
                 <label><input type="checkbox" class="native-checkbox" id="appearance-show-name-styles" /> Estilos de nome</label>
                 <label><input type="checkbox" class="native-checkbox" id="appearance-show-profile-animations" /> Animações de perfil</label>
+                <label><input type="checkbox" class="native-checkbox" id="appearance-animate-profile-decorations" /> Animar decorações</label>
+                <label><input type="checkbox" class="native-checkbox" id="appearance-animate-profile-frames" /> Animar molduras</label>
+                <label><input type="checkbox" class="native-checkbox" id="appearance-animate-profile-names" /> Animar estilos de nome</label>
               </fieldset>
             </section>
 
@@ -2715,11 +2845,12 @@
 
   <div id="compact-profile-modal" class="modal-backdrop hidden">
     <section class="modal-card compact-profile-dialog profile-card" role="dialog" aria-labelledby="compact-profile-title" aria-modal="true">
+      <button type="button" id="compact-close-profile" class="compact-profile-close" aria-label="Fechar cartão">×</button>
       <div id="compact-profile-content"></div>
       <div class="compact-profile-actions">
-        <button type="button" id="compact-full-profile" class="btn-primary small-btn">Ver perfil completo</button>
-        <button type="button" id="compact-message-profile" class="btn-secondary small-btn">Mensagem</button>
-        <button type="button" id="compact-close-profile" class="btn-secondary small-btn">Fechar</button>
+        <button type="button" id="compact-message-profile" class="btn-primary small-btn">Mensagem</button>
+        <button type="button" id="compact-edit-profile" class="btn-primary small-btn hidden">Editar perfil</button>
+        <button type="button" id="compact-full-profile" class="compact-profile-full">Perfil completo</button>
       </div>
     </section>
   </div>
@@ -2884,7 +3015,7 @@
         <button type="button" id="close-effect-picker-btn" class="avatar-crop-x" title="Fechar">✕</button>
       </div>
       <div id="effect-picker-preview" class="effect-picker-preview hidden">
-        <div class="effect-picker-sample" aria-hidden="true"><div id="picker-effect-layer" class="profile-effect-layer"></div></div>
+        <div id="effect-picker-card" class="compact-profile-preview profile-card" aria-label="Prévia do efeito"></div>
         <button type="button" class="btn-secondary small-btn" data-replay-profile-effect="picker-effect-layer" disabled>Reproduzir efeito</button>
       </div>
       <div id="nameplate-picker-preview" class="nameplate-picker-preview hidden" aria-label="Prévia da placa"></div>
@@ -3402,8 +3533,8 @@
                   <div class="dsp-toggles-list">
                     <label class="dsp-toggle-row">
                       <div>
-                        <div class="dsp-title">Exibir membros deste cargo separadamente (Hoist)</div>
-                        <div class="dsp-sub">Cria uma categoria própria na barra de membros à direita (como Fundador / Moderador).</div>
+                        <div class="dsp-title">Exibir membros deste cargo separadamente na lista de membros</div>
+                        <div class="dsp-sub">Cria uma seção própria na barra lateral de membros seguindo a hierarquia de cargos.</div>
                       </div>
                       <input type="checkbox" id="role-edit-hoist" />
                     </label>
@@ -3730,34 +3861,42 @@
        Carregados antes do app.js; só definem funções usadas em tempo de execução. -->
   <!-- Traduções (Fase 9): carregado primeiro, define t() e applyI18n(). -->
   <script src="/js/i18n.js?v=1"></script>
-  <script src="/js/icons.js?v=1"></script>
-  <script src="/js/ui-kit.js?v=20"></script>
+  <script src="/js/icons.js?v=2"></script>
+  <script src="/js/ui-kit.js?v=22"></script>
   <script src="/js/transport.js?v=19"></script>
-  <script src="/js/servers.js?v=23"></script>
+  <script src="/js/servers.js?v=24"></script>
   <script src="/js/invites.js?v=1"></script>
+  <script src="/js/member-list.js?v=1"></script>
   <script src="/js/permissions.js?v=19"></script>
-  <script src="/app.js?v=32"></script>
+  <script src="/app.js?v=36"></script>
   <!-- Chat (mensagens, composer, anexos, não lidas): depende dos elementos do app.js. -->
-  <script src="/js/chat.js?v=25"></script>
+  <script src="/js/chat.js?v=27"></script>
   <!-- Social (Fase 5): bloqueio, solicitações, grupos, privacidade e perfil completo. -->
   <script src="/js/social.js?v=8"></script>
   <!-- Voz (Fase 6): volume/silêncio por pessoa, moderação, toque e retomada de chamada. -->
-  <script src="/js/voice.js?v=1"></script>
+  <script src="/js/voice.js?v=2"></script>
   <!-- Avançados (Fase 8): busca no histórico, AutoMod e auditoria. -->
   <script src="/js/advanced.js?v=3"></script>
   <script src="/js/integrations.js?v=1"></script>
   <!-- Enquetes e eventos (Fase 8). -->
-  <script src="/js/community.js?v=1"></script>
+  <script src="/js/community.js?v=2"></script>
   <!-- Threads e fóruns (Fase 8). -->
   <script src="/js/threads.js?v=3"></script>
   <!-- Polimento (Fase 9): notificações por canal, navegação rápida, atalhos e acessibilidade. -->
   <script src="/js/polish.js?v=3"></script>
-  <script src="/js/profile-motion.js?v=1"></script>
-  <script src="/js/profile.js?v=8"></script>
-  <script src="/js/profile-board.js?v=1"></script>
-  <script src="/js/profile-collection.js?v=1"></script>
-  <script src="/js/profile-sharing.js?v=1"></script>
-  <script src="/js/settings-center.js?v=1"></script>
+  <script src="/js/profile-motion.js?v=3"></script>
+  <script src="/js/profile-card.js?v=1"></script>
+  <script src="/js/profile.js?v=10"></script>
+  <script src="/js/profile-board.js?v=2"></script>
+  <script src="/js/profile-collection.js?v=2"></script>
+  <script src="/js/profile-sharing.js?v=3"></script>
+  <script src="/js/settings-center.js?v=2"></script>
+  <!-- Editor visual de perfil: lateral com subeditores e perfil completo ao vivo. -->
+  <script src="/js/profile-editor.js?v=1"></script>
   <script src="/js/updater.js?v=1"></script>
+  <script src="/js/composer.js?v=1"></script>
+  <script src="/js/stickers.js?v=1"></script>
+  <script src="/js/voice-recorder.js?v=1"></script>
+  <script src="/js/scheduled.js?v=1"></script>
 </body>
 </html>

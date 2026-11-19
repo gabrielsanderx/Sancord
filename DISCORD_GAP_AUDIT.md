@@ -6,13 +6,13 @@ Documento vivo. Atualize as linhas quando um item mudar de estado e anote a data
 
 | Campo | Valor |
 |---|---|
-| Data da auditoria | 18/11/2026 |
-| Quem auditou | Claude (sessão de código), a pedido do usuário |
-| Sancord publicado | **v0.2.1**: tag `v0.2.1` = commit `8123c3cb` (branch `main`), release estável no GitHub e servidor/cliente de produção na 0.2.1 (banco v13) |
-| Sancord nos fontes (não publicado) | Sincronizado com `v0.2.1` (`8123c3cb`): timeout de membro (schema v11), modo lento (v12), tags de fórum (v13), Etapa A itens 1 e 2 e refatoração visual desktop |
-| Tamanho | Rust ~19 mil linhas (39 arquivos); front-end `app.js` ~7,7 mil linhas, 15 módulos JS, `styles.css` ~7,8 mil linhas e `ui.css` ~1,1 mil linhas |
-| Protocolo | 84 tipos de pedido do cliente (`ClientMessage`) e 47 tipos de evento do servidor (`ServerMessage`) |
-| Testes | 240 padrão + 1 artefato assinado = 241 aprovados: 106 núcleo, 8 desktop, 1 manutenção, 125 front-end e 1 HTTPS real |
+| Data da atualização de perfis, composer e voz | 19/11/2026 |
+| Autoria | Auditoria inicial por Claude e atualização por Codex |
+| Sancord publicado | Tag estável **v0.2.3** (`af2ff0d`) no GitHub, com esquema 19 |
+| Sancord nos fontes | Perfis, mural, composer, gravação de mensagens de voz, fila de agendamentos e nova organização das chamadas, com esquema 21 |
+| Tamanho no levantamento de 18/11 | Rust ~19 mil linhas (39 arquivos), `app.js` ~7,7 mil linhas, 15 módulos JS, `styles.css` ~7,8 mil linhas e `ui.css` ~1,1 mil linhas |
+| Protocolo no levantamento de 18/11 | 84 tipos de pedido do cliente (`ClientMessage`) e 47 tipos de evento do servidor (`ServerMessage`) |
+| Testes | 381 aprovados, com 167 de núcleo, 8 desktop, 1 de manutenção e 205 de frontend. Um ensaio de assinatura ignorado localmente. |
 | Referência Discord | Notas oficiais de atualização até **09/11/2026**; reforma visual de **25/03/2025** (temas Light, Ash, Dark e Onyx, 3 densidades, lista de canais redimensionável); criptografia de chamadas DAVE concluída em **maio/2026**; artigos de suporte sobre encaminhamento, polls, soundboard, texto em voz, stages e passkeys (as datas dos artigos variam, ver Fontes) |
 
 **Como foi verificado:**
@@ -445,12 +445,12 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Avatar (com GIF), banner, nome, username, bio, pronomes | Sim (GIF é pago) | Sim (Perfil P1, fontes): avatar e banner como arquivo validado com cache imutável, recorte de banner em faixa, bio de 300 com markdown seguro | ✅ | — |
 | Status e status personalizado | Sim | Sim, com prazo | ✅ | — |
 | Cargos, data de entrada, servidores e amigos em comum | Sim | Sim | ✅ | — |
-| Tema e decorações de perfil | Sim | Tema sólido/gradiente com quatro direções e destaque (P1). Decorações de avatar e molduras de cartão independentes, com validação de posse (P2) | ✅ | Verificação em janela nativa das animações e da reação à fala |
-| Efeitos de perfil | Sim | Fase P3 nos fontes. Efeitos clássicos e sete novos com entrada única, replay e pausa da moldura. Equipamento validado pelo servidor | ✅ | Conferência visual das animações na janela nativa |
-| Nameplates e estilos de nome | Sim | Fase P4 nos fontes. Opções clássicas, nove placas e oito estilos novos, gradiente de nome configurável, prévia e opção local de nomes simples | ✅ | Conferência visual de temas e movimento na janela nativa |
-| Perfil por servidor | Sim | Apelido, avatar, banner e bio por servidor com herança por campo (Perfil P5) | ✅ | Cosméticos e status configuráveis por servidor |
+| Tema e decorações de perfil | Sim | Tema sólido ou gradiente, decoração em dois planos e molduras adaptadas por contexto, com validação de posse | ✅ | Homologação da reação à fala em chamada entre redes |
+| Efeitos de perfil | Sim | Entrada única, replay e pausa da moldura. Efeito capturado no WebView2 e equipamento validado pelo servidor | ✅ | — |
+| Nameplates e estilos de nome | Sim | Gradiente configurável, amostras com o próprio nome, prévias clara e escura e controle de movimento | ✅ | — |
+| Perfil por servidor | Sim | Apelido, avatar, banner, bio, nome, tema e cosméticos com herança por campo, comparação e prévia ao vivo | ✅ | Estado personalizado por servidor |
 | Selos (badges) | Sim | Sim (Perfil P2, fontes): badges de confiança e cosméticas concedidas só pelo servidor (arquivo do operador + automáticas), com ícones próprios | ✅ | Painel de administração para conceder |
-| Coleções e presets | Sim | Minha Coleção, favoritos, presets e combinações aleatórias com prévia e validação de posse (Perfil P7) | ✅ | Conferência visual na janela desktop |
+| Coleções e presets | Sim | Minha Coleção, favoritos, presets e combinação aleatória com paleta que vai ao rascunho antes de salvar | ✅ | — |
 | Mural, conexões e privacidade do perfil | — | Mural P6 persistido com widgets, links e audiência própria | 🟡 | Conexões verificadas e privacidade dos demais campos |
 
 ### 30. Status e presença
@@ -871,3 +871,33 @@ Pouco trabalho, muito efeito, risco baixo:
 - 19/11/2026 — Perfil P2 (11 decorações novas, 29 molduras incluindo reativas, por conquista e de temporada, badges do servidor, seletor de cosméticos) nos fontes (Claude).
 - 19/11/2026 — Perfil P3 (efeitos de entrada, replay, interrupção em segundo plano e coordenação com a moldura) nos fontes.
 - 19/11/2026 — Expansão completa da Central de Configurações (22 páginas em 4 grupos, busca profunda, IPC Windows Desktop) e reforma completa do sistema de convites de servidores nos fontes (esquema **v19**, modal de 2 páginas `static/js/invites.js`, prévia rica com regras, DM InviteCard ao vivo, tombstone de revogação, link personalizado `SetCustomInviteSlug`, pausa/retomada `SetInvitesPaused`, associação temporária com limpeza na desconexão, permissão `manage_invites` e sobrescrita por canal, rate limits, **368 testes automatizados** e conferência visual/funcional concluída no executável real `SancordApp.exe` WebView2 em `1366×768` e `1920×1080`).
+
+### 19/11/2026 · Refatoração visual de perfis nos fontes
+
+| Área | Sancord após a refatoração | Escopo conferido |
+|---|---|---|
+| Cartão rápido e perfil completo | Banner de ponta a ponta, avatar sobreposto à esquerda, ações por contexto, identidade compartilhada e molduras adaptadas | Cartão no desktop e perfil completo com mural |
+| Editor | Rascunho ao vivo, tema claro/escuro independente, nome real nas amostras, replay e aviso ao descartar | Cartão e perfil completo usam os renderizadores da visita. As outras superfícies têm amostras do contexto. |
+| Perfil por servidor | Comparação global/local, herança por campo e prévia do formulário | Apelido, mídia, bio, tema, estilo de nome e cosméticos da conta |
+| Cosméticos | Arte em camadas para Sancord Core, Cosmic e Sakura, seletor pesquisável de decoração e moldura, amostra de efeito | As três coleções receberam arte de referência. Os IDs do catálogo anterior continuam disponíveis. |
+| Movimento e contraste | Replay controlado, preferências por tipo, redução de movimento e fallback estático | Limites existentes de superfície e GIF preservados |
+| Mural | Autoria preservada na transferência e consulta limitada de mensagens fora do lock | O esquema aditivo 20 cria o índice por autor. A recuperação de autoria anterior depende da existência do convite original. |
+
+Referências de hierarquia e interação desktop. [Perfis personalizados](https://support.discord.com/hc/en-us/articles/4403147417623-Custom-Profiles) · [Molduras](https://support.discord.com/hc/en-us/articles/40775065582615-Profile-Frames-FAQ) · [Estilos de nome](https://support.discord.com/hc/en-us/articles/33833879643927-Discord-Display-Name-Styles-FAQ)
+
+### 19/11/2026 · Composer e chamadas desktop
+
+| Área | Disponível nos fontes | Escopo |
+|---|---|---|
+| Composer | Menu `+` ancorado, ações por contexto, rascunho por conversa, atalhos e barra de resposta | Textos, DMs, grupos, threads, canais de voz e anúncios usam as permissões existentes. |
+| Anexos | Seleção múltipla, arrastar, colar, miniaturas, progresso e repetição após falha | O upload começa ao enviar. Rascunhos e uploads ficam associados à conversa original. |
+| GIF e Emoji | GIFs de conversas, recentes e favoritos. Emoji Unicode, categorias, busca e emoji de servidor | GIFs animam no hover ou foco. A busca funciona sobre o acervo disponível no cliente. |
+| Figurinhas | Coleção original, importação, figurinhas do servidor, recentes e favoritos | O servidor valida tipo, dimensões e tamanho. A aba Servidor usa figurinhas das conversas carregadas. Favoritos ficam neste aparelho. |
+| Enquete | Campos de opções separados, duração, escolhas múltiplas e envio | Usa os votos, a persistência, as permissões e o AutoMod existentes. |
+| Mensagem de voz | Captura, forma de onda, cancelamento, reprodução e envio | Gravação separada da mídia das chamadas. O ensaio Windows usou microfone virtual. |
+| Tópicos | Criação no menu `+` em canal elegível e no menu de uma mensagem | Mantém a regra de leitura e escrita do canal pai. |
+| Agendamento | Horários rápidos, data local, fila privada, cancelamento e entrega com o cliente fechado | Texto em até 30 dias. SQLite 21 e revalidação de permissões, AutoMod e modo lento no horário de envio. |
+| Apps e comandos | `/anexar`, `/enquete`, `/topico` e `/agendadas` | Clipes e comandos de apps de terceiros continuam como trabalho futuro. |
+| Chamadas | Sala, participantes e dock separados. Perfil compartilhado, volume local e palco privado | Estados de fala e mídia usam a sessão atual. O painel de qualidade usa estatísticas WebRTC existentes. |
+
+Referências de ergonomia para ações, anexos e navegação em voz. [Anexos](https://support.discord.com/hc/en-us/articles/25444343291031-File-Attachments-FAQ) · [Enquetes](https://support.discord.com/hc/en-us/articles/22163184112407-Polls-FAQ) · [Canais de voz](https://support.discord.com/hc/en-us/articles/19583625604887-Voice-Channels-FAQs) · [Chat da sala de voz](https://support.discord.com/hc/en-us/articles/4412085582359-Text-Channels-Text-Chat-In-Voice-Channels)

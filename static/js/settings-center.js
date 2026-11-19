@@ -261,6 +261,8 @@
     const summary = document.getElementById("settings-server-profile-summary");
     const editBtn = document.getElementById("settings-server-profile-edit-btn");
     const nickBtn = document.getElementById("settings-server-profile-nick-btn");
+    const preview = document.getElementById("settings-server-profile-preview");
+    const compare = document.getElementById("settings-server-profile-compare");
     if (!select || !summary) return;
     const servers = (state.servers || []).filter((s) => s.id !== "sancord");
     const prev = select.value;
@@ -270,6 +272,8 @@
       select.disabled = true;
       if (editBtn) editBtn.disabled = true;
       if (nickBtn) nickBtn.disabled = true;
+      if (compare) compare.disabled = true;
+      preview?.classList.add("hidden");
       summary.textContent = "Entre ou crie um servidor para personalizar avatar, banner, bio, apelido e cosméticos por servidor.";
       return;
     }
@@ -282,6 +286,15 @@
     const username = state.selfUser?.username || "";
     const local = typeof serverMemberProfile === "function" ? serverMemberProfile(srv, username) : null;
     const nick = typeof memberNickname === "function" ? memberNickname(srv, username) : null;
+    if (preview && compare && state.selfUser) {
+      compare.disabled = false;
+      const global = compare.getAttribute("aria-pressed") === "true";
+      preview.classList.remove("hidden");
+      const user = global ? state.selfUser : resolveServerProfile(srv, username, state.selfUser);
+      renderCompactProfile(preview, user, (!global && nick) || user.display_name || username, username, true);
+      fillCompactProfileDetails(preview, global ? [] : getUserServerRoles(srv, username));
+      preview.setAttribute("aria-label", global ? "Prévia do perfil principal" : `Prévia em ${srv.name}`);
+    }
     const activeOverrides = [];
     if (nick) activeOverrides.push(`Apelido: ${nick}`);
     if (local?.avatar) activeOverrides.push("Avatar próprio");
@@ -306,6 +319,14 @@
   }
 
   document.getElementById("settings-server-profile-select")?.addEventListener("change", renderServerProfileTabSummary);
+  document.getElementById("settings-server-profile-compare")?.addEventListener("click", (event) => {
+    const btn = event.currentTarget;
+    const showGlobal = btn.getAttribute("aria-pressed") !== "true";
+    btn.setAttribute("aria-pressed", String(showGlobal));
+    btn.textContent = showGlobal ? "Voltar ao perfil do servidor" : "Comparar com perfil principal";
+    renderServerProfileTabSummary();
+  });
+  window.refreshServerProfileSettings = renderServerProfileTabSummary;
   document.getElementById("settings-server-profile-edit-btn")?.addEventListener("click", async () => {
     const sid = document.getElementById("settings-server-profile-select")?.value;
     if (sid && typeof openServerProfileDialog === "function") {

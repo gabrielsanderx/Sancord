@@ -2845,7 +2845,7 @@ dependencies = [
 
 [[package]]
 name = "sancord"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "argon2",
  "axum",
@@ -2871,6 +2871,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+ "webview2-com",
  "windows",
  "windows-core 0.58.0",
  "wry",

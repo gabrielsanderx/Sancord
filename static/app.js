@@ -1267,6 +1267,11 @@ async function handleServerMessage(msg) {
       break;
     }
 
+    case "ScheduledMessages": {
+      receiveScheduledMessages(payload);
+      break;
+    }
+
     case "UserPrefsUpdated": {
       onUserPrefsUpdated(payload);
       renderPrivacySettings();
@@ -1300,6 +1305,7 @@ async function handleServerMessage(msg) {
       state.historyPageSize = payload.history_page_size || 50;
       state.historyState = new Map();
       state.selfUser = payload.user;
+      state.composerCapabilities = new Set(payload.composer_capabilities || []);
       resetBoardEditorOnAccountChange();
       resetCollectionOnAccountChange();
       resetProfileSharing();
@@ -1340,6 +1346,7 @@ async function handleServerMessage(msg) {
         applyChannelHeader(activeSrv, state.textChannels.find((c) => c.id === state.currentTextChannel) || state.voiceChannels.find((c) => c.id === state.currentTextChannel));
       }
       onChannelOpened(getActiveTextChannelId());
+      if (state.composerCapabilities.has("scheduling_v1")) sendWs("ListScheduledMessages");
       renderChatMessages();
       refreshUnreadIndicators();
       applyDeepLinkFromUrl();
@@ -1477,6 +1484,10 @@ async function handleServerMessage(msg) {
       const lower = username.toLowerCase();
       if (profile) srv.member_profiles = { ...srv.member_profiles, [lower]: profile };
       else if (srv.member_profiles) delete srv.member_profiles[lower];
+      if (lower === state.selfUser?.username?.toLowerCase() &&
+          !document.getElementById("profile-subtab-server")?.classList.contains("hidden")) {
+        window.refreshServerProfileSettings?.();
+      }
       if (state.activeView === "server" && state.activeServerId === server_id) {
         renderMembersSidebar();
         renderChatMessages({ preserveScroll: true });
@@ -1530,6 +1541,7 @@ async function handleServerMessage(msg) {
 
     case "ServerFeedback": {
       const { ok, message: fbMsg, action } = payload;
+      if (action === "schedule_message") receiveScheduleResult(ok);
       if (action === "profile_board") {
         handleBoardSaveFailure(fbMsg);
         break;
@@ -1727,7 +1739,8 @@ async function handleServerMessage(msg) {
       const { channel, server_id } = payload;
       const srv = state.servers.find((s) => s.id === (server_id || "sancord"));
       if (srv) {
-        if (channel.kind === "text") {
+        // Anúncios e fórum também ficam na lista de texto (como no servidor).
+        if (channel.kind !== "voice") {
           if (!srv.text_channels.some((c) => c.id === channel.id)) {
             srv.text_channels.push(channel);
           }
@@ -2385,16 +2398,16 @@ async function joinVoiceChannel(channelId, friendlyLabel = null) {
   const ch = state.voiceChannels.find((c) => c.id === channelId);
   const channelName = friendlyLabel || (ch ? ch.name : getFriendlyVoiceName(channelId));
 
-  activeVoiceChannelName.textContent = isPrivateVoiceId(channelId)
-    ? channelName
-    : `CALL / ${channelName}`;
-  stageTitle.textContent = `🔊 Em chamada: ${channelName}`;
+  activeVoiceChannelName.textContent = channelName;
+  stageTitle.textContent = isPrivateVoiceId(channelId) ? `Chamada privada · ${channelName}` : channelName;
+  if (typeof updateVoiceDockContext === "function") updateVoiceDockContext(channelId);
   if (typeof document !== "undefined") {
     document.getElementById("stage-open-voice-chat-btn")?.classList.toggle("hidden", isPrivateVoiceId(channelId));
   }
   voiceConnectionPanel.classList.remove("hidden");
   voiceStage.classList.remove("hidden");
   toggleStageBtn.classList.remove("hidden");
+  syncVoiceStageContext();
 
   startVoicePingMonitor();
   startVoiceCallTimer();
@@ -2407,6 +2420,24 @@ async function joinVoiceChannel(channelId, friendlyLabel = null) {
   renderVoiceChannels();
   renderVoiceStage();
   updateDmCallButtonUI();
+}
+
+/** O palco da call só aparece onde ela acontece: no servidor do canal de voz, ou na
+ *  conversa privada/grupo da chamada. Em outra DM ou outro servidor, fica escondido. */
+function voiceStageMatchesView() {
+  const id = state.currentVoiceChannel;
+  if (!id) return false;
+  if (isPrivateVoiceId(id)) {
+    const convId = id.replace(/^dmvoice:/, "dm:").replace(/^gdmvoice:/, "gdm:");
+    return state.activeView === "home" && state.activeDmId === convId;
+  }
+  if (state.activeView !== "server") return false;
+  const srv = (state.servers || []).find((s) => (s.voice_channels || []).some((c) => c.id === id));
+  return !srv || srv.id === state.activeServerId;
+}
+
+function syncVoiceStageContext() {
+  voiceStage?.classList.toggle("stage-out-of-context", !voiceStageMatchesView());
 }
 
 function getFriendlyVoiceName(channelId) {
@@ -2464,6 +2495,7 @@ function stopVoicePingMonitor() {
     state.voicePingInterval = null;
   }
   if (voiceSignalBox) {
+    if (typeof closeVoiceDetails === "function") closeVoiceDetails();
     voiceSignalBox.title = "Qualidade do Sinal";
     voiceSignalBox.className = "voice-signal-box";
   }
@@ -2504,36 +2536,7 @@ function stopVoiceCallTimer() {
 }
 
 async function updateVoicePingDisplay() {
-  if (!voiceSignalBox) return;
-  if (state.peers.size === 0) {
-    voiceSignalBox.title = "Voz conectada (aguardando participantes)";
-    voiceSignalBox.className = "voice-signal-box sig-good";
-    return;
-  }
-  let bestRttMs = null;
-  for (const peerEntry of state.peers.values()) {
-    try {
-      const stats = await peerEntry.pc.getStats();
-      stats.forEach((report) => {
-        if (report.type === "candidate-pair" && report.state === "succeeded" && report.currentRoundTripTime != null) {
-          const ms = Math.round(report.currentRoundTripTime * 1000);
-          if (bestRttMs === null || ms < bestRttMs) bestRttMs = ms;
-        }
-      });
-    } catch (_) {}
-  }
-  if (bestRttMs === null) {
-    voiceSignalBox.title = "Qualidade do Sinal: conectando...";
-    voiceSignalBox.className = "voice-signal-box sig-good";
-  } else {
-    voiceSignalBox.title = `Qualidade do Sinal: ${bestRttMs} ms`;
-    voiceSignalBox.className =
-      bestRttMs < 80
-        ? "voice-signal-box sig-good"
-        : bestRttMs < 180
-          ? "voice-signal-box sig-warn"
-          : "voice-signal-box sig-bad";
-  }
+  if (typeof refreshVoiceConnectionDetails === "function") await refreshVoiceConnectionDetails();
 }
 
 function createOrGetPeerConnection(peerId) {
@@ -3132,6 +3135,7 @@ function renderPickerSources() {
       <div class="source-thumb-wrap">
         <img src="${src.thumbnail}" alt="${escapeHtml(src.title)}" />
         <span class="source-res-tag">${src.width}×${src.height}</span>
+        ${src.minimized ? `<span class="source-min-tag" title="Será restaurada, sem tirar o foco, quando a transmissão começar">Minimizada</span>` : ""}
       </div>
       <div class="source-title" title="${escapeHtml(src.title)}">${escapeHtml(src.title)}</div>
     `;
@@ -3828,6 +3832,8 @@ function wrapSvgDeco(inner) {
 }
 
 function getDecoSvgHtml(decoId) {
+  const depthArt = profileAvatarArtLayer(decoId, "front");
+  if (depthArt) return depthArt;
   if (!decoId || decoId === "none") return "";
   // Perfil P2: decorações novas do Sancord (arte em static/js/profile.js).
   const art = typeof sancordDecorationArt === "function" ? sancordDecorationArt(decoId) : null;
@@ -4038,11 +4044,13 @@ function applyDecoToElement(el, decoId) {
   const cls = getDecoClass(decoId);
   if (el.dataset.decoClass === cls) return;
   if (el.dataset.decoClass) el.classList.remove(el.dataset.decoClass);
-  el.querySelector(".deco-svg-layer")?.remove();
+  el.querySelectorAll(":scope > .deco-svg-layer").forEach(layer => layer.remove());
   el.dataset.decoClass = cls;
   if (cls) {
     el.classList.add(cls);
-    const markup = getDecoSvgHtml(decoId);
+    const back = profileAvatarArtLayer(decoId, "back");
+    if (back) el.insertAdjacentHTML("afterbegin", back);
+    const markup = profileAvatarArtLayer(decoId, "front") || getDecoSvgHtml(decoId);
     if (markup) el.insertAdjacentHTML("beforeend", markup);
   }
 }
@@ -4520,6 +4528,7 @@ function renderVoiceStage() {
   }
 
   const memberIds = state.voiceMembers[state.currentVoiceChannel] || [];
+  if (typeof syncPrivateStageControls === "function") syncPrivateStageControls();
   const activeDomIds = new Set();
   let anyScreenActive = false;
 
@@ -4538,7 +4547,6 @@ function renderVoiceStage() {
     activeDomIds.add(voiceDomId);
     let card = document.getElementById(voiceDomId);
     const isSpeaking = state.speakingUsers.has(uid);
-    const volPct = getPeerVolume(uid);
 
     if (!card) {
       card = document.createElement("div");
@@ -4560,7 +4568,7 @@ function renderVoiceStage() {
       if (!camVideo) {
         card.innerHTML = `
           <div class="screen-controls-overlay">
-            <button type="button" class="screen-ctrl-btn cam-fs-btn" title="Tela Cheia">⛶</button>
+            <button type="button" class="screen-ctrl-btn cam-fs-btn" title="Tela cheia" aria-label="Tela cheia">${SancordIcons.html("expand")}</button>
           </div>
           <video class="camera-video-el" autoplay playsinline muted></video>
           <div class="stage-card-label">
@@ -4585,7 +4593,7 @@ function renderVoiceStage() {
       }
       const ownerEl = card.querySelector(".cam-owner-name");
       if (ownerEl) {
-        ownerEl.textContent = `${user.username}${isSelf ? " (Você)" : ""}${user.muted ? " 🔇" : ""}`;
+        ownerEl.textContent = `${user.username}${isSelf ? " (Você)" : ""}`;
       }
     } else {
       card.ondblclick = null;
@@ -4595,28 +4603,9 @@ function renderVoiceStage() {
         </div>
         <div class="stage-card-label">
           <span>${escapeHtml(user.display_name || user.username)}${isSelf ? " (Você)" : ""}</span>
-          ${user.server_muted ? `<span class="server-mod-badge" title="Silenciado pelo servidor">🔇</span>` : user.muted ? "<span>🔇</span>" : ""}
-          ${user.server_deafened ? `<span class="server-mod-badge" title="Ensurdecido pelo servidor">🎧</span>` : ""}
-          ${!isSelf && isLocallyMuted(uid) ? `<span title="Silenciado só para você">🔕</span>` : ""}
         </div>
-        ${
-          !isSelf
-            ? `<div class="volume-control-wrap" title="Ajustar volume de ${escapeHtml(user.username)} (0% a 200%)">
-                <span>🔊</span>
-                <input type="range" min="0" max="200" step="5" value="${volPct}" class="volume-slider" data-vol-slider="${uid}" />
-                <span class="volume-pct" data-vol-label="${uid}">${volPct}%</span>
-              </div>`
-            : ""
-        }
       `;
-
-      const volSlider = card.querySelector(`[data-vol-slider="${uid}"]`);
-      if (volSlider) {
-        volSlider.addEventListener("click", (e) => e.stopPropagation());
-        volSlider.addEventListener("input", (e) => {
-          setPeerVolume(uid, e.target.value);
-        });
-      }
+      card.querySelector(".stage-card-label")?.append(...voiceUserIndicators(user));
     }
 
     // 2. Card de Transmissão de Tela (preserva o <video> existente para não piscar nem sair da Tela Cheia)
@@ -4730,13 +4719,13 @@ function renderVoiceStage() {
 
       const spotlightBtn = screenCard.querySelector(".spotlight-toggle-btn");
       if (spotlightBtn) {
-        spotlightBtn.innerHTML = isSpotlight ? "🗗 Reduzir" : "🔍 Modo Teatro";
+        spotlightBtn.replaceChildren(SancordIcons.node(isSpotlight ? "close" : "screen"), document.createTextNode(isSpotlight ? "Reduzir" : "Modo teatro"));
       }
 
       const fullscreenBtn = screenCard.querySelector(".fullscreen-toggle-btn");
       if (fullscreenBtn) {
         const isFs = document.fullscreenElement === screenCard || document.fullscreenElement === videoEl;
-        fullscreenBtn.innerHTML = isFs ? "✕ Sair da Tela Cheia" : "⛶ Tela Cheia";
+        fullscreenBtn.replaceChildren(SancordIcons.node(isFs ? "close" : "expand"), document.createTextNode(isFs ? "Sair da tela cheia" : "Tela cheia"));
       }
 
       const ownerTextEl = screenCard.querySelector(".screen-owner-text");
@@ -4839,8 +4828,10 @@ function renderReplyMentionToggle() {
 }
 
 function setReplyingTo(msg) {
+  state.sendWhenUploaded = false;
   state.replyingTo = {
     id: msg.id,
+    channel_id: msg.channel_id || getActiveTextChannelId(),
     author_name: msg.author_name,
     content: msg.content || "[Imagem]",
   };
@@ -4864,6 +4855,7 @@ document.getElementById("reply-mention-toggle")?.addEventListener("click", () =>
 });
 
 function clearReplyingTo() {
+  if (state.replyingTo) state.sendWhenUploaded = false;
   state.replyingTo = null;
   replyPreviewBar?.classList.add("hidden");
 }
@@ -4905,8 +4897,7 @@ function sidebarMemberRows(server, users) {
   return [...rows.values()];
 }
 
-function renderMembersSidebar() {
-  membersList.innerHTML = "";
+function renderMembersSidebar(opts = {}) {
   const srv = getActiveServer();
   // Etapa C6: numa thread aberta, a lista mostra quem segue a thread.
   const openThreadObj = state.activeView === "server" && typeof isThreadId === "function" && isThreadId(state.currentTextChannel)
@@ -4915,120 +4906,70 @@ function renderMembersSidebar() {
   const threadMembers = openThreadObj ? new Set(openThreadObj.members || []) : null;
   const allUsers = sidebarMemberRows(srv, state.users.values())
     .filter(u => !threadMembers || threadMembers.has(u.username.toLowerCase()));
-  const offline = allUsers.filter(u => u.status_kind === "offline" || u.status_kind === "invisible");
-  const connected = allUsers.filter(u => u.status_kind !== "offline" && u.status_kind !== "invisible");
-  onlineCountTitle.textContent = threadMembers
-    ? `MEMBROS DA THREAD — ${allUsers.length}`
-    : `MEMBROS ONLINE — ${connected.length}`;
+  const onlineCount = allUsers.filter(u => !SancordMemberList.isMemberOffline(u)).length;
 
-  const renderSingleMember = (u, topRole) => {
-    const li = document.createElement("li");
-    const appearance = resolveServerProfile(srv, u.username, u);
-    const plateCls = getNameplateClass(appearance.nameplate_style);
-    li.className = plateCls ? `member-item ${plateCls}` : "member-item";
-    const sk = u.status_kind || "online";
-    const decoCls = getDecoClass(appearance.avatar_decoration);
-
-    const isOffline = sk === "offline" || sk === "invisible";
-    let activity = isOffline ? "Offline" : u.custom_status || STATUS_LABELS[sk] || "Online";
-    if (u.voice_channel_id && !isPrivateVoiceId(u.voice_channel_id)) {
-      const vc = state.voiceChannels.find((c) => c.id === u.voice_channel_id);
-      if (u.screen_sharing && u.camera_on) {
-        activity = `🖥️📹 Tela + Câm em ${vc ? vc.name : "Voz"}`;
-      } else if (u.screen_sharing) {
-        activity = `🖥️ Transmitindo em ${vc ? vc.name : "Voz"}`;
-      } else if (u.camera_on) {
-        activity = `📹 Câmera em ${vc ? vc.name : "Voz"}`;
-      } else {
-        activity = `🔊 Em ${vc ? vc.name : "Voz"}`;
-      }
-    }
-
-    const badge = topRole?.badge_emoji ? `<span title="${escapeHtml(topRole.name)}">${escapeHtml(topRole.badge_emoji)}</span> ` : "";
-    const timeoutUntil = memberTimeoutUntil(srv, u.username);
-    if (timeoutUntil) activity = `⏱️ De castigo até ${formatTimeoutEnd(timeoutUntil)}`;
-    const nick = memberNickname(srv, u.username);
-    const shownName = nick || u.display_name || u.username;
-    li.innerHTML = `
-      <div class="user-avatar-wrap ${decoCls}">
-        <div class="avatar" style="background: ${u.avatar_color}">
-          ${renderAvatarInner(u.username, appearance.avatar_url, appearance.avatar_animated)}
-        </div>
-        ${getDecoSvgHtml(appearance.avatar_decoration)}
-        <span class="status-badge ${sk}"></span>
-      </div>
-      <div class="member-details">
-        <div class="member-name"${shownName !== u.username ? ` title="@${escapeHtml(u.username)}"` : ""}>${badge}<span class="member-display-name">${escapeHtml(shownName)}</span></div>
-        <div class="member-activity">${escapeHtml(activity)}</div>
-      </div>
-    `;
-    applyNameStyleToEl(li.querySelector(".member-display-name"), appearance, topRole?.color);
-    li.classList.toggle("is-timed-out", Boolean(timeoutUntil));
-    li.classList.toggle("offline", isOffline);
-    const data = {author_name:u.username, author_color:u.avatar_color, author_avatar:u.avatar_url};
-    const openProfile = () => openMemberProfilePopover(u.id, data);
-    const openCompact = () => openCompactProfile(u.id, data);
-    li.tabIndex = 0;
-    li.setAttribute("role", "button");
-    li.setAttribute("aria-label", `${shownName !== u.username ? `${shownName} (${u.username})` : u.username}, ${activity}`);
-    li.addEventListener("click", openCompact);
-    li.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCompact(); } });
-    li.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      SancordUI.contextMenu(e.clientX, e.clientY, memberUserMenuItems(srv, u, openProfile));
-    });
-    membersList.appendChild(li);
-  };
-
-  // Agrupar membros online por Cargo Destacado (Hoist), igual ao Discord
-  const hoistedGroups = new Map();
-  const unhoisted = [];
-  for (const u of connected) {
-    const roles = getUserServerRoles(srv, u.username);
-    const hoistedRole = roles.find((r) => r.hoist);
-    const topRole = roles[0] || null;
-    if (hoistedRole) {
-      if (!hoistedGroups.has(hoistedRole.id)) {
-        hoistedGroups.set(hoistedRole.id, { role: hoistedRole, items: [] });
-      }
-      hoistedGroups.get(hoistedRole.id).items.push({ u, topRole });
+  // Cabeçalho global "MEMBROS ONLINE" removido na vista de servidor:
+  // a lista começa diretamente pelos cargos destacados, Disponível e Offline.
+  if (onlineCountTitle) {
+    if (threadMembers) {
+      onlineCountTitle.textContent = `MEMBROS DA THREAD — ${allUsers.length}`;
+      onlineCountTitle.classList.remove("hidden");
     } else {
-      unhoisted.push({ u, topRole });
+      onlineCountTitle.textContent = "";
+      onlineCountTitle.classList.add("hidden");
     }
   }
-
-  const sortedGroups = Array.from(hoistedGroups.values()).sort(
-    (a, b) => (b.role.position || 0) - (a.role.position || 0)
-  );
-
-  for (const grp of sortedGroups) {
-    const hdr = document.createElement("li");
-    hdr.className = "member-role-group-title";
-    hdr.textContent = `${grp.role.badge_emoji ? grp.role.badge_emoji + " " : ""}${grp.role.name} — ${grp.items.length}`;
-    membersList.appendChild(hdr);
-    grp.items.forEach(({ u, topRole }) => renderSingleMember(u, topRole));
+  if (typeof serverTitleEl !== "undefined" && serverTitleEl && srv && !threadMembers) {
+    serverTitleEl.dataset.onlineCount = String(onlineCount);
+    serverTitleEl.title = `${srv.name} — ${onlineCount} disponível${onlineCount === 1 ? "" : "is"} de ${allUsers.length}`;
   }
 
-  if (unhoisted.length > 0) {
-    if (sortedGroups.length > 0) {
-      const hdr = document.createElement("li");
-      hdr.className = "member-role-group-title";
-      hdr.textContent = `MEMBROS — ${unhoisted.length}`;
-      membersList.appendChild(hdr);
-    }
-    unhoisted.forEach(({ u, topRole }) => renderSingleMember(u, topRole));
-  }
-  if (offline.length) {
-    const hdr = document.createElement("li");
-    hdr.className = "member-role-group-title";
-    hdr.textContent = `OFFLINE — ${offline.length}`;
-    membersList.appendChild(hdr);
-    offline.sort((a,b) => a.username.localeCompare(b.username, "pt-BR")).forEach(u => renderSingleMember(u, getUserServerRoles(srv, u.username)[0] || null));
-  }
-  if (!allUsers.length) {
-    membersList.innerHTML = threadMembers
-      ? SancordUI.emptyHTML({icon:"thread",title:"Ninguém segue esta thread",description:"Quem escrever aqui ou escolher Seguir thread aparece nesta lista."})
-      : SancordUI.emptyHTML({icon:"users",title:"Ninguém por aqui",description:"Os membros aparecerão nesta lista."});
+  const groups = SancordMemberList.buildMemberGroups(allUsers, srv?.roles || [], {
+    memberRoles: srv?.member_roles || {},
+    ownerUsername: srv?.owner_username || "",
+    getDisplayName: (u) => memberNickname(srv, u.username) || u.display_name || u.username,
+    availableLabel: "Disponível",
+    offlineLabel: "Offline",
+  });
+
+  const emptyHtml = threadMembers
+    ? SancordUI.emptyHTML({icon:"thread",title:"Ninguém segue esta thread",description:"Quem escrever aqui ou escolher Seguir thread aparece nesta lista."})
+    : SancordUI.emptyHTML({icon:"users",title:"Ninguém por aqui",description:"Os membros aparecerão nesta lista."});
+
+  const changed = SancordMemberList.MemberList(membersList, groups, {
+    server: srv,
+    threadId: openThreadObj?.id || "",
+    emptyMode: threadMembers ? "thread" : "server",
+    emptyHtml,
+    force: Boolean(opts.force),
+    voiceChannels: state.voiceChannels || [],
+    statusLabels: STATUS_LABELS,
+    isPrivateVoiceId,
+    canViewChannel: (server, ch) => getChannelPermissions(server, ch).view_channel !== false,
+    resolveAppearance: (server, u) => resolveServerProfile(server, u.username, u),
+    getNameplateClass,
+    getDecoClass,
+    getDecoSvgHtml,
+    renderAvatarInner,
+    escapeHtml,
+    getTimeoutUntil: memberTimeoutUntil,
+    formatTimeoutEnd,
+    getCustomStatus: (u) => (typeof customStatusText === "function" ? customStatusText(u) : u.custom_status || ""),
+    applyNameStyle: applyNameStyleToEl,
+    onOpenCompact: (u, li) => {
+      const data = { author_name: u.username, author_color: u.avatar_color, author_avatar: u.avatar_url };
+      openCompactProfile(u.id, data, li);
+    },
+    onContextMenu: (e, u) => {
+      e.preventDefault();
+      const data = { author_name: u.username, author_color: u.avatar_color, author_avatar: u.avatar_url };
+      const openProfile = () => openMemberProfilePopover(u.id, data);
+      SancordUI.contextMenu(e.clientX, e.clientY, memberUserMenuItems(srv, u, openProfile));
+    },
+  });
+
+  if (changed && typeof refreshAnimatedMedia === "function") {
+    refreshAnimatedMedia(membersList);
   }
 }
 
@@ -5127,7 +5068,6 @@ function clearPendingImage() {
   if (imageFileInput) imageFileInput.value = "";
 }
 
-attachImageBtn?.addEventListener("click", () => imageFileInput?.click());
 imageFileInput?.addEventListener("change", (e) => {
   addComposerFiles(e.target.files);
   e.target.value = "";
@@ -5138,6 +5078,7 @@ removeImageBtn?.addEventListener("click", clearPendingImage);
 window.addEventListener("paste", (e) => {
   if (!loginModal.classList.contains("hidden")) return;
   if (chatMainView?.classList.contains("hidden")) return;
+  if (e.target !== chatInput && (e.target.closest?.("input, textarea, [contenteditable], [role=dialog]"))) return;
   const files = Array.from(e.clipboardData?.files || []);
   if (files.length === 0) return;
   e.preventDefault();
@@ -5404,9 +5345,11 @@ let emojiTargetMsg = null;
 
 emojiPickerBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
+  if (typeof closeStickerPicker === "function") closeStickerPicker();
   emojiTargetMsg = null;
   if (emojiPopover) emojiPopover.style.cssText = "";
   emojiPopover?.classList.toggle("hidden");
+  emojiPickerBtn.setAttribute("aria-expanded", String(!emojiPopover.classList.contains("hidden")));
 });
 
 // Helper seguro para Área de Transferência (HTTPS + HTTP local)
@@ -5820,36 +5763,16 @@ function renderVisitedProfile(globalProfile, name, userId) {
   };
   const lower = name.toLowerCase();
   const serverNick = memberNickname(srv, lower);
-  const status = user.status_kind || "invisible";
-  const custom = customStatusText(user) || (user.online === false ? "Offline" : STATUS_LABELS[status]) || "Offline";
-  const handle = `@${lower.replace(/\s+/g, "")}${user.pronouns ? ` • ${user.pronouns}` : ""}`;
-  if (profileCardAvatar) {
-    profileCardAvatar.style.background = user.avatar_color || "#5865f2";
-    setVisitedProfileAvatar(name, user.avatar_url, user.avatar_animated);
-  }
-  if (profileCardStatusDot) profileCardStatusDot.className = `status-badge ${status}`;
-  if (profileCardName) profileCardName.textContent = serverNick || user.display_name || name;
-  if (profileCardHandle) profileCardHandle.textContent = handle;
+  const handle = `@${lower.replace(/\s+/g, "")}`;
   const moreHandle = document.getElementById("profile-more-handle-sub");
   if (moreHandle) moreHandle.textContent = handle;
-  if (profileCardCustomStatus) profileCardCustomStatus.textContent = `• ${custom}`;
-  renderProfileBio(profileCardBio, appearance.bio);
-
   const card = document.getElementById("profile-popover-card");
-  applyProfileCardVisuals(card, profileCardBanner, document.getElementById("profile-card-effect-layer"),
-    document.getElementById("profile-card-deco-wrap"), profileCardName, appearance);
-  applyProfileFrame(card, user.profile_frame);
-  setFrameReactiveState(card, { ...user, id: userId });
-  renderProfileBadges(document.getElementById("profile-card-badges"), user.badges);
-  if (card) refreshAnimatedMedia(card);
-}
-
-let visitedAvatarSource = null;
-function setVisitedProfileAvatar(name, url, animated) {
-  if (visitedAvatarSource && visitedAvatarSource.url === url && visitedAvatarSource.name === name &&
-      visitedAvatarSource.animated === animated) return;
-  visitedAvatarSource = { name, url, animated };
-  profileCardAvatar.innerHTML = renderAvatarInner(name, url, animated);
+  renderProfileCardIdentity(card, {
+    avatar: profileCardAvatar, banner: profileCardBanner, name: profileCardName, handle: profileCardHandle,
+    avatarWrap: document.getElementById("profile-card-deco-wrap"), dot: profileCardStatusDot,
+    status: profileCardCustomStatus, bio: profileCardBio, badges: document.getElementById("profile-card-badges"),
+    effect: document.getElementById("profile-card-effect-layer"),
+  }, { ...appearance, username: name, id: userId }, "full", serverNick || user.display_name || name, handle);
 }
 
 function refreshVisitedServerProfile(serverId) {
@@ -6254,10 +6177,10 @@ const profileDraft = {
   bio: "",
   avatar_decoration: "none",
   banner_url: "",
-  theme_primary: "#5c1726",
-  theme_accent: "#111214",
+  theme_primary: "",
+  theme_accent: "",
   name_style: "default",
-  name_color: "#ffffff",
+  name_color: "",
   name_color_secondary: "",
   name_gradient_direction: "horizontal",
   nameplate_style: "none",
@@ -6299,6 +6222,53 @@ function syncNameStyleOptions() {
   }
   settingsNameStyleSelect.value = profileDraft.name_style;
 }
+
+function renderNameStyleSamples(user) {
+  const host = document.getElementById("settings-name-style-samples");
+  if (!host || !settingsNameStyleSelect) return;
+  const name = user.display_name || user.username;
+  const options = [...settingsNameStyleSelect.options];
+  const catalog = JSON.stringify(options.map(opt => [opt.value, opt.textContent, opt.disabled]));
+  const appearance = JSON.stringify([catalog, name, user.name_color, user.name_color_secondary, user.name_gradient_direction]);
+  if (host.dataset.catalog !== catalog) {
+    host.dataset.catalog = catalog;
+    host.replaceChildren();
+    const groups = [["Fontes", ["default", "gta", "retro", "gothic"]], ["Efeitos", null]];
+    for (const [label, fonts] of groups) {
+      const group = document.createElement("fieldset");
+      const legend = document.createElement("legend");
+      legend.textContent = label;
+      group.append(legend);
+      for (const opt of options) {
+        if (fonts ? !fonts.includes(opt.value) : groups[0][1].includes(opt.value)) continue;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn-secondary";
+        btn.dataset.styleSample = opt.value;
+        btn.disabled = opt.disabled;
+        const sample = document.createElement("span");
+        const title = document.createElement("small");
+        title.textContent = opt.textContent;
+        btn.append(sample, title);
+        btn.addEventListener("click", () => {
+          settingsNameStyleSelect.value = opt.value;
+          settingsNameStyleSelect.dispatchEvent(new Event("change"));
+        });
+        group.append(btn);
+      }
+      host.append(group);
+    }
+  }
+  for (const btn of host.querySelectorAll("[data-style-sample]")) {
+    const style = btn.dataset.styleSample;
+    btn.setAttribute("aria-pressed", String(style === profileDraft.name_style));
+    if (host.dataset.appearance !== appearance) {
+      btn.firstElementChild.textContent = name;
+      applyNameStyleToEl(btn.firstElementChild, { ...user, name_style: style }, "");
+    }
+  }
+  host.dataset.appearance = appearance;
+}
 const settingsNameColorInput = document.getElementById("settings-name-color-input");
 const custThemePreviewBox = document.getElementById("cust-theme-preview-box");
 const settingsThemePrimary = document.getElementById("settings-theme-primary");
@@ -6339,14 +6309,7 @@ function refreshLiveProfilePreview() {
   if (!state.selfUser) return;
   // Prévia usa a mídia do rascunho (ainda não salva) quando houver.
   const draftUser = draftPreviewUser();
-  const avatarAnimated = profileDraft.media?.avatar?.animated || (!profileDraft.media?.avatar && state.selfUser.avatar_animated);
-  const avHtml = renderAvatarInner(state.selfUser.username, draftUser.avatar_url, avatarAnimated);
-
-  if (settingsDecoPreviewAvatar) {
-    settingsDecoPreviewAvatar.innerHTML = avHtml;
-    settingsDecoPreviewAvatar.style.background = state.selfUser.avatar_color;
-  }
-  applyDecoToElement(settingsDecoPreviewWrap, profileDraft.avatar_decoration);
+  renderDecoratedAvatar(settingsDecoPreviewAvatar, settingsDecoPreviewWrap, draftUser);
   if (settingsDecoLabel) {
     // Nome vem do catálogo do servidor (com o antigo como reserva).
     const found = cosmeticInfo("avatar_decoration", profileDraft.avatar_decoration) || AVATAR_DECORATIONS.find((d) => d.id === profileDraft.avatar_decoration);
@@ -6358,10 +6321,7 @@ function refreshLiveProfilePreview() {
     frameLabel.textContent = fr ? fr.name : "Moldura";
   }
 
-  if (nameplateMiniAvatar) {
-    nameplateMiniAvatar.innerHTML = avHtml;
-    nameplateMiniAvatar.style.background = state.selfUser.avatar_color;
-  }
+  renderDecoratedAvatar(nameplateMiniAvatar, null, draftUser);
   if (nameplateCurrentLabel) {
     const np = cosmeticInfo("nameplate", profileDraft.nameplate_style) || NAMEPLATES.find((n) => n.id === profileDraft.nameplate_style);
     nameplateCurrentLabel.textContent = np ? np.name : "Sem placa";
@@ -6378,6 +6338,7 @@ function refreshLiveProfilePreview() {
     settingsNameShowcase.textContent = draftUser.display_name || state.selfUser.username;
     applyNameStyleToEl(settingsNameShowcase, profileDraft, "#ffffff");
   }
+  renderNameStyleSamples(draftUser);
   document.getElementById("settings-name-gradient-controls")?.classList.toggle("hidden", profileDraft.name_style !== "custom-gradient");
 
   if (custThemePreviewBox) {
@@ -6391,7 +6352,7 @@ function refreshLiveProfilePreview() {
     custBannerPreviewBox.style.backgroundColor = profileDraft.theme_primary;
   }
   if (settingsBannerBtnLabel) {
-    settingsBannerBtnLabel.textContent = draftBanner ? "Alterar banner" : "+ Enviar banner";
+    settingsBannerBtnLabel.textContent = draftBanner ? "Faixa" : "Faixa: cor do tema";
   }
   settingsRemoveBannerBtn?.classList.toggle("hidden", !draftBanner);
   document.getElementById("settings-remove-avatar-btn")?.classList.toggle("hidden", !draftUser.avatar_url);
@@ -6399,39 +6360,19 @@ function refreshLiveProfilePreview() {
 
   if (settingsEffectLabel) {
     const ef = cosmeticInfo("profile_effect", profileDraft.profile_effect) || PROFILE_EFFECTS.find((e) => e.id === profileDraft.profile_effect);
-    settingsEffectLabel.textContent = ef ? `Efeito: ${ef.name}` : "Efeito: Nenhum";
+    settingsEffectLabel.textContent = ef && ef.id !== "none" ? ef.name : "Efeito";
   }
 
   // Atualiza Cartão PRÉVIA ao vivo
-  if (previewCardAvatar) {
-    previewCardAvatar.innerHTML = avHtml;
-    previewCardAvatar.style.background = state.selfUser.avatar_color;
-  }
-  if (previewCardStatusDot) {
-    previewCardStatusDot.className = `status-badge ${profileDraft.status_kind || "online"}`;
-  }
-  if (previewCardName) previewCardName.textContent = draftUser.display_name || state.selfUser.username;
-  if (previewCardCustomStatus) {
-    previewCardCustomStatus.textContent =
-      profileDraft.custom_status || STATUS_LABELS[profileDraft.status_kind] || "Online";
-  }
-  if (previewCardBio) {
-    renderProfileBio(previewCardBio, profileDraft.bio);
-  }
-
-  applyProfileCardVisuals(
-    liveProfilePreviewCard,
-    previewCardBanner,
-    previewEffectLayer,
-    previewDecoWrap,
-    previewCardName,
-    { ...draftUser, banner_animated: profileDraft.media?.banner?.animated || (!profileDraft.media?.banner && state.selfUser.banner_animated) }
-  );
-  // Perfil P2: moldura, estado reativo e badges na prévia.
-  applyProfileFrame(liveProfilePreviewCard, profileDraft.profile_frame);
-  setFrameReactiveState(liveProfilePreviewCard, { ...state.selfUser, status_kind: profileDraft.status_kind });
-  renderProfileBadges(document.getElementById("preview-card-badges"), state.selfUser.badges);
+  renderProfileCardIdentity(liveProfilePreviewCard, {
+    avatar: previewCardAvatar, avatarWrap: previewDecoWrap, dot: previewCardStatusDot, name: previewCardName,
+    handle: document.getElementById("preview-card-handle"), status: previewCardCustomStatus,
+    banner: previewCardBanner, effect: previewEffectLayer, bio: previewCardBio,
+    badges: document.getElementById("preview-card-badges"),
+  }, draftUser, "editor-full");
   renderProfileContextPreview();
+  // Editor visual (profile-editor.js): membro desde, conexões, convites e miniaturas.
+  if (typeof peAfterRefresh === "function") peAfterRefresh();
   refreshAnimatedMedia(document.getElementById("settings-tab-profile") || document);
   updateProfileDirtyState();
 }
@@ -6440,10 +6381,10 @@ function normalizedProfileAppearance(u) {
   const theme = profileTheme(u);
   return {
     avatar_decoration: u.avatar_decoration || "none",
-    theme_primary: (u.theme_primary || "#5c1726").toLowerCase(),
-    theme_accent: (u.theme_accent || "#111214").toLowerCase(),
+    theme_primary: (u.theme_primary || "").toLowerCase(),
+    theme_accent: (u.theme_accent || "").toLowerCase(),
     name_style: u.name_style || "default",
-    name_color: (u.name_color || u.avatar_color || "#ffffff").toLowerCase(),
+    name_color: (u.name_color || "").toLowerCase(),
     name_color_secondary: (u.name_color_secondary || "").toLowerCase(),
     name_gradient_direction: u.name_gradient_direction || "horizontal",
     nameplate_style: u.nameplate_style || "none",
@@ -6466,11 +6407,22 @@ function getNormalizedSavedProfile() {
   };
 }
 
+// Rascunho do editor = campos do perfil + mural. Salvar/Redefinir/Descartar tratam os dois juntos.
 function isProfileDraftDirty() {
+  return isProfileFieldsDirty() || (typeof boardIsDirty === "function" && boardIsDirty());
+}
+
+function isProfileFieldsDirty() {
   if (!state.selfUser) return false;
   const saved = getNormalizedSavedProfile();
+  const socialFields = collectSocialProfileFields();
+  const expiry = document.getElementById("settings-status-expiry")?.value;
   return (
     Object.keys(profileDraft.media || {}).length > 0 ||
+    socialFields.display_name !== (state.selfUser.display_name || "") ||
+    socialFields.pronouns !== (state.selfUser.pronouns || "") ||
+    socialFields.custom_status_emoji !== (state.selfUser.custom_status_emoji || "") ||
+    expiry !== (state.selfUser.custom_status_expires_at ? "keep" : "0") ||
     (profileDraft.theme_highlight || "").toLowerCase() !== saved.theme_highlight ||
     profileDraft.theme_mode !== saved.theme_mode ||
     profileDraft.theme_direction !== saved.theme_direction ||
@@ -6480,10 +6432,10 @@ function isProfileDraftDirty() {
     (profileDraft.bio || "") !== saved.bio ||
     (profileDraft.avatar_decoration || "none") !== saved.avatar_decoration ||
     (profileDraft.banner_url || "") !== saved.banner_url ||
-    (profileDraft.theme_primary || "#5c1726").toLowerCase() !== saved.theme_primary ||
-    (profileDraft.theme_accent || "#111214").toLowerCase() !== saved.theme_accent ||
+    (profileDraft.theme_primary || "").toLowerCase() !== saved.theme_primary ||
+    (profileDraft.theme_accent || "").toLowerCase() !== saved.theme_accent ||
     (profileDraft.name_style || "default") !== saved.name_style ||
-    (profileDraft.name_color || "#ffffff").toLowerCase() !== saved.name_color ||
+    (profileDraft.name_color || "").toLowerCase() !== saved.name_color ||
     profileDraft.name_color_secondary !== saved.name_color_secondary ||
     profileDraft.name_gradient_direction !== saved.name_gradient_direction ||
     (profileDraft.nameplate_style || "none") !== saved.nameplate_style ||
@@ -6507,11 +6459,11 @@ function loadAppearanceDraft(u) {
   if (dir) dir.value = profileDraft.theme_direction;
 
   if (settingsNameStyleSelect) settingsNameStyleSelect.value = profileDraft.name_style;
-  if (settingsNameColorInput) settingsNameColorInput.value = profileDraft.name_color;
+  if (settingsNameColorInput) settingsNameColorInput.value = profileDraft.name_color || "#ffffff";
   if (settingsNameColorSecondary) settingsNameColorSecondary.value = profileDraft.name_color_secondary || "#42beae";
   if (settingsNameGradientDirection) settingsNameGradientDirection.value = profileDraft.name_gradient_direction;
-  if (settingsThemePrimary) settingsThemePrimary.value = profileDraft.theme_primary;
-  if (settingsThemeAccent) settingsThemeAccent.value = profileDraft.theme_accent;
+  if (settingsThemePrimary) settingsThemePrimary.value = profileDraft.theme_primary || "#5c1726";
+  if (settingsThemeAccent) settingsThemeAccent.value = profileDraft.theme_accent || "#111214";
 }
 
 function loadDraftFromSelfUser() {
@@ -6531,8 +6483,8 @@ function loadDraftFromSelfUser() {
 function syncSettingsModalFields() {
   if (state.selfUser) {
     updateSelfProfileUI();
-    loadDraftFromSelfUser();
     if (typeof fillSocialProfileFields === "function") fillSocialProfileFields(state.selfUser);
+    loadDraftFromSelfUser();
   }
   if (typeof renderPrivacySettings === "function") renderPrivacySettings();
 
@@ -6656,7 +6608,23 @@ function openSettingsModal(tab = "account") {
   settingsModal.classList.remove("hidden");
 }
 
-function closeSettingsModal() {
+let confirmingProfileDiscard = false;
+async function closeSettingsModal() {
+  if (settingsModal && !settingsModal.classList.contains("hidden") && isProfileDraftDirty()) {
+    if (confirmingProfileDiscard) return;
+    confirmingProfileDiscard = true;
+    const discard = await SancordUI.formDialog({
+      title: "Descartar alterações de perfil?",
+      submitLabel: "Descartar",
+      cancelLabel: "Continuar editando",
+      danger: true,
+    }).finally(() => { confirmingProfileDiscard = false; });
+    if (!discard) return;
+    loadDraftFromSelfUser();
+    fillSocialProfileFields(state.selfUser);
+    if (typeof boardIsDirty === "function" && boardIsDirty()) requestBoardEditorState(true);
+  }
+  if (typeof closePeSubeditor === "function") closePeSubeditor();
   if (state.micTestActive) {
     state.micTestActive = false;
     if (micTestBtn) micTestBtn.textContent = "Teste do microfone";
@@ -6674,6 +6642,10 @@ function switchAccountSubTab(subKey) {
   if (subKey === "security") switchSettingsTab("security");
   else if (subKey === "family") switchSettingsTab("social");
   else switchSettingsTab("account");
+}
+
+for (const id of ["settings-display-name", "settings-pronouns", "settings-status-emoji", "settings-status-expiry"]) {
+  document.getElementById(id)?.addEventListener("input", refreshLiveProfilePreview);
 }
 
 function switchSettingsTab(tabName) {
@@ -6696,6 +6668,7 @@ function switchSettingsTab(tabName) {
   const scrollArea = document.getElementById("settings-content-scroll");
   if (scrollArea) scrollArea.scrollTop = 0;
   if (typeof onSettingsCenterTabShown === "function") onSettingsCenterTabShown(tabName);
+  if (tabName === "profile" && typeof onProfileEditorShown === "function") onProfileEditorShown();
   updateProfileDirtyState();
 }
 
@@ -6753,10 +6726,12 @@ settingsNameGradientDirection?.addEventListener("change", (e) => {
 });
 settingsThemePrimary?.addEventListener("input", (e) => {
   profileDraft.theme_primary = e.target.value;
+  if (profileDraft.theme_mode === "gradient" && !profileDraft.theme_accent) profileDraft.theme_accent = settingsThemeAccent.value;
   refreshLiveProfilePreview();
 });
 settingsThemeAccent?.addEventListener("input", (e) => {
   profileDraft.theme_accent = e.target.value;
+  if (!profileDraft.theme_primary) profileDraft.theme_primary = settingsThemePrimary.value;
   refreshLiveProfilePreview();
 });
 
@@ -6829,8 +6804,10 @@ document.querySelectorAll(".deco-filter-tab").forEach((btn) => {
 });
 
 // Perfil P2: decoração (avatar) e moldura (cartão) têm seletores separados, ambos do catálogo.
-openDecorationPickerBtn?.addEventListener("click", () => openCosmeticPicker("avatar_decoration"));
-openDecoQuickBtn?.addEventListener("click", () => openCosmeticPicker("profile_frame"));
+// Editor de perfil: decoração, moldura, efeito e placa abrem subeditores na lateral
+// (static/js/profile-editor.js), com o perfil completo visível ao lado.
+openDecorationPickerBtn?.addEventListener("click", () => openPeView("decoration"));
+openDecoQuickBtn?.addEventListener("click", () => openPeView("frame"));
 closeDecoPickerBtn?.addEventListener("click", () => decorationPickerModal?.classList.add("hidden"));
 cancelDecoPickerBtn?.addEventListener("click", () => decorationPickerModal?.classList.add("hidden"));
 decorationPickerModal?.addEventListener("click", (e) => {
@@ -6859,7 +6836,15 @@ function openEffectOrNameplatePicker(mode) {
 
   effectGrid.innerHTML = "";
   const preview = document.getElementById("effect-picker-preview");
-  const layer = document.getElementById("picker-effect-layer");
+  const previewCard = document.getElementById("effect-picker-card");
+  buildCompactProfile(previewCard);
+  const layer = compactProfileSlots(previewCard).effect;
+  layer.id = "picker-effect-layer";
+  function renderEffectSample(id) {
+    const user = { ...draftPreviewUser(), profile_effect: id };
+    const username = user.username || state.selfUser?.username || "Sancord";
+    renderCompactProfile(previewCard, user, user.display_name || username, username, true);
+  }
   preview?.classList.toggle("hidden", mode !== "effect");
   const platePreview = document.getElementById("nameplate-picker-preview");
   platePreview?.classList.toggle("hidden", mode !== "nameplate");
@@ -6867,7 +6852,7 @@ function openEffectOrNameplatePicker(mode) {
     platePreview.textContent = draftPreviewUser().display_name || state.selfUser?.username || "Prévia da placa";
     applyNameplateChip(platePreview, activeId);
   }
-  configureProfileEffect(layer, mode === "effect" ? activeId : null);
+  if (mode === "effect") renderEffectSample(activeId);
   for (const item of list) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -6880,6 +6865,18 @@ function openEffectOrNameplatePicker(mode) {
       swatch.className = `nameplate-option-swatch ${getNameplateClass(item.id)}`;
       swatch.setAttribute("aria-hidden", "true");
       btn.appendChild(swatch);
+    } else {
+      const sample = document.createElement("span");
+      sample.className = "effect-option-preview";
+      const effect = document.createElement("span");
+      effect.className = "profile-effect-layer";
+      sample.append(effect);
+      btn.append(sample);
+      configureProfileEffect(effect, item.id);
+      const preview = () => playProfileEffect(effect);
+      btn.addEventListener("pointerenter", preview);
+      btn.addEventListener("focus", preview);
+      btn.addEventListener("pointerleave", () => stopProfileEffect(effect));
     }
     btn.insertAdjacentHTML("beforeend", `<strong>${escapeHtml(catalogItem?.name || item.name)}</strong><span>${escapeHtml(item.desc)}</span>`);
     btn.addEventListener("click", () => {
@@ -6891,7 +6888,7 @@ function openEffectOrNameplatePicker(mode) {
       }
       refreshLiveProfilePreview();
       if (mode === "effect") {
-        configureProfileEffect(layer, item.id);
+        renderEffectSample(item.id);
         playProfileEffect(layer);
       } else applyNameplateChip(platePreview, item.id);
     });
@@ -6900,20 +6897,32 @@ function openEffectOrNameplatePicker(mode) {
   effectPickerModal.classList.remove("hidden");
 }
 
-openEffectPickerBtn?.addEventListener("click", () => openEffectOrNameplatePicker("effect"));
-openNameplatePickerBtn?.addEventListener("click", () => openEffectOrNameplatePicker("nameplate"));
+openEffectPickerBtn?.addEventListener("click", () => openPeView("effect"));
+openNameplatePickerBtn?.addEventListener("click", () => openPeView("nameplate"));
 closeEffectPickerBtn?.addEventListener("click", () => effectPickerModal?.classList.add("hidden"));
-closeEffectDoneBtn?.addEventListener("click", () => effectPickerModal?.classList.add("hidden"));
+closeEffectDoneBtn?.addEventListener("click", () => {
+  effectPickerModal?.classList.add("hidden");
+  if (!document.getElementById("effect-picker-preview")?.classList.contains("hidden")) replayCurrentProfilePreview();
+});
 effectPickerModal?.addEventListener("click", (e) => {
   if (e.target === effectPickerModal) effectPickerModal.classList.add("hidden");
 });
 
 resetProfileDraftBtn?.addEventListener("click", () => {
   loadDraftFromSelfUser();
+  if (state.selfUser) fillSocialProfileFields(state.selfUser);
+  if (typeof boardIsDirty === "function" && boardIsDirty()) requestBoardEditorState(true);
+  refreshLiveProfilePreview();
   showUiToast("Alterações não salvas redefinidas.");
 });
 
 saveProfileBtn?.addEventListener("click", async () => {
+  // O mural tem fila própria no servidor (SaveProfileBoard); sai junto do mesmo botão.
+  if (typeof boardIsDirty === "function" && boardIsDirty()) document.getElementById("board-save")?.click();
+  if (!isProfileFieldsDirty()) {
+    updateProfileDirtyState();
+    return;
+  }
   // Perfil P1: avatar/banner pendentes sobem antes (anexo + SetProfileMedia).
   if (Object.keys(profileDraft.media || {}).length) {
     saveProfileBtn.disabled = true;
@@ -6928,6 +6937,7 @@ saveProfileBtn?.addEventListener("click", async () => {
   profileDraft.custom_status = customStatus || "";
   profileDraft.bio = bio || "";
 
+  const socialFields = collectSocialProfileFields();
   const sent = sendWs("UpdateProfile", {
     status_kind: statusKind,
     custom_status: customStatus,
@@ -6945,7 +6955,7 @@ saveProfileBtn?.addEventListener("click", async () => {
     name_gradient_direction: profileDraft.name_gradient_direction,
     nameplate_style: profileDraft.nameplate_style || "none",
     profile_effect: profileDraft.profile_effect || "none",
-    ...collectSocialProfileFields(),
+    ...socialFields,
   });
   if (!sent) {
     showErrorToast("Sem conexão para salvar o perfil. Tente novamente quando reconectar.");
@@ -6953,6 +6963,13 @@ saveProfileBtn?.addEventListener("click", async () => {
   }
 
   if (state.selfUser) {
+    state.selfUser.display_name = socialFields.display_name || null;
+    state.selfUser.pronouns = socialFields.pronouns || null;
+    state.selfUser.custom_status_emoji = socialFields.custom_status_emoji || null;
+    if (socialFields.custom_status_expires_in !== undefined) {
+      const seconds = socialFields.custom_status_expires_in;
+      state.selfUser.custom_status_expires_at = seconds > 0 ? Date.now() + seconds * 1000 : null;
+    }
     state.selfUser.status_kind = statusKind;
     state.selfUser.custom_status = customStatus;
     state.selfUser.bio = bio;
@@ -6972,6 +6989,7 @@ saveProfileBtn?.addEventListener("click", async () => {
       profileDraft.nameplate_style === "none" ? null : profileDraft.nameplate_style;
     state.selfUser.profile_effect =
       profileDraft.profile_effect === "none" ? null : profileDraft.profile_effect;
+    fillSocialProfileFields(state.selfUser);
     updateSelfProfileUI();
     renderChatMessages();
     renderMembersSidebar();
@@ -7234,6 +7252,8 @@ window.addEventListener("keydown", (e) => {
       effectPickerModal.classList.add("hidden");
       return;
     }
+    // Editor de perfil: Esc fecha o menu de prévia, depois volta do subeditor; só então fecha.
+    if (settingsModal && !settingsModal.classList.contains("hidden") && typeof handlePeEscape === "function" && handlePeEscape()) return;
     if (settingsModal && !settingsModal.classList.contains("hidden")) closeSettingsModal();
     profilePopoverModal?.classList.add("hidden");
     imageLightboxModal?.classList.add("hidden");
@@ -7337,6 +7357,7 @@ function switchToServerView() {
   updatePinnedBadge();
   renderTypingIndicator();
   renderMessageRequestBanner();
+  syncVoiceStageContext();
 }
 
 function switchToHomeFriendsView(tabName = null) {
@@ -7485,6 +7506,7 @@ function openDmConversation(dmId, peerObj = null) {
   updatePinnedBadge();
   renderTypingIndicator();
   updateDmCallButtonUI();
+  syncVoiceStageContext();
   chatInput?.focus();
 }
 
@@ -9158,7 +9180,7 @@ document.getElementById("srv-add-role-btn")?.addEventListener("click", () => {
     server_id: srv.id,
     name: rName.trim(),
     color: "#5865f2",
-    hoist: true,
+    hoist: false,
     mentionable: true,
     badge_emoji: null,
     permissions: {

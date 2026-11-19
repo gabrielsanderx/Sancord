@@ -127,3 +127,5 @@ A inspeção da interface também confirmou os dois participantes; o usuário re
 nem validação individual de todos os itens do roteiro. Redes diferentes, NAT/TURN,
 dispositivos distintos, retomada de rede e moderação durante transmissão ainda
 precisam de ensaios específicos antes de encerrar a fase 6.
+
+Em 19/11/2026, `scripts/rtc-qa.mjs` repetiu o ensaio com dois clientes desktop e áudio virtual. Os contadores RTP confirmaram recepção nos dois sentidos em conexão direta e via TURN/UDP. O modo TURN forçou `iceTransportPolicy: "relay"` no QA e confirmou que os candidatos selecionados nos dois lados eram `relay`. Silenciar, sair e reentrar também passaram. O ensaio também passou por duas sub-redes e dois NATs virtuais do QEMU no mesmo computador. Continua pendente o ensaio com acessos independentes à internet e um TURN público de homologação. Detalhes em `HOMOLOGACAO.md`.

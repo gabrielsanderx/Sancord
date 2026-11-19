@@ -9,7 +9,7 @@ const profileMedia = new Map();
 const profileFrames = new Map();
 const profileFrameJobs = new Map();
 const profileLiveContexts = ".profile-card:not(.pf-mini), .profile-context-preview";
-const profileHoverContexts = ".cosmetic-choice,.message-item,.member-item,.dm-item,.friend-row,.voice-user-row,.profile-card,.name-style-showcase-box,.effect-choice-btn";
+const profileHoverContexts = ".cosmetic-choice,.message-item,.member-item,.dm-item,.friend-row,.voice-user-row,.profile-card,.name-style-showcase-box,.effect-choice-btn,.gif-pick";
 let profileWindowFocused = true;
 let profileMotionFrame = null;
 let profileMotionSurface = null;
@@ -22,7 +22,7 @@ function profileMotionAvailable() {
 }
 
 function interactionSurface() {
-  return profileFocusSurface || profileHoverSurface;
+  return profileHoverSurface || (profileFocusSurface?.matches(".cosmetic-choice.selected") ? null : profileFocusSurface);
 }
 
 function mediaShouldAnimate(img) {
@@ -154,8 +154,12 @@ function updateProfileMotion() {
   const interaction = interactionSurface();
   const surface = (profileMotionAvailable() && (
     interaction?.isConnected && !interaction.closest(".hidden,[hidden]") ? interaction :
-      [...document.querySelectorAll("#profile-popover-card,#collection-preview-card,#live-profile-preview-card,#dm-peer-panel .profile-card,.cosmetic-picker-detail .profile-card")]
-        .find(card => !card.closest(".hidden,[hidden]") && card.getClientRects().length)
+      [...document.querySelectorAll(".cosmetic-picker-detail .profile-card,.cosmetic-picker-detail .avatar-deco-wrap,#profile-popover-card,.compact-profile-dialog,#collection-preview-card,#profile-context-preview .compact-profile-preview,#settings-server-profile-preview,#live-profile-preview-card,#dm-peer-panel .profile-card")]
+        .find(card => {
+          if (card.closest(".hidden,[hidden]")) return false;
+          const rect = card.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight;
+        })
   )) || null;
   if (profileMotionSurface !== surface) {
     profileMotionSurface?.classList.remove("profile-motion-active");

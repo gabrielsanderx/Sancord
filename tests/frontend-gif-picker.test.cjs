@@ -17,6 +17,7 @@ async function setup(t) {
     state.selfUser = { id: 'u1', username: 'Ana' };
     state.prefs = { guild_layout: [], muted_servers: [], collapsed_categories: [], favorite_gifs: ['${G2}'] };
     getActiveTextChannelId = () => 'c1';
+    state.servers = [{id:'s1',text_channels:[{id:'c1',effective_permissions:{attach_files:true,send_messages:true}}]}];
     const gif = (id, name) => ({ id, filename: name, content_type: 'image/gif', kind: 'image', url: '/api/attachments/' + id + '/' + name, size: 10 });
     state.chatHistory = {
       c1: [
@@ -40,12 +41,12 @@ test('seletor: abas, filtro, envio pelo ID do anexo e respeito à resposta', asy
   const pop = d.getElementById('gif-popover');
   assert.equal(pop.classList.contains('hidden'), false);
   const tabs = () => [...pop.querySelectorAll('.gif-tab')].map(b => `${b.textContent}${b.classList.contains('active') ? '*' : ''}`);
-  assert.deepEqual(tabs(), ['Favoritos (1)*', 'Nas conversas (2)']);
+  assert.deepEqual(tabs(), ['Favoritos (1)*', 'Recentes (0)', 'Nas conversas (2)']);
   assert.equal(pop.querySelectorAll('.gif-pick').length, 1);
-  assert.match(pop.querySelector('.gif-pick img').getAttribute('src'), new RegExp(`/api/attachments/${G2}/gif$`));
+  assert.match(pop.querySelector('.gif-pick img').dataset.profileSrc, new RegExp(`/api/attachments/${G2}/gif$`));
 
   pop.querySelector('[data-gif-tab="recent"]').click();
-  assert.deepEqual(tabs(), ['Favoritos (1)', 'Nas conversas (2)*']);
+  assert.deepEqual(tabs(), ['Favoritos (1)', 'Recentes (0)', 'Nas conversas (2)*']);
   const search = pop.querySelector('.gif-search');
   search.value = 'gato';
   search.dispatchEvent(new h.w.Event('input'));

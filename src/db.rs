@@ -35,7 +35,7 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use tracing::{error, info, warn};
 
-pub const SCHEMA_VERSION: i64 = 19;
+pub const SCHEMA_VERSION: i64 = 21;
 
 /// Metadados de um arquivo enviado (o conteúdo fica em `data/uploads/`).
 #[derive(Debug, Clone, PartialEq)]
@@ -162,6 +162,9 @@ pub enum WriteOp {
     SetMemberTimeout { server_id: String, user_lower: String, until_ms: Option<i64> },
     RenameMemberTimeout { from: String, to: String },
     UpsertMessage(Box<ChatMessage>),
+    UpsertScheduled(crate::scheduled::ScheduledMessage),
+    DeleteScheduled { id: String },
+    PublishScheduled { id: String, message: Box<ChatMessage> },
     DeleteMessage { id: String },
     DeleteMessagesByIds { ids: Vec<String> },
     DeleteChannelMessages { channel_id: String },
@@ -578,6 +581,30 @@ fn migrate_schema(conn: &Connection) -> DbResult<()> {
              PRAGMA user_version = 19;",
         )?;
         txn.commit()?;
+    }
+    if version < 20 {
+        conn.execute_batch(
+            "BEGIN;
+             CREATE INDEX IF NOT EXISTS idx_messages_author_lower ON messages(lower(author_name));
+             PRAGMA user_version = 20;
+             COMMIT;",
+        )?;
+    }
+    if version < 21 {
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS scheduled_messages (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                channel_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                send_at INTEGER NOT NULL,
+                error TEXT
+             );
+             CREATE INDEX IF NOT EXISTS idx_scheduled_account ON scheduled_messages(account_id);
+             PRAGMA user_version = 21;
+             COMMIT;",
+        )?;
     }
     Ok(())
 }
@@ -1083,6 +1110,18 @@ fn apply(conn: &Connection, op: WriteOp) -> DbResult<()> {
             )?;
         }
         WriteOp::UpsertMessage(msg) => upsert_message(conn, &msg)?,
+        WriteOp::UpsertScheduled(job) => {
+            conn.execute("INSERT INTO scheduled_messages (id,account_id,channel_id,content,send_at,error)
+                          VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET error=excluded.error",
+                params![job.id, job.account_id, job.channel_id, job.content, job.send_at, job.error])?;
+        }
+        WriteOp::DeleteScheduled { id } => {
+            conn.execute("DELETE FROM scheduled_messages WHERE id=?1", [&id])?;
+        }
+        WriteOp::PublishScheduled { id, message } => {
+            upsert_message(conn, &message)?;
+            conn.execute("DELETE FROM scheduled_messages WHERE id=?1", [&id])?;
+        }
         WriteOp::DeleteMessage { id } => {
             conn.execute("DELETE FROM messages WHERE id = ?1", params![id])?;
         }
@@ -1305,6 +1344,17 @@ impl Db {
                 }
             }
             Ok(out)
+        })
+    }
+
+    pub fn load_scheduled(&self) -> DbResult<Vec<crate::scheduled::ScheduledMessage>> {
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare("SELECT id,account_id,channel_id,content,send_at,error FROM scheduled_messages")?;
+            let rows = stmt.query_map([], |row| Ok(crate::scheduled::ScheduledMessage {
+                id: row.get(0)?, account_id: row.get(1)?, channel_id: row.get(2)?,
+                content: row.get(3)?, send_at: row.get(4)?, error: row.get(5)?,
+            }))?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
         })
     }
 
@@ -2006,7 +2056,7 @@ impl Db {
     pub fn count_messages_by_author(&self, author_lower: &str) -> DbResult<i64> {
         self.with_reader(|c| {
             Ok(c.query_row(
-                "SELECT COUNT(*) FROM messages WHERE lower(author_name) = ?1",
+                "SELECT COUNT(*) FROM (SELECT 1 FROM messages WHERE lower(author_name) = ?1 LIMIT 500)",
                 params![author_lower],
                 |r| r.get(0),
             )?)
@@ -2214,6 +2264,25 @@ mod tests {
         assert!(!more);
         let pins = db.pinned_messages("c", 50).unwrap();
         assert_eq!(pins.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["m030", "m020", "m010", "m000"]);
+        db.shutdown();
+    }
+
+    #[test]
+    fn profile_author_count_is_case_insensitive_and_bounded() {
+        let dir = temp_dir("profile-message-count");
+        let (db, _) = Db::open(&dir.join("t.db"), None).unwrap();
+        for i in 0..505 {
+            let mut message = msg(&format!("m{i}"), "geral", i);
+            message.author_name = if i % 2 == 0 { "Ana" } else { "ANA" }.into();
+            db.write(WriteOp::UpsertMessage(Box::new(message)));
+        }
+        let mut message = msg("outra", "geral", 600);
+        message.author_name = "Bia".into();
+        db.write(WriteOp::UpsertMessage(Box::new(message)));
+        db.flush();
+        assert_eq!(db.count_messages_by_author("ana").unwrap(), 500);
+        assert_eq!(db.count_messages_by_author("bia").unwrap(), 1);
+        assert_eq!(db.count_messages_by_author("carla").unwrap(), 0);
         db.shutdown();
     }
 

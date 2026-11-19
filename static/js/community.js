@@ -68,7 +68,7 @@ function buildPollNode(msg) {
 
   const head = document.createElement("div");
   head.className = "poll-head";
-  head.textContent = `📊 Enquete${poll.multiple ? " • escolha várias" : ""}`;
+  head.append(SancordIcons.node("poll"), document.createTextNode(`Enquete${poll.multiple ? " · escolha várias" : ""}`));
   card.appendChild(head);
   if ((msg.content || "").trim() !== poll.question) {
     const q = document.createElement("div");
@@ -129,13 +129,13 @@ function buildPollNode(msg) {
 
 async function openPollDialog() {
   const channelId = getActiveTextChannelId();
-  if (!channelId) return;
+  if (!channelId || chatInput.disabled || currentSlowmodeWait(channelId) > 0) return;
   const values = await SancordUI.formDialog({
     title: "Criar enquete",
-    submitLabel: "Publicar",
+    submitLabel: "Criar enquete",
     fields: [
       { name: "question", label: "PERGUNTA", maxlength: 300, required: true, placeholder: "Ex.: Onde jogamos sábado?" },
-      { name: "options", label: "OPÇÕES (UMA POR LINHA, 2 A 10)", type: "textarea", rows: 4, required: true, placeholder: "Casa da Ana\nOnline" },
+      { name: "options", label: "Opções", type: "text-list", min: 2, max: 10, maxlength: 80, addLabel: "Adicionar opção" },
       {
         name: "multiple",
         label: "TIPO",
@@ -162,13 +162,13 @@ async function openPollDialog() {
       },
     ],
   });
-  if (!values) return;
-  const options = values.options.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (!values || getActiveTextChannelId() !== channelId || chatInput.disabled) return;
+  const options = values.options;
   if (options.length < 2) {
     showUiToast("A enquete precisa de pelo menos 2 opções.");
     return;
   }
-  sendWs("SendChat", {
+  if (!sendChatPayload({
     channel_id: channelId,
     content: "",
     poll: {
@@ -177,10 +177,9 @@ async function openPollDialog() {
       multiple: values.multiple === "multiple",
       duration_hours: Number(values.duration) || 0,
     },
-  });
+  })) showErrorToast("A enquete não foi enviada.");
 }
 
-document.getElementById("poll-create-btn")?.addEventListener("click", openPollDialog);
 
 // ---------------------------------------------------------------------------
 // Eventos do servidor

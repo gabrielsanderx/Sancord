@@ -25,7 +25,7 @@ function joinHarness(captures, connected = true) {
     sendWs:(type,payload)=>{sent.push({type,payload});return connected;},
     showErrorToast:m=>errors.push(m), releaseLocalAudioStream(){}, cleanupAllPeers(){}, playUiSound(){}, clearUnansweredCallTimer(){},
     stopVoicePingMonitor(){},stopVoiceCallTimer(){},stopScreenSharing(){},stopCamera(){},
-    getFriendlyVoiceName:id=>id, startVoicePingMonitor(){},startVoiceCallTimer(){},syncVoiceStateWithServer(){},
+    getFriendlyVoiceName:id=>id, syncVoiceStageContext(){}, startVoicePingMonitor(){},startVoiceCallTimer(){},syncVoiceStateWithServer(){},
     startUnansweredCallTimer(){},updateSelfProfileUI(){},updateQuickKrispBtnUI(){},renderVoiceChannels(){},renderVoiceStage(){},updateDmCallButtonUI(){},
     activeVoiceChannelName:node(),stageTitle:node(),voiceConnectionPanel:node(),voiceStage:node(),toggleStageBtn:node(),
   });

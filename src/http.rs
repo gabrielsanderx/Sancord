@@ -118,6 +118,7 @@ pub async fn register_handler(State(state): State<SharedState>, Json(req): Json<
         inventory: Vec::new(),
         cosmetic_collection: Default::default(),
         profile_board: Default::default(),
+        created_community: false,
         profile_sharing: Default::default(),
         profile: Default::default(),
         token: String::new(),

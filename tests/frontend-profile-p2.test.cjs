@@ -33,7 +33,8 @@ test('decoração nova tem arte própria em camada separada do avatar', async t 
   const h = await setup(t);
   const html = h.run('getDecoSvgHtml("core-orbit")');
   assert.match(html, /deco-svg-layer/);
-  assert.match(html, /deco-spin-slow/);
+  assert.match(html, /avatar-art-front.*hover-loop/);
+  assert.match(h.run('profileAvatarArtLayer("core-orbit", "back")'), /avatar-art-back/);
   assert.equal(h.run('sancordDecorationArt("inexistente")'), null);
   for (const id of ['nebula-orbit', 'sakura-fall', 'cyber-ring', 'electric-pulse', 'lunar', 'ember', 'snowfall', 'ocean-bubbles', 'digital-rain', 'retro-pixels']) {
     assert.ok(h.run(`sancordDecorationArt("${id}")`), `sem arte: ${id}`);
@@ -103,7 +104,7 @@ test('seletor: abas, coleções, itens bloqueados não equipam e Aplicar vai par
 
   pickerEl.querySelector('.cosmetic-choice[data-id="core-pulse"]').click();
   assert.equal(pickerEl.querySelector('.cosmetic-choice.selected').dataset.id, 'core-pulse');
-  assert.ok(pickerEl.querySelector('.cosmetic-picker-detail .pf-mini.pf-core-pulse'), 'prévia grande com a moldura');
+  assert.ok(pickerEl.querySelector('.cosmetic-picker-detail .compact-profile-preview.pf-core-pulse'), 'prévia real com a moldura');
   pickerEl.querySelector('[data-picker-apply]').click();
   assert.equal(h.run('profileDraft.profile_frame'), 'core-pulse');
   assert.equal(pickerEl.classList.contains('hidden'), true);

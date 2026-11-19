@@ -117,12 +117,17 @@ test('catálogo: posse vinda do servidor e prévia em contextos', async t => {
   assert.equal(h.run('ownsCosmetic("avatar_decoration", "outra")'), false);
   assert.equal(h.run('ownsCosmetic("avatar_decoration", "none")'), true);
 
+  // Outros contextos ficam no menu "Pré-visualizar em", sem esconder o perfil completo.
   h.run('refreshLiveProfilePreview = () => {}');
+  const popover = d.getElementById('pe-context-popover');
+  assert.equal(popover.classList.contains('hidden'), true);
+  d.getElementById('pe-context-toggle').click();
+  assert.equal(popover.classList.contains('hidden'), false);
   d.querySelector('[data-profile-context="chat"]').click();
   const host = d.getElementById('profile-context-preview');
-  assert.equal(host.classList.contains('hidden'), false);
-  assert.equal(d.getElementById('live-profile-preview-card').classList.contains('hidden'), true);
+  assert.equal(d.getElementById('live-profile-preview-card').classList.contains('hidden'), false);
   assert.match(host.textContent, /Ana/);
-  d.querySelector('[data-profile-context="popout"]').click();
-  assert.equal(host.classList.contains('hidden'), true);
+  assert.equal(d.querySelector('[data-profile-context="popout"]'), null, 'o perfil completo já é a prévia principal');
+  h.run('handlePeEscape()');
+  assert.equal(popover.classList.contains('hidden'), true, 'Esc fecha o menu antes de sair da página');
 });

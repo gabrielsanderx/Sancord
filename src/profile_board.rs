@@ -12,18 +12,10 @@ pub fn view(
     owner: &str,
     has_mutual_server: bool,
     badges: &[String],
+    message_count: i64,
 ) -> Option<ProfileBoardView> {
     let board = &st.accounts.get(owner)?.profile_board;
-    let allowed = viewer == owner
-        || (!st.friends_store.blocked_either(viewer, owner)
-            && match board.audience {
-                BoardAudience::Everyone => true,
-                BoardAudience::SharedSpaces => {
-                    has_mutual_server || st.friends_store.are_friends(viewer, owner)
-                }
-                BoardAudience::Friends => st.friends_store.are_friends(viewer, owner),
-            });
-    if !allowed {
+    if !board_visible(st, viewer, owner, has_mutual_server, board.audience) {
         return None;
     }
     let widgets: Vec<_> = board
@@ -46,7 +38,7 @@ pub fn view(
             })
             .cloned()
             .collect();
-        for milestone in compute_milestones(st, owner) {
+        for milestone in compute_milestones(st, owner, message_count) {
             if !list.iter().any(|existing| existing == milestone) {
                 list.push(milestone.to_string());
             }
@@ -61,12 +53,52 @@ pub fn view(
     })
 }
 
-fn compute_milestones(st: &ServerState, owner_lower: &str) -> Vec<&'static str> {
+fn board_visible(st: &ServerState, viewer: &str, owner: &str, has_mutual_server: bool, audience: BoardAudience) -> bool {
+    viewer == owner || (!st.friends_store.blocked_either(viewer, owner) && match audience {
+        BoardAudience::Everyone => true,
+        BoardAudience::SharedSpaces => has_mutual_server || st.friends_store.are_friends(viewer, owner),
+        BoardAudience::Friends => st.friends_store.are_friends(viewer, owner),
+    })
+}
+
+pub fn needs_message_count(st: &ServerState, viewer: &str, owner: &str) -> bool {
+    st.accounts.get(owner).is_some_and(|account| {
+        let board = &account.profile_board;
+        if !board.widgets.iter().any(|w| w.visible && matches!(w.content, ProfileWidgetContent::Achievements)) {
+            return false;
+        }
+        let shared = board.audience == BoardAudience::SharedSpaces && st.servers.iter()
+            .any(|s| s.id != "sancord" && s.is_member(viewer) && s.is_member(owner));
+        board_visible(st, viewer, owner, shared, board.audience)
+    })
+}
+
+pub fn restore_first_creation(st: &mut ServerState) {
+    let mut original_invites = std::collections::HashMap::new();
+    for invite in st.invites.values().filter(|i| i.expires_at.is_none() && i.max_uses.is_none() && i.channel_id.is_none() && !i.temporary) {
+        let key = (invite.server_id.as_str(), invite.created_at);
+        original_invites.entry(key)
+            .and_modify(|creator: &mut Option<&str>| {
+                if *creator != Some(invite.creator.as_str()) { *creator = None; }
+            })
+            .or_insert(Some(invite.creator.as_str()));
+    }
+    let mut changed = false;
+    for server in st.servers.iter().filter(|s| s.id != "sancord" && s.created_at > 0) {
+        // Na criação, o convite permanente padrão recebe o mesmo timestamp do servidor.
+        let Some(Some(creator)) = original_invites.get(&(server.id.as_str(), server.created_at)) else { continue };
+        if let Some(account) = st.accounts.get_mut(*creator) {
+            changed |= !account.created_community;
+            account.created_community = true;
+        }
+    }
+    if changed { st.save_accounts(); }
+}
+
+fn compute_milestones(st: &ServerState, owner_lower: &str, message_count: i64) -> Vec<&'static str> {
     let mut out = Vec::new();
     if st
-        .servers
-        .iter()
-        .any(|s| s.id != "sancord" && s.owner_username.eq_ignore_ascii_case(owner_lower))
+        .accounts.get(owner_lower).is_some_and(|account| account.created_community)
     {
         out.push("milestone_first_server");
     }
@@ -79,22 +111,10 @@ fn compute_milestones(st: &ServerState, owner_lower: &str) -> Vec<&'static str> 
     if friends >= 5 {
         out.push("milestone_5_friends");
     }
-    let db_msgs = st
-        .db
-        .count_messages_by_author(owner_lower)
-        .unwrap_or(0)
-        .max(0) as usize;
-    let mem_msgs = st
-        .chat_history
-        .values()
-        .flat_map(|msgs| msgs.iter())
-        .filter(|m| m.author_name.eq_ignore_ascii_case(owner_lower))
-        .count();
-    let total_msgs = db_msgs.max(mem_msgs);
-    if total_msgs >= 100 {
+    if message_count >= 100 {
         out.push("milestone_100_messages");
     }
-    if total_msgs >= 500 {
+    if message_count >= 500 {
         out.push("milestone_500_messages");
     }
     out

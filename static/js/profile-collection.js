@@ -175,20 +175,18 @@ function showCollectionPreview(look) {
   collectionLook = look;
   const user = { ...draftPreviewUser(), ...look.appearance };
   const card = document.getElementById("collection-preview-card");
-  const avatar = document.getElementById("collection-preview-avatar");
-  avatar.style.background = user.avatar_color || "#5865f2";
-  avatar.innerHTML = renderAvatarInner(user.username, user.avatar_url, user.avatar_animated);
-  const name = document.getElementById("collection-preview-name");
-  name.textContent = user.display_name || user.username || "Você";
-  applyProfileCardVisuals(card, document.getElementById("collection-preview-banner"), collectionEffect,
-    document.getElementById("collection-preview-deco"), name, user);
-  applyProfileFrame(card, user.profile_frame);
-  setFrameReactiveState(card, user);
+  renderProfileCardIdentity(card, {
+    avatar: document.getElementById("collection-preview-avatar"),
+    avatarWrap: document.getElementById("collection-preview-deco"),
+    name: document.getElementById("collection-preview-name"),
+    banner: document.getElementById("collection-preview-banner"),
+    effect: collectionEffect,
+  }, user, "collection");
   collectionPreviewTitle.textContent = look.item ? look.item.name : "Prévia da combinação";
   document.getElementById("collection-preview-items").textContent = Object.entries(collectionKinds)
     .map(([kind, { field }]) => cosmeticInfo(kind, look.appearance[field])?.name)
     .filter(Boolean).join(" · ");
-  collectionUse.textContent = look.item ? "Usar no editor" : "Aplicar combinação";
+  collectionUse.textContent = "Usar no editor";
   collectionUse.disabled = !ownsCollectionAppearance(look.appearance);
   collectionPreview.classList.remove("hidden");
   collectionPreviewTitle.focus();
@@ -212,6 +210,12 @@ function randomizeCollectionLook() {
     const candidates = alternatives.length ? alternatives : pool;
     appearance[field] = candidates[Math.floor(Math.random() * candidates.length)]?.id ?? null;
   }
+  const palettes = [
+    { theme_primary:"#251f39", theme_accent:"#30324d", theme_highlight:"#a697ee", name_color:"#d6cbff", name_color_secondary:"#9ae9da" },
+    { theme_primary:"#352639", theme_accent:"#502f42", theme_highlight:"#de9eaf", name_color:"#f8cddd", name_color_secondary:"#ffd9ae" },
+    { theme_primary:"#21313a", theme_accent:"#293b53", theme_highlight:"#79c9d1", name_color:"#b8efe1", name_color_secondary:"#c1caff" },
+  ].filter(palette => palette.theme_primary !== appearance.theme_primary);
+  Object.assign(appearance, palettes[Math.floor(Math.random() * palettes.length)]);
   showCollectionPreview({ appearance });
 }
 
@@ -270,15 +274,13 @@ document.getElementById("collection-dismiss-look").addEventListener("click", () 
 collectionUse.addEventListener("click", () => {
   if (!collectionLook || !ownsCollectionAppearance(collectionLook.appearance)) return;
   const { item, appearance } = collectionLook;
-  if (!item) {
-    collectionCommand("EquipProfileLook", { choice: { kind: "custom", appearance } });
-    return;
-  }
-  profileDraft[collectionKinds[item.kind].field] = item.id;
-  loadAppearanceDraft({ ...state.selfUser, ...profileDraft });
+  if (item) profileDraft[collectionKinds[item.kind].field] = item.id;
+  loadAppearanceDraft({ ...profileDraft, ...(item ? null : appearance) });
   refreshLiveProfilePreview();
   closeCollectionPreview(true);
-  collectionStatus.textContent = "Item no editor. Salve as alterações do perfil para equipá-lo.";
+  collectionStatus.textContent = item
+    ? "Item no editor. Salve as alterações do perfil para equipá-lo."
+    : "Combinação no editor. Salve as alterações do perfil para aplicar.";
 });
 collectionSavePreset.addEventListener("click", async () => {
   const appearance = profileAppearanceForWire(profileDraft);

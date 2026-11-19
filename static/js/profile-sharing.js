@@ -69,6 +69,7 @@ function resetProfileSharing() {
   profilePrivacyForm.classList.add("hidden");
   profilePrivacyFields.replaceChildren();
   profileOwnLinks.replaceChildren();
+  selfProfileLinks = null;
   profileAddLink.disabled = true;
   setProfileSharingFeedback("");
   resetBadgeAdminPanel();
@@ -96,9 +97,14 @@ function sharingButton(text, action) {
   return button;
 }
 
+// Conexões da própria conta, para a prévia do editor mostrar só as visíveis.
+let selfProfileLinks = null;
+
 function receiveProfileSharing({ privacy, links = [] }) {
   resetProfileSharing();
   if (!privacy) return;
+  selfProfileLinks = links;
+  if (typeof refreshLiveProfilePreview === "function") refreshLiveProfilePreview();
   if (!profilePrivacyFields.childElementCount) {
     for (const [name, label] of Object.entries(profilePrivacyLabels)) {
       const wrapper = sharingText("label", label);
@@ -197,9 +203,8 @@ profilePrivacyForm.addEventListener("submit", e => {
   if (sendProfileSharing("SetProfilePrivacy", { privacy })) setProfileSharingFeedback("Salvando privacidade…");
 });
 
-function renderVisitedProfileLinks(links) {
-  const wrap = document.getElementById("profile-card-links-wrap");
-  const list = document.getElementById("profile-card-links");
+function renderVisitedProfileLinks(links, wrap = document.getElementById("profile-card-links-wrap"),
+  list = document.getElementById("profile-card-links")) {
   list.replaceChildren();
   for (const link of links || []) {
     const url = parseBoardLink(link.url);
@@ -294,27 +299,12 @@ badgeAdminSave?.addEventListener("click", () => {
 });
 
 function renderCompactProfile(host, user, name, handle, preview = false) {
-  host.innerHTML = '<div class="profile-card-banner"></div><div class="compact-profile-identity">' +
-    '<div class="profile-card-avatar-wrap"><div class="avatar large-avatar"></div><span class="status-badge"></span></div>' +
-    '<div class="profile-nameplate-wrap"><h2></h2></div><small class="compact-profile-handle"></small>' +
-    '<p class="compact-profile-bio"></p></div>';
+  buildCompactProfile(host);
   const shell = host.closest(".profile-card") || host;
-  const avatar = host.querySelector(".avatar");
-  avatar.innerHTML = renderAvatarInner(handle, user.avatar_url, user.avatar_animated);
-  avatar.style.background = user.avatar_color || "#5865f2";
-  host.querySelector(".status-badge").classList.add(STATUS_LABELS[user.status_kind] ? user.status_kind : "offline");
-  const heading = host.querySelector("h2");
-  if (!preview) heading.id = "compact-profile-title";
-  heading.textContent = name;
-  host.querySelector(".compact-profile-handle").textContent = `@${handle}`;
-  const bio = host.querySelector(".compact-profile-bio");
-  bio.classList.toggle("hidden", !user.bio);
-  if (user.bio) renderProfileBio(bio, user.bio);
-  applyProfileCardVisuals(shell, host.querySelector(".profile-card-banner"), null,
-    host.querySelector(".profile-card-avatar-wrap"), heading, user);
-  applyProfileFrame(shell, user.profile_frame);
-  setFrameReactiveState(shell, user);
-  refreshAnimatedMedia(host);
+  const slots = compactProfileSlots(host);
+  if (!preview) slots.name.id = "compact-profile-title";
+  slots.bio.classList.toggle("hidden", !user.bio);
+  renderProfileCardIdentity(shell, slots, user, preview ? "editor" : "popout", name, `@${handle.toLowerCase()}`);
 }
 
 function compactServerId(fallback) {
@@ -334,18 +324,34 @@ function drawCompactVisit(global, scope = {}) {
     bio: scope.bio_visible === false ? null : user.bio,
     banner_url: scope.banner_visible === false ? null : user.banner_url,
   }, name, target.username);
+  fillCompactProfileDetails(compactProfileContent, getUserServerRoles(server, target.username), scope.links);
+  positionCompactProfile();
 }
 
-function openCompactProfile(userId, fallback) {
+function positionCompactProfile() {
+  const card = compactProfileModal.querySelector(".compact-profile-dialog");
+  const anchor = currentCompactProfile?.anchor?.getBoundingClientRect();
+  const bounds = card.getBoundingClientRect();
+  card.classList.toggle("compact-profile-anchored", Boolean(anchor?.width && bounds.width));
+  if (!anchor?.width || !bounds.width) return;
+  const roomRight = window.innerWidth - anchor.right;
+  const left = roomRight > bounds.width + 20 ? anchor.right + 12 : anchor.left - bounds.width - 12;
+  card.style.setProperty("--compact-left", `${Math.max(10, Math.min(left, window.innerWidth - bounds.width - 10))}px`);
+  card.style.setProperty("--compact-top", `${Math.max(40, Math.min(anchor.top - 15, window.innerHeight - bounds.height - 12))}px`);
+}
+
+function openCompactProfile(userId, fallback, anchor = document.activeElement) {
   const cached = state.users.get(userId) || findLiveUserByName(fallback?.author_name?.toLowerCase());
   const username = cached?.username || fallback?.author_name;
   if (!username || username === "Sancord Bot") return;
-  currentCompactProfile = { userId, username, fallback, serverId: compactServerId(fallback), trigger: document.activeElement };
+  currentCompactProfile = { userId, username, fallback, serverId: compactServerId(fallback), trigger: document.activeElement, anchor, effectPlayed: false };
   profilePopoverModal?.classList.add("hidden");
   compactProfileModal.classList.remove("hidden");
   drawCompactVisit({ ...cached, bio: null, banner_url: null, avatar_url: cached?.avatar_url || fallback?.author_avatar,
     avatar_color: cached?.avatar_color || fallback?.author_color }, { bio_visible: false, banner_visible: false });
-  compactMessage.classList.toggle("hidden", username.toLowerCase() === state.selfUser?.username?.toLowerCase());
+  const self = username.toLowerCase() === state.selfUser?.username?.toLowerCase();
+  compactMessage.classList.toggle("hidden", self);
+  document.getElementById("compact-edit-profile").classList.toggle("hidden", !self);
   compactFullProfile.focus();
   sendWs("GetUserProfile", { username, server_id: currentCompactProfile.serverId });
 }
@@ -354,12 +360,16 @@ function renderCompactProfileReply(p) {
   if (currentCompactProfile?.username.toLowerCase() !== p.user.username.toLowerCase() ||
       currentCompactProfile.serverId !== (p.server_id ?? null)) return;
   drawCompactVisit(p.user, p);
+  if (!currentCompactProfile.effectPlayed) {
+    currentCompactProfile.effectPlayed = playProfileEffect(compactProfileSlots(compactProfileContent).effect);
+  }
 }
 
 function closeCompactProfile(restoreFocus = true) {
   const target = currentCompactProfile;
   currentCompactProfile = null;
   compactProfileModal.classList.add("hidden");
+  stopProfileEffect(compactProfileSlots(compactProfileContent).effect);
   if (restoreFocus) target?.trigger?.focus?.({ preventScroll: true });
   return target;
 }
@@ -381,6 +391,11 @@ compactMessage.addEventListener("click", () => {
   if (target) sendWs("OpenDm", { target_username: target.username });
 });
 document.getElementById("compact-close-profile").addEventListener("click", () => closeCompactProfile());
+document.getElementById("compact-edit-profile").addEventListener("click", () => {
+  closeCompactProfile(false);
+  openSettingsModal("profile");
+});
+window.addEventListener("resize", () => { if (currentCompactProfile) positionCompactProfile(); });
 compactProfileModal.addEventListener("click", e => { if (e.target === compactProfileModal) closeCompactProfile(); });
 compactProfileModal.addEventListener("keydown", e => {
   if (e.key === "Escape") {
@@ -388,7 +403,7 @@ compactProfileModal.addEventListener("keydown", e => {
     e.stopPropagation();
     closeCompactProfile();
   } else if (e.key === "Tab") {
-    const items = [...compactProfileModal.querySelectorAll("button:not(.hidden)")];
+    const items = [...compactProfileModal.querySelectorAll("button:not(.hidden), a[href]")];
     const at = items.indexOf(document.activeElement);
     if (e.shiftKey ? at <= 0 : at === items.length - 1) {
       e.preventDefault();

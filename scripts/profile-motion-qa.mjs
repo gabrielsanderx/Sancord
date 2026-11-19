@@ -5,6 +5,10 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { promisify } from 'node:util';
+import { runProfileArtQa } from './profile-art-qa.mjs';
+import { runComposerVoiceQa } from './composer-voice-qa.mjs';
+
+const composerVoiceQa = process.argv.includes('--composer-voice');
 
 const exec = promisify(execFile);
 const delay = ms => new Promise(r => setTimeout(r, ms));
@@ -28,14 +32,15 @@ const debugPort = locator.address().port;
 await new Promise((r, j) => locator.close(error => error ? j(error) : r()));
 const debugUrl = 'http://127.0.0.1:' + debugPort;
 const data = await mkdtemp(join(tmpdir(), 'sancord-profile-p8-'));
-const app = spawn(resolve('target/debug/SancordApp.exe'), [], { windowsHide: true, stdio: 'ignore', env: {
+const app = spawn(resolve(process.env.SANCORD_QA_EXE || 'target/debug/SancordApp.exe'), [], { windowsHide: true, stdio: 'ignore', env: {
   ...process.env,
   SANCORD_DESKTOP_DATA_DIR: data,
   SANCORD_REGISTER_PROTOCOL: '0',
   SANCORD_DISABLE_UPDATES: '1',
   SANCORD_SERVER_URL: endpoint,
-  SANCORD_WINDOW_TITLE: 'Sancord - QA perfis P8',
-  WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-address=127.0.0.1 --remote-debugging-port=' + debugPort,
+  SANCORD_WINDOW_TITLE: 'Sancord - QA perfis',
+  WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-address=127.0.0.1 --remote-debugging-port=' + debugPort +
+    (composerVoiceQa ? ' --use-fake-device-for-media-stream --use-fake-ui-for-media-stream' : ''),
 } });
 const clients = [];
 async function connect(address) {
@@ -95,6 +100,17 @@ try {
     if (response.exceptionDetails) throw Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text);
     return response.result.value;
   };
+  let ready = false;
+  for (let attempt = 0; attempt < 80 && !ready; attempt++) {
+    ready = await evaluate(`document.readyState === 'complete' && typeof applyProfileVisualSettings === 'function'`).catch(() => false);
+    if (!ready) await delay(100);
+  }
+  if (!ready) throw Error('O frontend embutido do Sancord não terminou de iniciar.');
+  if (composerVoiceQa) {
+    await runComposerVoiceQa(page, evaluate);
+  } else if (process.argv.includes('--art')) {
+    await runProfileArtQa(page, evaluate);
+  } else {
   await page('Performance.enable');
   await page('Emulation.setEmulatedMedia', { features:[{name:'prefers-reduced-motion',value:'no-preference'}] });
   const info = await evaluate(`({
@@ -173,6 +189,7 @@ try {
   const background = await evaluate(count);
   if (background.live !== 0 || background.motionSurfaces) throw Error('Restaram animações na perda de foco.');
   console.log(JSON.stringify({label:'apos_perda_de_foco',...background}));
+  }
 } finally {
   for (const client of clients) client.close();
   app.kill();

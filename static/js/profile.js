@@ -90,6 +90,11 @@ function updateProfileEffectButtons() {
     button.disabled = reduced || !layer?.dataset.profileEffect;
     button.title = reduced ? "Animações de perfil desativadas." : button.disabled ? "Escolha um efeito." : "";
   });
+  const editorReplay = document.getElementById("profile-preview-replay");
+  if (editorReplay) {
+    const effect = profileDraft.profile_effect;
+    editorReplay.disabled = reduced || !effect || effect === "none";
+  }
 }
 
 function stopProfileEffect(layer = activeProfileEffect?.layer) {
@@ -105,7 +110,7 @@ function stopProfileEffect(layer = activeProfileEffect?.layer) {
 
 function playProfileEffect(layer) {
   const id = layer?.dataset.profileEffect;
-  const card = layer?.parentElement;
+  const card = layer?.closest(".profile-card") || layer?.parentElement;
   if (!id || !card || !layer.isConnected || layer.closest(".hidden, [hidden]") ||
       !profileMotionAvailable() || state.audioSettings?.showProfileEffects === false) return false;
   stopProfileEffect();
@@ -119,9 +124,10 @@ function playProfileEffect(layer) {
   for (let el = card; el; el = el.parentElement) {
     observer.observe(el, { attributes: true, attributeFilter: ["class", "hidden"] });
   }
-  const timer = setTimeout(() => stopProfileEffect(layer), PROFILE_EFFECT_DURATION_MS + 100);
+  const duration = profileCardArt.effect[id]?.duration || PROFILE_EFFECT_DURATION_MS;
+  const timer = setTimeout(() => stopProfileEffect(layer), duration + 100);
   activeProfileEffect = { layer, card, id, timer, observer, onEnd };
-  layer.style.setProperty("--profile-effect-duration", `${PROFILE_EFFECT_DURATION_MS}ms`);
+  layer.style.setProperty("--profile-effect-duration", `${duration}ms`);
   // Recalcular o estilo após limpar a classe permite replay inclusive durante o efeito.
   void layer.offsetWidth;
   layer.addEventListener("animationend", onEnd);
@@ -153,6 +159,11 @@ const profileVisualToggles = {
   nameplates: "showProfileNameplates",
   animations: "showProfileAnimations",
 };
+const cosmeticMotionToggles = {
+  decorations: "animateProfileDecorations",
+  frames: "animateProfileFrames",
+  names: "animateProfileNameStyles",
+};
 function applyProfileVisualSettings() {
   for (const [type, key] of Object.entries(profileVisualToggles)) {
     const visible = state.audioSettings[key] !== false;
@@ -160,11 +171,23 @@ function applyProfileVisualSettings() {
     const input = document.getElementById(`appearance-show-profile-${type}`);
     if (input) input.checked = visible;
   }
+  for (const [type, key] of Object.entries(cosmeticMotionToggles)) {
+    const animate = state.audioSettings[key] !== false;
+    document.body.classList.toggle(`profile-static-${type}`, !animate);
+    document.getElementById(`appearance-animate-profile-${type}`).checked = animate;
+  }
   if (state.audioSettings.showProfileEffects === false) stopProfileEffect();
   applyProfileAnimPolicy();
 }
 for (const [type, key] of Object.entries(profileVisualToggles)) {
   document.getElementById(`appearance-show-profile-${type}`)?.addEventListener("change", e => {
+    state.audioSettings[key] = e.target.checked;
+    saveAudioSettings();
+    applyProfileVisualSettings();
+  });
+}
+for (const [type, key] of Object.entries(cosmeticMotionToggles)) {
+  document.getElementById(`appearance-animate-profile-${type}`).addEventListener("change", e => {
     state.audioSettings[key] = e.target.checked;
     saveAudioSettings();
     applyProfileVisualSettings();
@@ -345,7 +368,10 @@ const SERVER_PROFILE_OVERRIDE_FIELDS = [
 ];
 
 function resolveServerProfile(server, username, globalProfile) {
-  const local = serverMemberProfile(server, username);
+  return mergeServerProfile(globalProfile, serverMemberProfile(server, username));
+}
+
+function mergeServerProfile(globalProfile, local) {
   if (!local) return globalProfile;
   const user = { ...(globalProfile || {}) };
   if (local.avatar) {
@@ -405,9 +431,56 @@ async function openServerProfileDialog(serverId) {
     { value: "diagonal", label: "Diagonal" },
     { value: "radial", label: "Radial" },
   ];
+  const preview = document.createElement("aside");
+  preview.className = "compact-profile-preview profile-card server-profile-dialog-preview";
+  preview.setAttribute("aria-label", "Prévia do perfil neste servidor");
+  const mediaPreviews = new Map();
+  function draftOverrides(values) {
+    const overrides = Object.fromEntries(SERVER_PROFILE_OVERRIDE_FIELDS.map(field => [field, null]));
+    overrides.bio = values.bio.trim() || null;
+    for (const { name } of cosmeticFields) overrides[name] = values[name] || null;
+    if (values.name_color_mode === "custom") {
+      overrides.name_color = values.name_color;
+      if ((values.name_style || state.selfUser.name_style) === "custom-gradient") {
+        overrides.name_color_secondary = values.name_color_secondary;
+        overrides.name_gradient_direction = values.name_gradient_direction;
+      }
+    }
+    if (values.theme_override === "custom") {
+      overrides.theme_mode = values.theme_mode;
+      overrides.theme_primary = values.theme_primary;
+      overrides.theme_highlight = values.theme_highlight;
+      if (values.theme_mode === "gradient") {
+        overrides.theme_accent = values.theme_accent;
+        overrides.theme_direction = values.theme_direction;
+      }
+    }
+    return overrides;
+  }
   const values = await SancordUI.formDialog({
     title: "Editar perfil do servidor",
     description: `Personalize como seu perfil aparece em ${srv.name}. Campos sem personalização usam seu perfil global.`,
+    preview,
+    onPreview(form) {
+      const overrides = draftOverrides(form);
+      for (const { kind, limit } of media) {
+        const file = form[kind] === "upload" ? form[`${kind}_file`] : null;
+        const previous = mediaPreviews.get(kind);
+        if (previous && previous.file !== file) {
+          URL.revokeObjectURL(previous.url);
+          mediaPreviews.delete(kind);
+        }
+        if (file && file.size <= limit && typeof URL.createObjectURL === "function" && !mediaPreviews.has(kind)) {
+          mediaPreviews.set(kind, { file, url: URL.createObjectURL(file), animated: file.type === "image/gif" });
+        }
+        if (form[kind] === "keep") overrides[kind] = local?.[kind];
+        else if (form[kind] === "upload") overrides[kind] = mediaPreviews.get(kind);
+      }
+      const profile = mergeServerProfile(state.selfUser, overrides);
+      const name = memberNickname(srv, username) || profile.display_name || username;
+      renderCompactProfile(preview, profile, name, username, true);
+      fillCompactProfileDetails(preview, getUserServerRoles(srv, username));
+    },
     fields: [
       { name: "bio", label: "Bio", type: "textarea", value: bio, rows: 3, maxlength: 300, placeholder: "Usar a bio do perfil global", hint: "Apague o texto para voltar a usar a bio global." },
       ...media.flatMap(({ kind, label, maxMB }) => [
@@ -447,50 +520,13 @@ async function openServerProfileDialog(serverId) {
       { name: "theme_highlight", label: "Cor de destaque", type: "color", value: local?.theme_highlight || state.selfUser?.theme_highlight || "#5865f2", visibleWhen: (v) => v.theme_override === "custom" },
       { name: "theme_direction", label: "Direção do gradiente do tema", type: "select", value: local?.theme_direction || state.selfUser?.theme_direction || "vertical", options: directionOptions, visibleWhen: (v) => v.theme_override === "custom" && v.theme_mode !== "solid" },
     ],
+  }).finally(() => {
+    for (const { url } of mediaPreviews.values()) URL.revokeObjectURL(url);
   });
   if (!values) return;
   const changes = {};
-  if (values.bio.trim() !== bio) changes.bio = values.bio.trim();
-  for (const { name } of cosmeticFields) {
-    if ((values[name] || "") !== (local?.[name] || "")) changes[name] = values[name] || "";
-  }
-  if (values.name_color_mode === "inherit") {
-    if (hasNameColors) {
-      changes.name_color = "";
-      changes.name_color_secondary = "";
-      changes.name_gradient_direction = "";
-    }
-  } else {
-    if ((values.name_color || "") !== (local?.name_color || "")) changes.name_color = values.name_color;
-    const isCustomGrad = (values.name_style || state.selfUser?.name_style) === "custom-gradient";
-    if (isCustomGrad) {
-      if ((values.name_color_secondary || "") !== (local?.name_color_secondary || "")) changes.name_color_secondary = values.name_color_secondary;
-      if ((values.name_gradient_direction || "") !== (local?.name_gradient_direction || "")) changes.name_gradient_direction = values.name_gradient_direction;
-    } else if (local?.name_color_secondary || local?.name_gradient_direction) {
-      changes.name_color_secondary = "";
-      changes.name_gradient_direction = "";
-    }
-  }
-  if (values.theme_override === "inherit") {
-    if (hasTheme) {
-      changes.theme_primary = "";
-      changes.theme_accent = "";
-      changes.theme_highlight = "";
-      changes.theme_mode = "";
-      changes.theme_direction = "";
-    }
-  } else {
-    const mode = values.theme_mode === "solid" ? "solid" : "gradient";
-    if (mode !== (local?.theme_mode || "")) changes.theme_mode = mode;
-    if ((values.theme_primary || "") !== (local?.theme_primary || "")) changes.theme_primary = values.theme_primary;
-    if ((values.theme_highlight || "") !== (local?.theme_highlight || "")) changes.theme_highlight = values.theme_highlight;
-    if (mode === "gradient") {
-      if ((values.theme_accent || "") !== (local?.theme_accent || "")) changes.theme_accent = values.theme_accent;
-      if ((values.theme_direction || "") !== (local?.theme_direction || "")) changes.theme_direction = values.theme_direction;
-    } else {
-      if (local?.theme_accent) changes.theme_accent = "";
-      if (local?.theme_direction) changes.theme_direction = "";
-    }
+  for (const [field, value] of Object.entries(draftOverrides(values))) {
+    if ((value || "") !== (local?.[field] || "")) changes[field] = value || "";
   }
   for (const { kind, label, limit, maxMB } of media) {
     if (values[kind] === "upload" && values[`${kind}_file`].size > limit) {
@@ -519,19 +555,31 @@ async function openServerProfileDialog(serverId) {
 // ---------------------------------------------------------------------------
 // Prévia em contextos (popout, chat, lista de membros, DM)
 // ---------------------------------------------------------------------------
-let profilePreviewContext = "popout";
+let profilePreviewContext = "compact";
 
 function draftPreviewUser() {
   const u = state.selfUser || {};
   const media = (typeof profileDraft !== "undefined" && profileDraft.media) || {};
   const pick = (k, field) => (media[k] === "remove" ? null : media[k]?.url || u[field]);
+  const socials = collectSocialProfileFields();
   return {
     ...u,
     ...(typeof profileDraft !== "undefined" ? profileDraft : {}),
     avatar_url: pick("avatar", "avatar_url"),
     banner_url: pick("banner", "banner_url"),
-    display_name: document.getElementById("settings-display-name")?.value.trim() || u.display_name,
+    avatar_animated: Boolean(media.avatar ? media.avatar.animated : u.avatar_animated),
+    banner_animated: Boolean(media.banner ? media.banner.animated : u.banner_animated),
+    display_name: socials.display_name,
+    pronouns: socials.pronouns,
+    custom_status_emoji: socials.custom_status_emoji,
+    custom_status_expires_at: socials.custom_status_expires_in === undefined ? u.custom_status_expires_at : null,
   };
+}
+
+// O perfil completo é sempre a prévia principal do editor. Os outros contextos aparecem no
+// menu "Pré-visualizar em", sem esconder o perfil.
+function profileContextPopoverOpen() {
+  return !document.getElementById("pe-context-popover")?.classList.contains("hidden");
 }
 
 function renderProfileContextPreview() {
@@ -543,24 +591,21 @@ function renderProfileContextPreview() {
     b.setAttribute("aria-selected", String(on));
   });
   if (!host || !card) return;
-  const popout = profilePreviewContext === "popout";
-  card.classList.toggle("hidden", !popout);
-  host.classList.toggle("hidden", popout);
-  document.querySelector('[data-replay-profile-effect="preview-effect-layer"]')?.classList.toggle("hidden", !popout);
-  if (popout) return;
+  const replay = document.getElementById("profile-preview-replay");
+  replay.disabled = !profileMotionAvailable() || state.audioSettings.showProfileEffects === false ||
+    !profileDraft.profile_effect || profileDraft.profile_effect === "none";
   const u = draftPreviewUser();
   const name = u.display_name || u.username || "Você";
-  const deco = typeof getDecoClass === "function" ? getDecoClass(u.avatar_decoration) : "";
-  const decoSvg = typeof getDecoSvgHtml === "function" ? getDecoSvgHtml(u.avatar_decoration) : "";
   const avatar = (size) => `
-    <div class="avatar-status-wrap ${deco}" style="width:${size}px;height:${size}px">
-      <div class="avatar" style="background:${escapeHtml(u.avatar_color || "#5865f2")};width:${size}px;height:${size}px">${renderAvatarInner(u.username || "?", u.avatar_url)}</div>
-      ${decoSvg}
+    <div class="avatar-status-wrap" style="width:${size}px;height:${size}px">
+      <div class="avatar" style="width:${size}px;height:${size}px"></div>
     </div>`;
   const nameSpan = `<span class="styled-name ctx-name">${escapeHtml(name)}</span>`;
   const plate = typeof getNameplateClass === "function" ? getNameplateClass(u.nameplate_style) : "";
   if (profilePreviewContext === "compact") {
-    host.innerHTML = '<div class="compact-profile-preview profile-card"></div>';
+    if (!host.firstElementChild?.classList.contains("compact-profile-preview")) {
+      host.innerHTML = '<div class="compact-profile-preview profile-card"></div>';
+    }
     renderCompactProfile(host.firstElementChild, u, name, u.username || "voce", true);
   } else if (profilePreviewContext === "panel") {
     host.innerHTML = `<div class="ctx-dm-row profile-panel-preview ${plate}">${avatar(34)}<div>${nameSpan}
@@ -581,15 +626,29 @@ function renderProfileContextPreview() {
   }
   const nameEl = host.querySelector(".ctx-name");
   if (nameEl && typeof applyNameStyleToEl === "function") applyNameStyleToEl(nameEl, u, "#ffffff");
+  const avatarEl = host.querySelector(".ctx-name") ? host.querySelector(".avatar-status-wrap") : null;
+  if (avatarEl) renderDecoratedAvatar(avatarEl.firstElementChild, avatarEl, u);
   refreshAnimatedMedia(host);
 }
 
 document.querySelectorAll("[data-profile-context]").forEach((b) =>
   b.addEventListener("click", () => {
+    if (b.dataset.profileContext !== profilePreviewContext) stopProfileEffect();
     profilePreviewContext = b.dataset.profileContext;
     renderProfileContextPreview();
   })
 );
+
+function replayCurrentProfilePreview() {
+  const inPopover = profileContextPopoverOpen() && profilePreviewContext === "compact";
+  const layer = inPopover ? document.querySelector("#profile-context-preview [data-profile-slot=effect]") :
+    document.getElementById("preview-effect-layer");
+  playProfileEffect(layer);
+}
+document.getElementById("profile-preview-replay").addEventListener("click", replayCurrentProfilePreview);
+document.getElementById("profile-preview-theme").addEventListener("change", e => {
+  document.querySelector("#pe-context-popover").dataset.previewTheme = e.target.value;
+});
 
 // ---------------------------------------------------------------------------
 // Rascunho de mídia (avatar/banner): prévia imediata, envio só em "Salvar"
@@ -646,6 +705,10 @@ document.querySelectorAll('input[name="theme-mode"]').forEach((r) =>
   r.addEventListener("change", () => {
     if (r.checked) {
       profileDraft.theme_mode = r.value === "solid" ? "solid" : "gradient";
+      if (r.value === "gradient") {
+        profileDraft.theme_primary ||= document.getElementById("settings-theme-primary").value;
+        profileDraft.theme_accent ||= document.getElementById("settings-theme-accent").value;
+      }
       refreshLiveProfilePreview();
     }
   })
@@ -774,7 +837,7 @@ function applyProfileFrame(cardEl, frameId) {
   const layer = document.createElement("div");
   layer.className = "pf-layer";
   layer.setAttribute("aria-hidden", "true");
-  layer.innerHTML = `<div class="pf-ring"></div>${FRAME_ORNAMENTS[frameId] || ""}`;
+  layer.innerHTML = `<div class="pf-ring"></div>${profileFrameArt(frameId) || FRAME_ORNAMENTS[frameId] || ""}`;
   cardEl.appendChild(layer);
 }
 
@@ -891,17 +954,15 @@ function buildPickerPreview(kind, id, size = "small") {
   const u = draftPreviewUser();
   const wrap = document.createElement("div");
   if (kind === "profile_frame") {
-    wrap.className = `pf-mini profile-card ${size === "large" ? "pf-mini-large" : ""}`;
-    wrap.innerHTML = `<div class="pf-mini-banner"></div><div class="pf-mini-avatar"></div><div class="pf-mini-line"></div><div class="pf-mini-line short"></div>`;
-    applyProfileTheme(wrap, u);
-    wrap.querySelector(".pf-mini-banner").style.background = profileTheme(u).primary || u.avatar_color || "var(--brand)";
-    applyProfileFrame(wrap, id);
-    setFrameReactiveState(wrap, { ...u, status_kind: u.status_kind || "online" });
+    wrap.className = `profile-card ${size === "large" ? "compact-profile-preview" : "pf-mini profile-picker-thumbnail"}`;
+    const view = size === "large" ? u : { ...u, avatar_url: null, banner_url: null, bio: null, badges: [] };
+    renderCompactProfile(wrap, { ...view, profile_frame: id, profile_effect: null }, u.display_name || u.username || "Perfil", u.username || "perfil", true);
   } else {
     const px = size === "large" ? 96 : 52;
-    wrap.className = `avatar-deco-wrap ${getDecoClass(id)}`;
+    wrap.className = "avatar-deco-wrap";
     wrap.style.cssText = `width:${px}px;height:${px}px`;
-    wrap.innerHTML = `<div class="avatar" style="background:${escapeHtml(u.avatar_color || "#5865f2")};width:${px}px;height:${px}px;font-size:${Math.round(px / 3)}px">${renderAvatarInner(u.username || "?", u.avatar_url)}</div>${getDecoSvgHtml(id)}`;
+    wrap.innerHTML = `<div class="avatar" style="width:${px}px;height:${px}px;font-size:${Math.round(px / 3)}px"></div>`;
+    renderDecoratedAvatar(wrap.firstElementChild, wrap, { ...u, avatar_decoration: id, avatar_url: size === "large" ? u.avatar_url : null });
   }
   return wrap;
 }
@@ -917,6 +978,10 @@ function ensurePickerEl() {
         <button type="button" class="avatar-crop-x" data-picker-close aria-label="Fechar">✕</button>
       </div>
       <div class="cosmetic-picker-tabs" role="tablist"></div>
+      <div class="cosmetic-picker-filters">
+        <input type="search" class="settings-select" data-cosmetic-search aria-label="Buscar cosméticos" placeholder="Buscar cosméticos…" />
+        <label><input type="checkbox" data-cosmetic-owned /> Minha coleção</label>
+      </div>
       <div class="cosmetic-picker-body">
         <div class="cosmetic-picker-grid" role="listbox"></div>
         <aside class="cosmetic-picker-detail" aria-live="polite"></aside>
@@ -929,6 +994,8 @@ function ensurePickerEl() {
       </div>
     </div>`;
   document.body.appendChild(el);
+  el.querySelector("[data-cosmetic-search]").addEventListener("input", renderCosmeticPicker);
+  el.querySelector("[data-cosmetic-owned]").addEventListener("change", renderCosmeticPicker);
   el.addEventListener("click", (e) => {
     if (e.target === el || e.target.closest("[data-picker-close]")) closeCosmeticPicker();
     else if (e.target.closest("[data-picker-none]")) {
@@ -937,7 +1004,24 @@ function ensurePickerEl() {
     } else if (e.target.closest("[data-picker-apply]")) applyCosmeticPicker();
   });
   el.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeCosmeticPicker();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeCosmeticPicker();
+    } else if (e.target.matches(".cosmetic-choice") && ["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(e.key)) {
+      const options = [...el.querySelectorAll(".cosmetic-choice")];
+      const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1;
+      const index = options.indexOf(e.target);
+      e.preventDefault();
+      options[(index + step + options.length) % options.length]?.focus();
+    } else if (e.key === "Tab") {
+      const focusable = [...el.querySelectorAll("button:not(:disabled), input")];
+      const at = focusable.indexOf(document.activeElement);
+      if (e.shiftKey ? at <= 0 : at === focusable.length - 1) {
+        e.preventDefault();
+        (e.shiftKey ? focusable.at(-1) : focusable[0])?.focus();
+      }
+    }
   });
   picker.el = el;
   return el;
@@ -947,10 +1031,13 @@ function openCosmeticPicker(kind) {
   if (!PICKER_KINDS[kind]) return;
   const el = ensurePickerEl();
   picker.kind = kind;
+  picker.trigger = document.activeElement;
   picker.tab = "all";
   const current = profileDraft[PICKER_KINDS[kind].field];
   picker.selected = current && current !== "none" ? current : null;
   el.querySelector("#cosmetic-picker-title").textContent = PICKER_KINDS[kind].title;
+  el.querySelector("[data-cosmetic-search]").value = "";
+  el.querySelector("[data-cosmetic-owned]").checked = false;
   renderCosmeticPicker();
   el.classList.remove("hidden");
   setTimeout(() => el.querySelector(".cosmetic-choice.selected, .cosmetic-choice")?.focus(), 0);
@@ -958,6 +1045,7 @@ function openCosmeticPicker(kind) {
 
 function closeCosmeticPicker() {
   picker.el?.classList.add("hidden");
+  picker.trigger?.focus?.({ preventScroll: true });
 }
 
 function applyCosmeticPicker() {
@@ -1002,7 +1090,11 @@ function renderCosmeticPicker() {
   grid.innerHTML = "";
   // Agrupa por coleção, mantendo a ordem do catálogo.
   const groups = new Map();
-  for (const item of items.filter((i) => pickerTabMatches(i, picker.tab))) {
+  const query = el.querySelector("[data-cosmetic-search]").value.trim().toLocaleLowerCase();
+  const ownedOnly = el.querySelector("[data-cosmetic-owned]").checked;
+  for (const item of items.filter(i => pickerTabMatches(i, picker.tab) &&
+      (!ownedOnly || ownsCosmetic(i.kind, i.id)) &&
+      `${i.name} ${COLLECTION_LABELS[i.collection] || i.collection}`.toLocaleLowerCase().includes(query))) {
     if (!groups.has(item.collection)) groups.set(item.collection, []);
     groups.get(item.collection).push(item);
   }
@@ -1019,7 +1111,8 @@ function renderCosmeticPicker() {
       b.dataset.id = item.id;
       b.setAttribute("role", "option");
       b.setAttribute("aria-selected", String(picker.selected === item.id));
-      b.title = owned ? item.name : `${item.name} — ${pickerUnlockHint(item)}`;
+      b.title = [item.name, PICKER_KINDS[item.kind].title, COLLECTION_LABELS[collection] || collection,
+        owned ? "" : pickerUnlockHint(item)].filter(Boolean).join(" · ");
       const prev = document.createElement("div");
       prev.className = "cosmetic-choice-preview";
       prev.appendChild(buildPickerPreview(item.kind, item.id));
@@ -1039,11 +1132,16 @@ function renderCosmeticPicker() {
           return;
         }
         picker.selected = item.id;
-        renderCosmeticPicker();
+        for (const option of grid.querySelectorAll(".cosmetic-choice")) {
+          option.classList.toggle("selected", option === b);
+          option.setAttribute("aria-selected", String(option === b));
+        }
+        renderPickerDetail(item);
       });
       grid.appendChild(b);
     }
   }
+  if (!groups.size) grid.textContent = "Nenhum cosmético encontrado.";
   const sel = items.find((i) => i.id === picker.selected);
   renderPickerDetail(sel || null);
   refreshAnimatedMedia(grid);
@@ -1071,4 +1169,5 @@ function renderPickerDetail(item) {
     lock.textContent = `🔒 ${hint}. Concedido pelo Sancord — não dá para equipar por aqui.`;
     box.appendChild(lock);
   }
+  refreshAnimatedMedia(box);
 }

@@ -1,6 +1,6 @@
 [package]
 name = "sancord"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 # BinÃ¡rios declarados explicitamente: `src/bin/capture_bridge.rs` Ã© um mÃ³dulo do
 # SancordApp, nÃ£o um programa (a detecÃ§Ã£o automÃ¡tica o tratava como binÃ¡rio sem `main`).
@@ -60,10 +60,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 tao = "0.30"
 wry = "0.47"
+# Mesma versão que o wry usa: permissões de microfone/câmera do WebView2.
+webview2-com = "0.33"
 tokio-tungstenite = "0.24"
 windows-core = "0.58"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Storage_Xps",
@@ -71,6 +74,7 @@ windows = { version = "0.58", features = [
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Threading",
     "Win32_System_Variant",
+    "Win32_System_WinRT",
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Media_Audio",

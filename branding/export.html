@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Sancord — exportação do ícone</title></head>
+<body style="background:#0e0f13;color:#ddd;font:12px system-ui">
+<pre id="log"></pre>
+<script src="concepts/concepts.js"></script>
+<script>
+// Rasteriza os SVGs de branding/icon e grava PNG, ICO e RGBA cru via POST /save do servidor local.
+const log = m => { document.getElementById('log').textContent += m + '\n'; };
+const fresh = src => src + '?v=' + Date.now();
+async function load(src) { const i = new Image(); i.src = src; await i.decode(); return i; }
+function canvasOf(img, size) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, size, size); return c;
+}
+const pngBytes = c => new Promise(r => c.toBlob(b => b.arrayBuffer().then(a => r(new Uint8Array(a))), 'image/png'));
+async function save(path, bytes) {
+  const res = await fetch('/save?path=' + encodeURIComponent(path), { method: 'POST', body: bytes });
+  if (!res.ok) throw new Error(path + ': ' + res.status);
+  log(`${path} (${bytes.length} bytes)`);
+}
+// Entrada BMP 32 bits (BGRA de baixo para cima + máscara AND) para tamanhos pequenos; PNG para 128/256.
+function bmpEntry(c) {
+  const s = c.width, px = c.getContext('2d').getImageData(0, 0, s, s).data;
+  const maskRow = Math.ceil(s / 32) * 4;
+  const buf = new Uint8Array(40 + s * s * 4 + maskRow * s), dv = new DataView(buf.buffer);
+  dv.setUint32(0, 40, true); dv.setInt32(4, s, true); dv.setInt32(8, s * 2, true);
+  dv.setUint16(12, 1, true); dv.setUint16(14, 32, true); dv.setUint32(20, s * s * 4 + maskRow * s, true);
+  let o = 40;
+  for (let y = s - 1; y >= 0; y--) for (let x = 0; x < s; x++) {
+    const i = (y * s + x) * 4;
+    buf[o++] = px[i + 2]; buf[o++] = px[i + 1]; buf[o++] = px[i]; buf[o++] = px[i + 3];
+  }
+  for (let y = s - 1; y >= 0; y--) for (let x = 0; x < s; x++) {
+    if (px[(y * s + x) * 4 + 3] === 0) buf[o + (x >> 3)] |= 0x80 >> (x & 7);
+    if (x === s - 1) o += maskRow;
+  }
+  return buf;
+}
+function ico(entries) {
+  const head = 6 + 16 * entries.length;
+  const total = head + entries.reduce((n, e) => n + e.data.length, 0);
+  const buf = new Uint8Array(total), dv = new DataView(buf.buffer);
+  dv.setUint16(2, 1, true); dv.setUint16(4, entries.length, true);
+  let off = head;
+  entries.forEach((e, k) => {
+    const p = 6 + 16 * k;
+    buf[p] = e.size >= 256 ? 0 : e.size; buf[p + 1] = e.size >= 256 ? 0 : e.size;
+    dv.setUint16(p + 4, 1, true); dv.setUint16(p + 6, 32, true);
+    dv.setUint32(p + 8, e.data.length, true); dv.setUint32(p + 12, off, true);
+    buf.set(e.data, off); off += e.data.length;
+  });
+  return buf;
+}
+window.runExport = async () => {
+  const master = await load(fresh('icon/sancord-icon.svg'));
+  const small = await load(fresh('icon/sancord-icon-small.svg'));
+  const pick = s => (s <= 32 ? small : master);
+  const canv = {};
+  for (const s of [16, 24, 32, 48, 64, 128, 256, 512]) {
+    canv[s] = canvasOf(pick(s), s);
+    await save(`icon/png/sancord-${s}.png`, await pngBytes(canv[s]));
+  }
+  const entries = [];
+  for (const s of [16, 24, 32, 48, 64]) entries.push({ size: s, data: bmpEntry(canv[s]) });
+  for (const s of [128, 256]) entries.push({ size: s, data: await pngBytes(canv[s]) });
+  await save('icon/sancord.ico', ico(entries));
+  await save('icon/sancord-64.rgba', new Uint8Array(canv[64].getContext('2d').getImageData(0, 0, 64, 64).data));
+  for (const [svg, name] of [['sancord-mark.svg', 'mark'], ['sancord-mark-light.svg', 'mark-light']]) {
+    await save(`icon/png/sancord-${name}-512.png`, await pngBytes(canvasOf(await load(fresh('icon/' + svg)), 512)));
+  }
+  // Folha comparativa: conceitos x tamanhos, em fundo escuro e claro.
+  const rows = [
+    ['1 · Monograma S', CONCEPTS['1a · S monograma']],
+    ['2 · Balão + onda de voz', CONCEPTS['R1 · Balão + S deitado (arcos 180°)']],
+    ['3 · Diálogo', CONCEPTS['B1 · Dois balões em S (bicolor)']],
+    ['Final · Diálogo em S', null],
+  ];
+  const sheet = document.createElement('canvas'); sheet.width = 900; sheet.height = 40 + rows.length * 150;
+  const g = sheet.getContext('2d');
+  g.fillStyle = '#0e0f13'; g.fillRect(0, 0, 900, sheet.height);
+  g.fillStyle = '#f3f3f6'; g.fillRect(560, 0, 340, sheet.height);
+  g.font = '600 15px system-ui'; g.fillStyle = '#e6e6ea'; g.fillText('Sancord — comparação dos conceitos (128 · 48 · 32 · 24 · 16 px)', 16, 26);
+  let y = 40;
+  for (const [label, svg] of rows) {
+    const art = svg ? await load('data:image/svg+xml;utf8,' + encodeURIComponent(svg)) : master;
+    const smallArt = svg ? art : small;
+    g.fillStyle = '#e6e6ea'; g.font = '13px system-ui'; g.fillText(label, 16, y + 20);
+    g.drawImage(art, 16, y + 28, 112, 112);
+    let x = 150;
+    for (const s of [48, 32, 24, 16]) { g.drawImage(canvasOf(s <= 32 ? smallArt : art, s), x, y + 140 - s); x += s + 18; }
+    x = 580;
+    for (const s of [48, 32, 24, 16]) { g.drawImage(canvasOf(s <= 32 ? smallArt : art, s), x, y + 140 - s); x += s + 18; }
+    y += 150;
+  }
+  await save('concepts/comparativo.png', await pngBytes(sheet));
+  for (const [file, key] of [['conceito-1-monograma.svg', '1a · S monograma'], ['conceito-2-balao-voz.svg', 'R1 · Balão + S deitado (arcos 180°)'], ['conceito-3-dialogo.svg', 'B1 · Dois balões em S (bicolor)']]) {
+    await save('concepts/' + file, new TextEncoder().encode(CONCEPTS[key]));
+  }
+  log('ok');
+  return 'ok';
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 100 100">
+  <title>Sancord (16–32 px)</title>
+  <!-- Versão simplificada: sem sombra, sem filete, cores chapadas, símbolo maior e vão maior. -->
+  <defs>
+    <linearGradient id="scs-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2E2878"/>
+      <stop offset="1" stop-color="#1A163D"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="98" height="98" rx="21" fill="url(#scs-tile)"/>
+  <g transform="translate(50 50) scale(1.04) translate(-50 -50)">
+    <path d="M66 18.5 H47 A13 13 0 0 0 47 44.5 H69 L81 54.5 V31.5 A13 13 0 0 0 68 18.5 Z" fill="#FFFFFF"/>
+    <path d="M34 81.5 H53 A13 13 0 0 0 53 55.5 H31 L19 45.5 V68.5 A13 13 0 0 0 32 81.5 Z" fill="#9A85FF"/>
+  </g>
+</svg>

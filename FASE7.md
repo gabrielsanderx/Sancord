@@ -80,5 +80,6 @@ Iniciar capturas e decidir permissões manualmente.
 5. Validar redes diferentes e TURN real, perda/retomada de conexão e grupos maiores.
    P2P mesh aumenta upload/CPU por participante; não foi acrescentado SFU.
 
-Esta etapa permanece em validação. Nenhuma tag/release foi publicada e nenhuma
-captura foi gravada. Não converter o relato local em garantia de produção.
+Em 19/11/2026, `scripts/rtc-qa.mjs` validou vídeo bidirecional no executável usando duas câmeras geradas por Canvas. Cada cliente exibiu quadros novos recebidos pelo WebRTC, em conexão direta e via TURN/UDP. O vídeo remoto saiu do palco quando a câmera foi desligada. As capturas e os contadores RTP estão em `qa-rtc`.
+
+O teste de vídeo bidirecional com TURN/UDP também passou com dois NATs virtuais no mesmo computador. Continuam em aberto a integração com uma webcam física, o restante do roteiro de compartilhamento de tela e a chamada com TURN entre dois acessos independentes à internet.

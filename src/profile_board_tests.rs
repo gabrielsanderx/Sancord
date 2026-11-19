@@ -23,6 +23,36 @@ async fn save(ws: &mut Ws, board: &Value) {
 }
 
 #[tokio::test]
+async fn creator_milestone_survives_transfer_and_legacy_recovery() {
+    let srv = start_server().await;
+    let token = register(&srv, "CriadoraMural").await;
+    let mut creator = connect(&srv, &token).await;
+    wait_for(&mut creator, "Welcome").await;
+    send(&mut creator, json!({"type":"CreateServer","payload":{"name":"Clube Mural","template":"friends"}})).await;
+    let community = wait_for(&mut creator, "ServerCreated").await["server"].clone();
+    let (mut successor, _) = join_with(&srv, "HerdeiroMural", community["invite_code"].as_str().unwrap()).await;
+    let board = json!({"revision":0,"audience":"everyone","widgets":[{"kind":"achievements","visible":true}]});
+    for owner in [&mut creator, &mut successor] {
+        save(owner, &board).await;
+        wait_for(owner, "ProfileBoardSaved").await;
+    }
+    send(&mut creator, json!({"type":"TransferServerOwnership","payload":{"server_id":community["id"],"new_owner_username":"HerdeiroMural"}})).await;
+    assert_eq!(wait_for(&mut creator, "ServerFeedback").await["ok"], true);
+    assert_eq!(visit(&mut successor, "CriadoraMural").await["board"]["achievements"],
+        json!(["early_user", "milestone_first_server"]));
+    assert_eq!(visit(&mut creator, "HerdeiroMural").await["board"]["achievements"], json!(["early_user"]));
+
+    let mut state = srv.state.write().await;
+    state.accounts.get_mut("criadoramural").unwrap().created_community = false;
+    crate::profile_board::restore_first_creation(&mut state);
+    assert!(state.accounts["criadoramural"].created_community);
+    assert!(!state.accounts["herdeiromural"].created_community);
+    state.db.flush();
+    let stored = state.db.load_accounts().unwrap();
+    assert_eq!(stored.iter().filter(|account| account.created_community).count(), 1);
+}
+
+#[tokio::test]
 async fn profile_board_filters_audience_and_hidden_widgets_and_syncs_edits() {
     let srv = start_server().await;
     let token = register(&srv, "DonaMural").await;
@@ -230,9 +260,8 @@ async fn profile_board_supports_custom_widget_and_automatic_milestones() {
                 "a5".into(),
             ],
         );
-        let hist = st.chat_history.entry("geral".to_string()).or_default();
         for i in 0..100 {
-            hist.push(crate::models::ChatMessage {
+            st.insert_message(crate::models::ChatMessage {
                 id: format!("m-{i}"),
                 channel_id: "geral".into(),
                 author_id: "u".into(),
@@ -257,6 +286,8 @@ async fn profile_board_supports_custom_widget_and_automatic_milestones() {
             });
         }
     }
+    let db = srv.state.read().await.db.clone();
+    tokio::task::spawn_blocking(move || db.flush()).await.unwrap();
 
     let viewed = visit(&mut owner, "MestreMural").await;
     let achs: Vec<&str> = viewed["board"]["achievements"]

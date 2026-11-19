@@ -93,8 +93,7 @@ function boardText(tag, value, className) {
   return element;
 }
 
-function renderVisitedBoard(board, emptyMessage) {
-  const root = document.getElementById("profile-board-widgets");
+function renderVisitedBoard(board, emptyMessage, root = document.getElementById("profile-board-widgets")) {
   root.replaceChildren();
   const widgets = (board?.widgets || []).filter(widget => widget.visible && Object.hasOwn(boardWidgetNames, widget.kind));
   if (!widgets.length) {
@@ -187,7 +186,10 @@ function renderBoardEditor() {
   boardSave.disabled = Boolean(saving || conflict || !boardIsDirty());
   boardReload.disabled = Boolean(saving);
   boardList.replaceChildren();
-  if (!draft) return;
+  if (!draft) {
+    if (typeof onBoardEditorChanged === "function") onBoardEditorChanged();
+    return;
+  }
   boardAudience.value = draft.audience;
   boardAudience.disabled = Boolean(saving);
   boardKind.disabled = Boolean(saving || draft.widgets.length >= 8);
@@ -239,6 +241,7 @@ function renderBoardEditor() {
     check.addEventListener("change", () => {
       widget.visible = check.checked;
       boardSave.disabled = Boolean(conflict || !boardIsDirty());
+      if (typeof onBoardEditorChanged === "function") onBoardEditorChanged();
     });
     const visible = boardText("label", "Visível", "profile-board-visibility");
     visible.prepend(check);
@@ -266,6 +269,7 @@ function renderBoardEditor() {
     row.append(grip, label, visible, actions);
     boardList.append(row);
   }
+  if (typeof onBoardEditorChanged === "function") onBoardEditorChanged();
 }
 
 async function editBoardWidget(kind, index = null) {

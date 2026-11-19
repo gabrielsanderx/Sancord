@@ -3,6 +3,7 @@
 mod capture_bridge;
 mod desktop_assets;
 mod desktop_links;
+mod desktop_permissions;
 mod desktop_updater;
 use desktop_links::{confirm_page, desktop_url, link_endpoint, open_link_page, origin_of, KnownEndpoints};
 
@@ -875,6 +876,7 @@ fn main() {
             .build(&*window)
             .expect("Falha ao inicializar WebView2 nativo")
     };
+    desktop_permissions::grant_app_media(&webview);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;

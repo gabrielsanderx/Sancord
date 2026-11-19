@@ -28,14 +28,21 @@ test('editor integra catálogo, duas cores, direção e placa ao rascunho e ao p
   const gradient = d.getElementById('settings-name-showcase').style.getPropertyValue('--sancord-name-gradient');
   assert.match(gradient, /^radial-gradient\(ellipse/);
   assert.match(gradient, /#a677dd.*#46cebd/);
+  // A placa abre um subeditor na lateral; o perfil completo continua visível.
   d.getElementById('open-nameplate-picker-btn').click();
-  const buttons = [...d.querySelectorAll('#effect-grid button')];
+  const view = d.querySelector('[data-pe-view="nameplate"]');
+  assert.equal(view.classList.contains('hidden'), false);
+  assert.equal(d.querySelector('[data-pe-view="home"]').classList.contains('hidden'), true);
+  const buttons = [...view.querySelectorAll('.pe-choice')];
   assert.ok(buttons.find(b => b.textContent.includes('Vidro de Maré')).disabled);
-  buttons.find(b => b.textContent.includes('Faixa Core')).click();
-  assert.ok(d.getElementById('nameplate-picker-preview').classList.contains('nameplate-core-stripe'));
+  const core = buttons.find(b => b.textContent.includes('Faixa Core'));
+  assert.ok(core.querySelector('.pe-plate-sample').classList.contains('nameplate-core-stripe'), 'amostra real da placa');
+  core.click();
+  assert.ok(d.querySelector('#live-profile-preview-card .profile-nameplate-wrap').classList.contains('nameplate-core-stripe'));
   assert.equal(h.run('sent.some(packet => packet.type === "UpdateProfile")'), false);
   assert.equal(h.run('state.selfUser.name_style'), 'gradient');
-  d.getElementById('close-effect-done-btn').click();
+  view.querySelector('.pe-back').click();
+  assert.equal(d.querySelector('[data-pe-view="home"]').classList.contains('hidden'), false);
   h.run('saveProfileBtn.click()');
   const payload = JSON.parse(h.run('JSON.stringify(sent.find(packet => packet.type === "UpdateProfile").data)'));
   assert.equal(payload.name_style, 'custom-gradient');

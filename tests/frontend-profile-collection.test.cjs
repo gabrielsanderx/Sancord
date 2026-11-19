@@ -61,7 +61,7 @@ test('coleção filtra por tipo e conjunto, marca vistos e sincroniza favoritos'
   assert.equal(pick('profile_frame','core-pulse','favorite').getAttribute('aria-pressed'), 'true');
 });
 
-test('Surpreenda-me prepara prévia só com itens possuídos e aplica após confirmação', async t => {
+test('Surpreenda-me prepara prévia só com itens possuídos e propõe um rascunho', async t => {
   const h = await setup(t), d = h.document;
   h.run('profileDraft.bio = "Rascunho local"; profileDraft.media.banner = "remove";');
   d.getElementById('collection-random').click();
@@ -70,21 +70,16 @@ test('Surpreenda-me prepara prévia só com itens possuídos e aplica após conf
   assert.equal(d.getElementById('collection-preview').classList.contains('hidden'), false);
   assert.match(d.getElementById('collection-preview-items').textContent, /Sinal Core/);
   d.getElementById('collection-use-look').click();
-  const choice = JSON.parse(h.run('JSON.stringify(sent.at(-1).payload.choice)'));
-  assert.equal(choice.kind, 'custom');
-  assert.equal(choice.appearance.profile_frame, 'core-pulse');
-  assert.equal(choice.appearance.avatar_decoration, 'core-orbit');
-  assert.equal(choice.appearance.profile_effect, 'core-signal');
-  assert.equal(choice.appearance.nameplate_style, 'core-stripe');
-  assert.equal(choice.appearance.name_style, 'neon');
-  assert.equal(choice.appearance.bio, undefined);
+  assert.equal(h.run('sent.length'), 0);
+  assert.equal(h.run('profileDraft.profile_frame'), 'core-pulse');
+  assert.equal(h.run('profileDraft.profile_effect'), 'core-signal');
+  assert.equal(h.run('profileDraft.nameplate_style'), 'core-stripe');
   assert.equal(h.run('state.selfUser.avatar_decoration'), undefined);
-  await h.run('receive("ProfileLookApplied", {appearance:sent.at(-1).payload.choice.appearance})');
   assert.equal(h.run('profileDraft.avatar_decoration'), 'core-orbit');
   assert.equal(h.run('profileDraft.bio'), 'Rascunho local');
   assert.equal(h.run('profileDraft.media.banner'), 'remove');
   assert.equal(d.getElementById('settings-name-style-select').value, 'neon');
-  assert.equal(d.getElementById('collection-status').textContent, 'Visual aplicado.');
+  assert.match(d.getElementById('collection-status').textContent, /Salve as alterações/);
 });
 
 test('preset captura o visual do editor e aplica pelo ID confirmado pelo servidor', async t => {

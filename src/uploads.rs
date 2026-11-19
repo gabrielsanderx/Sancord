@@ -174,6 +174,7 @@ fn json_error(status: StatusCode, message: &str) -> Response {
 pub struct UploadQuery {
     #[serde(default)]
     filename: Option<String>,
+    presentation: Option<String>,
 }
 
 /// `POST /api/attachments?filename=nome.ext` com `Authorization: Bearer <token>`.
@@ -213,8 +214,19 @@ pub async fn upload_handler(
         return json_error(StatusCode::PAYLOAD_TOO_LARGE, "O arquivo passa do limite de 25 MB.");
     }
 
-    let (content_type, kind, ext) = sniff(&body);
-    let dims = if kind == "image" { image_dimensions(&body, content_type) } else { None };
+    let (detected_type, detected_kind, ext) = sniff(&body);
+    let dims = if detected_kind == "image" { image_dimensions(&body, detected_type) } else { None };
+    let (content_type, kind) = match q.presentation.as_deref() {
+        None => (detected_type, detected_kind),
+        Some("sticker") if matches!(detected_type, "image/png" | "image/webp" | "image/gif")
+            && dims.is_some_and(|(w, h)| w > 0 && h > 0 && w <= 512 && h <= 512)
+            && body.len() <= 2 * 1024 * 1024 => (detected_type, "sticker"),
+        Some("sticker") => return json_error(StatusCode::BAD_REQUEST, "Use PNG, WebP ou GIF de até 512 × 512 pixels e 2 MB."),
+        Some("voice") if detected_kind == "audio" => (detected_type, "voice"),
+        Some("voice") if detected_type == "video/webm" => ("audio/webm", "voice"),
+        Some("voice") => return json_error(StatusCode::BAD_REQUEST, "Formato de gravação incompatível."),
+        Some(_) => return json_error(StatusCode::BAD_REQUEST, "Formato de anexo desconhecido."),
+    };
     let id = uuid::Uuid::new_v4().simple().to_string();
     let filename = sanitize_filename(q.filename.as_deref().unwrap_or(""), ext);
     let path = disk_path(&data_dir, &id, ext);
@@ -289,7 +301,7 @@ pub async fn download_handler(
     if !res.status().is_success() && res.status() != StatusCode::PARTIAL_CONTENT && res.status() != StatusCode::NOT_MODIFIED {
         return res;
     }
-    let inline = matches!(record.kind.as_str(), "image" | "video" | "audio");
+    let inline = matches!(record.kind.as_str(), "image" | "video" | "audio" | "sticker" | "voice");
     let headers = res.headers_mut();
     let ct = if inline { record.content_type.as_str() } else { "application/octet-stream" };
     if let Ok(v) = HeaderValue::from_str(ct) {

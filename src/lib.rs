@@ -9,6 +9,7 @@
 pub mod auth;
 mod access;
 pub mod chat;
+pub mod scheduled;
 pub mod community;
 pub mod config;
 pub mod db;

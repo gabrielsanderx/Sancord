@@ -36,10 +36,16 @@ use windows::Win32::System::Threading::{
     CreateEventW, GetCurrentProcessId, SetEvent, WaitForSingleObject,
 };
 use windows::Win32::System::Variant::VT_BLOB;
+use windows::Win32::Foundation::WPARAM;
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+use windows::Win32::Graphics::Gdi::{CreateSolidBrush, FillRect};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DrawIconEx, EnumWindows, GetCursorInfo, GetIconInfo, GetWindowLongW, GetWindowRect,
-    GetWindowTextLengthW, GetWindowTextW, IsIconic, IsWindowVisible, CURSORINFO,
-    CURSOR_SHOWING, DI_NORMAL, GWL_EXSTYLE, ICONINFO, WS_EX_TOOLWINDOW,
+    DrawIconEx, EnumWindows, GetClassLongPtrW, GetCursorInfo, GetIconInfo, GetWindow,
+    GetWindowLongW, GetWindowPlacement, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SendMessageTimeoutW, ShowWindow,
+    CURSORINFO, CURSOR_SHOWING, DI_NORMAL, GCLP_HICON, GCLP_HICONSM, GWL_EXSTYLE, GW_OWNER,
+    HICON, ICONINFO, ICON_BIG, ICON_SMALL2, SMTO_ABORTIFHUNG, SW_SHOWNOACTIVATE,
+    WINDOWPLACEMENT, WM_GETICON, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
 
 mod base64_helper {
@@ -69,6 +75,9 @@ pub struct CaptureSourceInfo {
     pub width: i32,
     pub height: i32,
     pub thumbnail: String, // data:image/bmp;base64,...
+    /// Janela minimizada: a miniatura é o ícone do app e ela é restaurada ao transmitir.
+    #[serde(default)]
+    pub minimized: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -280,16 +289,47 @@ struct WindowEntry {
     hwnd_val: isize,
     title: String,
     rect: RECT,
+    minimized: bool,
 }
 
-unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
-        return BOOL(1);
+/// Janelas "ocultas" pelo DWM: apps UWP suspensos (ex.: Configurações), a Experiência de
+/// Entrada do Windows e janelas de outras áreas de trabalho virtuais. Não aparecem na tela.
+unsafe fn is_cloaked(hwnd: HWND) -> bool {
+    let mut cloaked: u32 = 0;
+    DwmGetWindowAttribute(
+        hwnd,
+        DWMWA_CLOAKED,
+        &mut cloaked as *mut u32 as *mut _,
+        std::mem::size_of::<u32>() as u32,
+    )
+    .is_ok()
+        && cloaked != 0
+}
+
+/// Mesma regra do Alt+Tab: janela de topo visível, sem dono (ou marcada como janela de app),
+/// que não seja ferramenta, nem oculta pelo DWM, nem do próprio Sancord.
+unsafe fn is_shareable_app_window(hwnd: HWND) -> bool {
+    if !IsWindowVisible(hwnd).as_bool() || is_cloaked(hwnd) {
+        return false;
     }
     let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
     if (ex_style & WS_EX_TOOLWINDOW.0) != 0 {
+        return false;
+    }
+    let owned = GetWindow(hwnd, GW_OWNER).map(|o| !o.is_invalid()).unwrap_or(false);
+    if owned && (ex_style & WS_EX_APPWINDOW.0) == 0 {
+        return false;
+    }
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    pid != GetCurrentProcessId()
+}
+
+unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    if !is_shareable_app_window(hwnd) {
         return BOOL(1);
     }
+    let minimized = IsIconic(hwnd).as_bool();
 
     let len = GetWindowTextLengthW(hwnd);
     if len <= 0 {
@@ -308,20 +348,87 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
         return BOOL(1);
     }
 
-    let mut rect = RECT::default();
-    if GetWindowRect(hwnd, &mut rect).is_ok() {
-        let w = rect.right - rect.left;
-        let h = rect.bottom - rect.top;
-        if w >= 120 && h >= 80 {
-            let list = &mut *(lparam.0 as *mut Vec<WindowEntry>);
-            list.push(WindowEntry {
-                hwnd_val: hwnd.0 as isize,
-                title: trimmed.to_string(),
-                rect,
-            });
+    // Minimizada: o retângulo atual é o do ícone; usa o tamanho que ela terá ao ser restaurada.
+    let rect = if minimized {
+        let mut placement = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
+        if GetWindowPlacement(hwnd, &mut placement).is_err() {
+            return BOOL(1);
         }
+        placement.rcNormalPosition
+    } else {
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return BOOL(1);
+        }
+        rect
+    };
+    let w = rect.right - rect.left;
+    let h = rect.bottom - rect.top;
+    if w >= 120 && h >= 80 {
+        let list = &mut *(lparam.0 as *mut Vec<WindowEntry>);
+        list.push(WindowEntry {
+            hwnd_val: hwnd.0 as isize,
+            title: trimmed.to_string(),
+            rect,
+            minimized,
+        });
     }
     BOOL(1)
+}
+
+/// Ícone do app da janela (grande, se houver), sem travar em janelas que não respondem.
+unsafe fn window_icon(hwnd: HWND) -> Option<HICON> {
+    for kind in [ICON_BIG, ICON_SMALL2] {
+        let mut result = 0usize;
+        let ok = SendMessageTimeoutW(
+            hwnd,
+            WM_GETICON,
+            WPARAM(kind as usize),
+            LPARAM(0),
+            SMTO_ABORTIFHUNG,
+            60,
+            Some(&mut result as *mut usize),
+        );
+        if ok.0 != 0 && result != 0 {
+            return Some(HICON(result as *mut _));
+        }
+    }
+    for index in [GCLP_HICON, GCLP_HICONSM] {
+        let icon = GetClassLongPtrW(hwnd, index);
+        if icon != 0 {
+            return Some(HICON(icon as *mut _));
+        }
+    }
+    None
+}
+
+/// Miniatura de janela minimizada: fundo escuro com o ícone do app no centro.
+unsafe fn minimized_thumbnail_bgra(hwnd: HWND, out_w: i32, out_h: i32) -> Option<Vec<u8>> {
+    let screen_dc = GetDC(HWND::default());
+    if screen_dc.is_invalid() {
+        return None;
+    }
+    let dc = CreateCompatibleDC(screen_dc);
+    let bmp = CreateCompatibleBitmap(screen_dc, out_w, out_h);
+    let old = SelectObject(dc, bmp);
+    // COLORREF é 0x00BBGGRR: fundo #1A1C24.
+    let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x0024_1C1A));
+    FillRect(dc, &RECT { left: 0, top: 0, right: out_w, bottom: out_h }, brush);
+    let _ = DeleteObject(brush);
+    if let Some(icon) = window_icon(hwnd) {
+        let size = (out_h / 3).clamp(24, 64);
+        let _ = DrawIconEx(dc, (out_w - size) / 2, (out_h - size) / 2, icon, size, size, 0, None, DI_NORMAL);
+    }
+    let mut pixels = vec![0u8; (out_w * out_h * 4) as usize];
+    extract_dib_bgra(dc, bmp, out_w, out_h, &mut pixels);
+    SelectObject(dc, old);
+    let _ = DeleteObject(bmp);
+    let _ = DeleteDC(dc);
+    ReleaseDC(HWND::default(), screen_dc);
+    Some(pixels)
 }
 
 fn encode_bgra_to_bmp_data_url(bgra: &[u8], w: i32, h: i32) -> String {
@@ -377,6 +484,7 @@ fn enumerate_capture_sources() -> Vec<CaptureSourceInfo> {
                     width: src_w,
                     height: src_h,
                     thumbnail: encode_bgra_to_bmp_data_url(&bgra, tw, th),
+                    minimized: false,
                 });
             }
         }
@@ -388,12 +496,19 @@ fn enumerate_capture_sources() -> Vec<CaptureSourceInfo> {
             LPARAM(&mut windows_list as *mut _ as isize),
         );
 
-        for win in windows_list.into_iter().take(18) {
+        // Janelas abertas primeiro (na ordem em que estão na tela), depois as minimizadas.
+        windows_list.sort_by_key(|w| w.minimized);
+        for win in windows_list.into_iter().take(24) {
             let src_w = (win.rect.right - win.rect.left).max(1);
             let src_h = (win.rect.bottom - win.rect.top).max(1);
             let (tw, th) = fit_dimensions(src_w, src_h, 320, 180);
             let hwnd = HWND(win.hwnd_val as *mut _);
-            if let Some(bgra) = capture_window_bgra(hwnd, win.rect, tw, th) {
+            let thumb = if win.minimized {
+                minimized_thumbnail_bgra(hwnd, tw, th)
+            } else {
+                capture_window_bgra(hwnd, win.rect, tw, th)
+            };
+            if let Some(bgra) = thumb {
                 results.push(CaptureSourceInfo {
                     id: format!("win:{}", win.hwnd_val),
                     kind: "window".to_string(),
@@ -401,6 +516,7 @@ fn enumerate_capture_sources() -> Vec<CaptureSourceInfo> {
                     width: src_w,
                     height: src_h,
                     thumbnail: encode_bgra_to_bmp_data_url(&bgra, tw, th),
+                    minimized: win.minimized,
                 });
             }
         }
@@ -714,12 +830,24 @@ fn video_capture_loop(
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
+        // Janela minimizada não tem imagem: restaura sem roubar o foco antes de transmitir.
+        if kind == "window" && hwnd_val != 0 {
+            let hwnd = HWND(hwnd_val as *mut _);
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            }
+        }
+
         while !stop.load(Ordering::Relaxed) {
             let tick = Instant::now();
 
             let captured = if kind == "window" && hwnd_val != 0 {
                 let hwnd = HWND(hwnd_val as *mut _);
                 let mut rect = RECT::default();
+                if IsIconic(hwnd).as_bool() {
+                    // Minimizada durante a transmissão: segura o último quadro até voltar.
+                    None
+                } else
                 if GetWindowRect(hwnd, &mut rect).is_ok() {
                     let src_w = (rect.right - rect.left).max(2);
                     let src_h = (rect.bottom - rect.top).max(2);
@@ -1020,5 +1148,22 @@ mod tests {
         assert!(!try_connect(port, Some(remote), "segredo-certo").await);
         trusted.lock().unwrap().push(remote.to_string());
         assert!(try_connect(port, Some(remote), "segredo-certo").await);
+    }
+
+    /// Conferência manual na máquina real (depende das janelas abertas):
+    /// `cargo test --bin SancordApp lista_janelas_reais -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn lista_janelas_reais() {
+        let sources = enumerate_capture_sources();
+        for s in sources.iter().filter(|s| s.kind == "window") {
+            println!("{} {}x{} minimizada={} | {}", s.id, s.width, s.height, s.minimized, s.title);
+            assert!(s.thumbnail.starts_with("data:image/bmp;base64,"));
+            if let Ok(dir) = std::env::var("SANCORD_THUMBS_DIR") {
+                let b64 = s.thumbnail.trim_start_matches("data:image/bmp;base64,");
+                let _ = std::fs::write(format!("{dir}/{}.b64", s.id.replace(':', "_")), b64);
+            }
+        }
+        assert!(sources.iter().any(|s| s.kind == "monitor"));
     }
 }

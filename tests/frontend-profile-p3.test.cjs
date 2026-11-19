@@ -46,27 +46,30 @@ test('seletor respeita posse, permite replay e só altera o rascunho ao escolher
     document.getElementById('open-settings-btn').click();
     switchSettingsTab('profile');`);
   d.getElementById('open-effect-picker-btn').click();
-  const layer = d.getElementById('picker-effect-layer');
-  const replay = d.querySelector('[data-replay-profile-effect="picker-effect-layer"]');
-  const buttons = [...d.querySelectorAll('#effect-grid button')];
+  // O efeito toca no perfil completo do editor, não num cartão separado.
+  const layer = d.getElementById('preview-effect-layer');
+  const view = d.querySelector('[data-pe-view="effect"]');
+  const replay = view.querySelector('[data-pe-replay]');
+  const buttons = [...view.querySelectorAll('.pe-choice')];
   assert.ok(buttons.find(b => b.textContent.includes('Rastro Celeste')).disabled);
   assert.ok(!buttons.some(b => b.textContent.includes('Poço de Luz')), 'sem efeito novo ausente no catálogo');
   buttons.find(b => b.textContent.includes('Sinal Core')).click();
-  assert.ok(layer.classList.contains('effect-core-signal'));
+  assert.ok(layer.classList.contains('effect-core-signal'), 'toca uma vez ao escolher');
   assert.equal(h.run('profileDraft.profile_effect'), 'core-signal');
   assert.equal(h.run('state.selfUser.profile_effect'), 'aurora');
   finishEffect(h, layer);
+  assert.equal(layer.classList.contains('is-playing'), false);
   replay.click();
   assert.ok(layer.classList.contains('is-playing'));
-  d.getElementById('close-effect-done-btn').click();
+  finishEffect(h, layer);
+  d.getElementById('profile-preview-replay').click();
+  assert.ok(layer.classList.contains('is-playing'), '↻ da prévia também reproduz');
+  view.querySelector('.pe-back').click();
+  h.run('closeSettingsModal()');
   await h.flush();
-  assert.equal(layer.classList.contains('is-playing'), false);
-  const editorLayer = d.getElementById('preview-effect-layer');
-  d.querySelector('[data-replay-profile-effect="preview-effect-layer"]').click();
-  assert.ok(editorLayer.classList.contains('effect-core-signal'));
-  d.querySelector('[data-profile-context="chat"]').click();
+  d.querySelector('.sancord-dialog form').dispatchEvent(new h.w.Event('submit', { cancelable: true }));
   await h.flush();
-  assert.equal(editorLayer.classList.contains('is-playing'), false);
+  assert.equal(layer.classList.contains('is-playing'), false, 'fechar a página interrompe o efeito');
 });
 
 test('segundo plano e redução de movimento interrompem efeitos clássicos e novos', async t => {

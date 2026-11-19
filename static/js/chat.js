@@ -22,6 +22,7 @@ const EMOJI_SOURCE = [
   ["Viagem", "🚀", "🚗 carro|🚕 taxi|🚌 onibus|🏎️ carro corrida|🚓 policia|🚑 ambulancia|🚒 bombeiro|🚚 caminhao|🚲 bicicleta|🛵 moto scooter|🏍️ moto|✈️ aviao|🚁 helicoptero|🚀 foguete lancamento|🛸 disco voador|⛵ veleiro|🚢 navio|⚓ ancora|🗺️ mapa|🗿 moai|🗽 estatua liberdade|🏰 castelo|🏠 casa|🏢 predio|🏫 escola|🏥 hospital|⛪ igreja|🏝️ ilha|🏖️ praia|⛰️ montanha|🌋 vulcao|🏕️ acampamento|🌃 cidade noite|🌆 por do sol cidade|🌉 ponte"],
   ["Objetos", "💡", "⌚ relogio|📱 celular|💻 notebook|⌨️ teclado|🖥️ computador monitor|🖨️ impressora|🖱️ mouse|💾 disquete salvar|💿 cd|📷 camera|📸 foto flash|🎥 camera filme|📺 tv|📻 radio|🎙️ microfone estudio|⏰ despertador|⏳ ampulheta|🔋 bateria|🔌 tomada|💡 lampada ideia|🔦 lanterna|🕯️ vela|💸 dinheiro voando|💰 saco dinheiro|💳 cartao|💎 diamante|🔧 chave inglesa|🔨 martelo|⚙️ engrenagem|🔩 parafuso|🧲 ima|🔫 pistola agua|💣 bomba|🔪 faca|🛡️ escudo|🔮 bola de cristal|🧪 tubo ensaio|💊 remedio|🩹 curativo|🚪 porta|🛏️ cama|🛒 carrinho compras|🔑 chave|🗝️ chave antiga|🔒 cadeado fechado|🔓 cadeado aberto|📌 alfinete fixar|📎 clipe|✏️ lapis|🖊️ caneta|📝 anotacao|📁 pasta|📅 calendario|📈 grafico subindo|📉 grafico descendo|📊 grafico barras|📋 prancheta|📚 livros|📖 livro aberto|🔗 link corrente|📦 caixa pacote|✉️ envelope carta|📧 email|📢 megafone anuncio|🔔 sino notificacao|🔕 sino mudo|🏷️ etiqueta"],
   ["Símbolos", "✅", "✅ certo feito|☑️ caixa marcada|✔️ visto|❌ errado x|❎ x quadrado|➕ mais|➖ menos|➗ dividir|❓ pergunta|❔ pergunta branca|❗ exclamacao|‼️ dupla exclamacao|⚠️ aviso atencao|🚫 proibido|⛔ entrada proibida|🔞 maiores de 18|♻️ reciclar|🆗 ok|🆕 novo|🆒 cool|🆓 gratis|🆘 socorro sos|🔝 topo|🔜 em breve|🔴 circulo vermelho|🟠 laranja|🟡 amarelo|🟢 verde online|🔵 azul|🟣 roxo|⚫ preto|⚪ branco|🟥 quadrado vermelho|🟩 quadrado verde|🟦 quadrado azul|⬆️ seta cima|⬇️ seta baixo|⬅️ seta esquerda|➡️ seta direita|🔄 recarregar|🔁 repetir|▶️ play|⏸️ pausa|⏹️ parar|⏭️ proximo|🔊 volume alto|🔇 mudo|💤 dormir|🎵 nota musical|🎶 notas musicais|➰ laco|💲 cifrao|©️ copyright|®️ registrado|™️ marca|#️⃣ hashtag|*️⃣ asterisco|0️⃣ zero|1️⃣ um|2️⃣ dois|3️⃣ tres|🇧🇷 brasil bandeira|🏳️‍🌈 arco iris orgulho|🏴‍☠️ pirata"],
+  ["Bandeiras", "🏳️", "🏳️ branca bandeira|🏁 xadrez chegada|🚩 aviso bandeira|🇧🇷 brasil|🇵🇹 portugal|🇦🇷 argentina|🇺🇾 uruguai|🇨🇱 chile|🇲🇽 mexico|🇺🇸 estados unidos|🇨🇦 canada|🇬🇧 reino unido|🇫🇷 franca|🇪🇸 espanha|🇩🇪 alemanha|🇮🇹 italia|🇯🇵 japao|🇰🇷 coreia|🇦🇺 australia|🇺🇳 onu|🏳️‍🌈 orgulho arco iris|🏳️‍⚧️ orgulho trans"],
 ];
 
 const EMOJI_CATEGORIES = EMOJI_SOURCE.map(([label, icon, raw]) => ({
@@ -520,7 +521,7 @@ function buildAttachmentsNode(msg) {
     list.unshift({ id: "legacy", kind: "image", url: msg.image_url, filename: "imagem", size: 0 });
   }
   for (const att of list) {
-    if (att.kind === "image" && showImages) {
+    if (["image", "sticker"].includes(att.kind) && showImages) {
       // GIF: estrela para favoritar (aparece ao passar o mouse), como no Discord.
       let holder = wrap;
       if (typeof isGifAttachment === "function" && isGifAttachment(att)) {
@@ -542,7 +543,7 @@ function buildAttachmentsNode(msg) {
       }
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "attachment-image";
+      btn.className = `attachment-image${att.kind === "sticker" ? " attachment-sticker" : ""}`;
       btn.setAttribute("aria-label", `Abrir imagem ${att.filename || ""}`);
       const img = document.createElement("img");
       img.loading = "lazy";
@@ -551,7 +552,8 @@ function buildAttachmentsNode(msg) {
       img.src = SancordNet.imageUrl(att.url);
       if (att.width && att.height) {
         // Reserva o espaço antes de carregar (sem "pulos" na rolagem).
-        const scale = Math.min(1, 400 / att.width, 300 / att.height);
+        const cap = att.kind === "sticker" ? 144 : 300;
+        const scale = Math.min(1, cap / att.width, cap / att.height);
         img.style.width = `${Math.max(1, Math.round(att.width * scale))}px`;
         img.style.aspectRatio = `${att.width} / ${att.height}`;
       }
@@ -589,7 +591,8 @@ function buildAttachmentsNode(msg) {
       card.className = `attachment-file kind-${att.kind}`;
       const icon = document.createElement("span");
       icon.className = "attachment-file-icon";
-      icon.textContent = att.kind === "audio" ? "🎵" : att.kind === "image" ? "🖼️" : att.kind === "video" ? "🎞️" : fileIconFor(att);
+      if (att.kind === "voice") icon.append(SancordIcons.node("mic"));
+      else icon.textContent = att.kind === "audio" ? "🎵" : att.kind === "image" ? "🖼️" : att.kind === "video" ? "🎞️" : fileIconFor(att);
       const meta = document.createElement("div");
       meta.className = "attachment-file-meta";
       const link = document.createElement("a");
@@ -601,7 +604,7 @@ function buildAttachmentsNode(msg) {
       size.className = "attachment-file-size";
       size.textContent = formatBytes(att.size);
       meta.append(link, size);
-      if (att.kind === "audio") {
+      if (att.kind === "audio" || att.kind === "voice") {
         const audio = document.createElement("audio");
         audio.controls = true;
         audio.preload = "none";
@@ -847,7 +850,7 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
 
   div.querySelectorAll(".clickable-profile").forEach((el) => {
     el.style.cursor = "pointer";
-    el.addEventListener("click", () => openCompactProfile(liveUser?.id || msg.author_id, msg));
+    el.addEventListener("click", () => openCompactProfile(liveUser?.id || msg.author_id, msg, el));
   });
   div.querySelector(".reply-context-line")?.addEventListener("click", () => jumpToMessage(msg.channel_id, msg.reply_to.id));
   div.querySelectorAll(".dm-join-invite-btn").forEach((btn) => {
@@ -1383,11 +1386,13 @@ function onChannelOpened(channelId) {
       showUiToast("Envio automático cancelado ao mudar de conversa. Confira os anexos antes de enviar.");
     }
     state.editingMsgId = null;
-    state.composerChannelId = channelId;
   }
+  if (typeof switchComposerDraft === "function") switchComposerDraft(state.composerChannelId, channelId);
+  state.composerChannelId = channelId;
   if (state.suppressAckFor && state.suppressAckFor !== channelId) state.suppressAckFor = null;
   hideJumpBar();
   if (channelId) placeUnreadDivider(channelId);
+  if (typeof syncComposerChrome === "function") syncComposerChrome();
 }
 
 const lastAckSent = new Map();
@@ -1604,13 +1609,13 @@ function autocompleteCandidates(trigger, query) {
       names.delete(myLower());
       people = [...names.entries()].map(([l, n]) => {
         const live = findLiveUserByName(l);
-        return { lower: l, name: live?.username || n, online: Boolean(live) };
+        return { lower: l, name: live?.username || n, display: memberNickname(srv, l) || live?.display_name, role: getUserServerRoles(srv, l)[0]?.name };
       });
     } else if (state.activeDmId) {
       people = privateConversationPeople(state.activeDmId).map((p) => ({ lower: p.username.toLowerCase(), name: p.username, online: p.online }));
     }
     for (const p of people) {
-      if (normalizeSearch(p.name).includes(q)) out.push({ kind: "user", label: p.name, hint: p.online ? "online" : "", insert: `@${p.name} `, user: p });
+      if (normalizeSearch(`${p.name} ${p.display || ""}`).includes(q)) out.push({ kind: "user", label: p.display || p.name, hint: p.role ? `@${p.name} · ${p.role}` : `@${p.name}`, insert: `@${p.name} `, user: p });
     }
     if (srv) {
       for (const r of srv.roles || []) {
@@ -1623,7 +1628,7 @@ function autocompleteCandidates(trigger, query) {
       }
     }
   } else if (trigger === "#" && srv) {
-    for (const c of srv.text_channels || []) {
+    for (const c of [...(srv.text_channels || []), ...(srv.voice_channels || [])]) {
       if (normalizeSearch(c.name).includes(q)) out.push({ kind: "channel", label: c.name, hint: c.kind === "announcement" ? "anúncios" : "", insert: `#${c.name} ` });
     }
   } else if (trigger === ":" && q.length >= 2) {
@@ -1632,6 +1637,8 @@ function autocompleteCandidates(trigger, query) {
       if (normalizeSearch(c.name).includes(q)) out.push({ kind: "custom", label: c.name, custom: c, hint: c.server.name, insert: `:${c.name}: ` });
     }
     for (const em of searchEmojis(q, 8)) out.push({ kind: "emoji", label: em.k.split(" ")[0], emoji: em.e, insert: `${em.e} ` });
+  } else if (trigger === "/" && typeof composerCommands === "function") {
+    for (const command of composerCommands()) if (command.label.startsWith(q)) out.push({ ...command, kind: "command", insert: "" });
   }
   out.sort((a, b) => Number(normalizeSearch(b.label).startsWith(q)) - Number(normalizeSearch(a.label).startsWith(q)));
   return out.slice(0, 8);
@@ -1641,8 +1648,9 @@ function updateAutocomplete() {
   if (!chatInput || !autocompleteEl) return;
   const caret = chatInput.selectionStart ?? chatInput.value.length;
   const before = chatInput.value.slice(0, caret);
-  const m = before.match(/(^|[\s(])([@#:])([^\s@#:]{0,32})$/);
+  const m = before.match(/(^|[\s(])([@#:/])([^\s@#:/]{0,32})$/);
   if (!m) return closeAutocomplete();
+  if (m[2] === "/" && before.trimStart() !== m[0].trimStart()) return closeAutocomplete();
   const items = autocompleteCandidates(m[2], m[3]);
   if (!items.length) return closeAutocomplete();
   ac.open = true;
@@ -1657,7 +1665,7 @@ function renderAutocomplete(trigger) {
   autocompleteEl.innerHTML = "";
   const title = document.createElement("div");
   title.className = "composer-autocomplete-title";
-  title.textContent = trigger === "@" ? "Membros e cargos" : trigger === "#" ? "Canais" : "Emojis";
+  title.textContent = trigger === "@" ? "Membros e cargos" : trigger === "#" ? "Canais" : trigger === "/" ? "Comandos do Sancord" : "Emojis";
   autocompleteEl.appendChild(title);
   ac.items.forEach((item, i) => {
     const row = document.createElement("div");
@@ -1676,13 +1684,15 @@ function renderAutocomplete(trigger) {
       icon.innerHTML = customEmojiHtml(item.custom.name, item.custom.id);
     } else if (item.kind === "channel") {
       icon.textContent = "#";
+    } else if (item.kind === "command") {
+      icon.append(SancordIcons.node(item.icon));
     } else {
       icon.textContent = "@";
       if (item.color && /^#[0-9a-f]{3,8}$/i.test(item.color)) icon.style.color = item.color;
     }
     const label = document.createElement("span");
     label.className = "ac-label";
-    label.textContent = item.kind === "emoji" || item.kind === "custom" ? `:${item.label}:` : item.label;
+    label.textContent = item.kind === "emoji" || item.kind === "custom" ? `:${item.label}:` : item.kind === "command" ? `/${item.label}` : item.label;
     const hint = document.createElement("span");
     hint.className = "ac-hint";
     hint.textContent = item.hint || "";
@@ -1710,6 +1720,8 @@ function applyAutocomplete() {
   closeAutocomplete();
   autosizeTextarea(chatInput);
   chatInput.focus();
+  if (typeof syncComposerChrome === "function") syncComposerChrome();
+  item.run?.();
 }
 
 chatInput?.addEventListener("input", () => {
@@ -1734,12 +1746,13 @@ chatInput?.addEventListener("keydown", (e) => {
     }
     if (e.key === "Escape") {
       e.preventDefault();
+      e.stopPropagation();
       closeAutocomplete();
       return;
     }
   }
   const enterSends = state.audioSettings?.chatEnterSends !== false;
-  if (e.key === "Enter" && !e.isComposing && (enterSends ? !e.shiftKey : (e.ctrlKey || e.metaKey))) {
+  if (e.key === "Enter" && !e.isComposing && !e.shiftKey && (enterSends || e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     chatForm.requestSubmit();
     return;
@@ -1754,8 +1767,15 @@ chatInput?.addEventListener("keydown", (e) => {
     }
     return;
   }
-  if (e.key === "Escape" && state.replyingTo) {
-    clearReplyingTo();
+  if (e.key === "Escape") {
+    if (typeof closeComposerPickers === "function" && closeComposerPickers()) {
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (state.replyingTo) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearReplyingTo();
+    }
   }
 });
 
@@ -1765,7 +1785,7 @@ chatInput?.addEventListener("keydown", (e) => {
 const composerTray = document.getElementById("composer-attachments");
 state.composerFiles = [];
 
-function addComposerFiles(fileList) {
+function addComposerFiles(fileList, presentation = null) {
   const files = Array.from(fileList || []).filter((f) => f && f.size >= 0);
   if (!files.length) return;
   if (!messagePermissions({ channel_id: getActiveTextChannelId() }).attach_files) {
@@ -1776,6 +1796,7 @@ function addComposerFiles(fileList) {
     showErrorToast("Você não pode enviar arquivos neste canal.");
     return;
   }
+  let added = 0;
   for (const file of files) {
     if (state.composerFiles.length >= MAX_FILES_PER_MESSAGE) {
       showErrorToast(`No máximo ${MAX_FILES_PER_MESSAGE} arquivos por mensagem.`);
@@ -1784,24 +1805,25 @@ function addComposerFiles(fileList) {
     const item = {
       key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       file,
+      presentation,
       name: file.name || (file.type.startsWith("image/") ? "imagem colada.png" : "arquivo"),
       status: "pending",
       progress: 0,
       attachment: null,
       error: "",
-      preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+      preview: file.type.startsWith("image/") && file.size <= MAX_UPLOAD_BYTES && typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : null,
       xhr: null,
     };
     state.composerFiles.push(item);
+    added++;
     if (file.size > MAX_UPLOAD_BYTES) {
       item.status = "error";
       item.error = "Maior que 25 MB";
-    } else {
-      uploadComposerFile(item);
     }
   }
   renderComposerTray();
   chatInput?.focus();
+  return added;
 }
 
 function uploadComposerFile(item) {
@@ -1810,7 +1832,9 @@ function uploadComposerFile(item) {
   item.error = "";
   const xhr = new XMLHttpRequest();
   item.xhr = xhr;
-  xhr.open("POST", SancordNet.url(`/api/attachments?filename=${encodeURIComponent(item.name)}`));
+  const query = new URLSearchParams({ filename: item.name });
+  if (item.presentation) query.set("presentation", item.presentation);
+  xhr.open("POST", SancordNet.url(`/api/attachments?${query}`));
   xhr.setRequestHeader("Authorization", `Bearer ${getStoredToken() || ""}`);
   xhr.setRequestHeader("Content-Type", "application/octet-stream");
   xhr.upload.onprogress = (e) => {
@@ -1820,7 +1844,7 @@ function uploadComposerFile(item) {
     }
   };
   xhr.onload = () => {
-    if (!state.composerFiles.includes(item) || item.xhr !== xhr) return;
+    if (item.removed || item.xhr !== xhr) return;
     item.xhr = null;
     let data = null;
     try {
@@ -1833,6 +1857,7 @@ function uploadComposerFile(item) {
       item.status = "error";
       item.error = data?.message || (xhr.status === 413 ? "Arquivo grande demais" : `Falha no envio (${xhr.status})`);
     }
+    if (!state.composerFiles.includes(item)) return;
     renderComposerTray();
     if (state.sendWhenUploaded && !state.composerFiles.some((f) => f.status === "uploading")) {
       state.sendWhenUploaded = false;
@@ -1840,37 +1865,48 @@ function uploadComposerFile(item) {
     }
   };
   xhr.onerror = () => {
-    if (!state.composerFiles.includes(item) || item.xhr !== xhr) return;
+    if (item.removed || item.xhr !== xhr) return;
     item.xhr = null;
     item.status = "error";
     item.error = "Sem conexão";
-    state.sendWhenUploaded = false;
-    renderComposerTray();
+    if (state.composerFiles.includes(item)) {
+      state.sendWhenUploaded = false;
+      renderComposerTray();
+    }
   };
   xhr.send(item.file);
 }
 
 function removeComposerFile(item) {
   state.sendWhenUploaded = false;
-  item.xhr?.abort();
-  if (item.preview) URL.revokeObjectURL(item.preview);
+  discardComposerFileList([item]);
   state.composerFiles = state.composerFiles.filter((f) => f !== item);
   renderComposerTray();
 }
 
 function clearComposerFiles() {
   state.sendWhenUploaded = false;
-  for (const f of state.composerFiles) {
-    f.xhr?.abort();
-    if (f.preview) URL.revokeObjectURL(f.preview);
-  }
+  discardComposerFileList(state.composerFiles);
   state.composerFiles = [];
   renderComposerTray();
 }
 
+function discardComposerFileList(files) {
+  for (const file of files) {
+    file.removed = true;
+    file.xhr?.abort();
+    if (file.preview) URL.revokeObjectURL(file.preview);
+  }
+}
+
 function updateTrayItemProgress(item) {
-  const bar = composerTray?.querySelector(`[data-file-key="${item.key}"] .tray-progress-fill`);
-  if (bar) bar.style.width = `${Math.round(item.progress * 100)}%`;
+  const row = composerTray?.querySelector(`[data-file-key="${item.key}"]`);
+  if (!row) return;
+  const pct = Math.round(item.progress * 100);
+  const bar = row.querySelector("progress");
+  if (bar) bar.value = pct;
+  const status = row.querySelector(".tray-sub");
+  if (status) status.textContent = `Enviando · ${pct}%`;
 }
 
 function renderComposerTray() {
@@ -1889,7 +1925,7 @@ function renderComposerTray() {
       img.alt = "";
       thumb.appendChild(img);
     } else {
-      thumb.textContent = fileIconFor({ filename: item.name, content_type: item.file.type });
+      thumb.append(SancordIcons.node(item.file.type.startsWith("audio/") ? "mic" : "file"));
     }
     const info = document.createElement("div");
     info.className = "tray-info";
@@ -1898,13 +1934,15 @@ function renderComposerTray() {
     name.textContent = item.name;
     const sub = document.createElement("span");
     sub.className = "tray-sub";
-    sub.textContent =
-      item.status === "error" ? item.error : item.status === "done" ? formatBytes(item.file.size) : `Enviando… ${formatBytes(item.file.size)}`;
+    sub.textContent = item.status === "error" ? item.error : item.status === "done" ? `Concluído · ${formatBytes(item.file.size)}` :
+      item.status === "pending" ? formatBytes(item.file.size) : `Enviando · ${Math.round(item.progress * 100)}%`;
     info.append(name, sub);
     if (item.status === "uploading") {
-      const bar = document.createElement("div");
+      const bar = document.createElement("progress");
       bar.className = "tray-progress";
-      bar.innerHTML = `<div class="tray-progress-fill" style="width:${Math.round(item.progress * 100)}%"></div>`;
+      bar.max = 100;
+      bar.value = Math.round(item.progress * 100);
+      bar.setAttribute("aria-label", `Progresso de ${item.name}`);
       info.appendChild(bar);
     }
     const actions = document.createElement("div");
@@ -1913,9 +1951,11 @@ function renderComposerTray() {
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "tray-btn";
-      retry.textContent = "↻";
+      retry.append(SancordIcons.node("rotate"));
+      retry.title = "Tentar novamente";
       retry.setAttribute("aria-label", `Tentar enviar ${item.name} de novo`);
       retry.addEventListener("click", () => {
+        if (chatInput.disabled || !messagePermissions({ channel_id: getActiveTextChannelId() }).attach_files) return;
         uploadComposerFile(item);
         renderComposerTray();
       });
@@ -1924,13 +1964,15 @@ function renderComposerTray() {
     const rm = document.createElement("button");
     rm.type = "button";
     rm.className = "tray-btn danger";
-    rm.textContent = "✕";
+    rm.append(SancordIcons.node("close"));
+    rm.title = "Remover anexo";
     rm.setAttribute("aria-label", `Remover ${item.name}`);
     rm.addEventListener("click", () => removeComposerFile(item));
     actions.appendChild(rm);
     chip.append(thumb, info, actions);
     composerTray.appendChild(chip);
   }
+  if (typeof syncComposerChrome === "function") syncComposerChrome();
 }
 
 function convertBasicEmoticons(text) {
@@ -1949,13 +1991,15 @@ function submitComposer() {
   if (slowWait > 0) { showErrorToast(`Modo lento: aguarde ${formatSlowmodeWait(slowWait)} para enviar de novo.`); return; }
   const content = convertBasicEmoticons(chatInput.value.trim());
   const files = state.composerFiles;
-  if (files.some((f) => f.status === "uploading")) {
-    state.sendWhenUploaded = true;
-    showUiToast("Enviando assim que os anexos terminarem de subir...");
-    return;
-  }
+  if (files.length && !messagePermissions({ channel_id: getActiveTextChannelId() }).attach_files) return showErrorToast("Você não pode anexar arquivos neste canal.");
   if (files.some((f) => f.status === "error")) {
     showErrorToast("Alguns anexos falharam. Remova-os ou tente de novo antes de enviar.");
+    return;
+  }
+  if (files.some((f) => f.status === "pending" || f.status === "uploading")) {
+    state.sendWhenUploaded = true;
+    for (const file of files.filter(f => f.status === "pending")) uploadComposerFile(file);
+    renderComposerTray();
     return;
   }
   const attachmentIds = files.filter((f) => f.status === "done").map((f) => f.attachment.id);
@@ -1982,19 +2026,19 @@ const dropOverlay = document.getElementById("chat-drop-overlay");
 let dragDepth = 0;
 const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
 chatMainView?.addEventListener("dragenter", (e) => {
-  if (!hasFiles(e) || chatInput?.disabled) return;
+  if (!hasFiles(e) || chatInput?.disabled || !messagePermissions({ channel_id: getActiveTextChannelId() }).attach_files) return;
   e.preventDefault();
   dragDepth += 1;
   const activeCh = state.textChannels.find((c) => c.id === state.currentTextChannel) || state.voiceChannels.find((c) => c.id === state.currentTextChannel);
-  const where = state.activeView === "server" ? `${activeCh?.kind === "voice" ? "🔊" : "#"}${activeCh?.name || "canal"}` : "esta conversa";
+  const where = state.activeView === "server" ? `#${activeCh?.name || threadById(getActiveTextChannelId())?.name || "canal"}` : "esta conversa";
   const target = document.getElementById("chat-drop-target");
-  if (target) target.textContent = `Os arquivos serão enviados para ${where}.`;
+  if (target) target.textContent = `Os arquivos serão preparados em ${where}.`;
   dropOverlay?.classList.remove("hidden");
 });
 chatMainView?.addEventListener("dragover", (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault();
-  e.dataTransfer.dropEffect = "copy";
+  e.dataTransfer.dropEffect = !chatInput?.disabled && messagePermissions({ channel_id: getActiveTextChannelId() }).attach_files ? "copy" : "none";
 });
 chatMainView?.addEventListener("dragleave", (e) => {
   if (!hasFiles(e)) return;
@@ -2119,7 +2163,10 @@ function initEmojiPicker() {
       emojiPopover.classList.add("hidden");
     } else {
       insertAtCaret(chatInput, btn.dataset.insert || em);
-      if (!e.shiftKey) emojiPopover.classList.add("hidden");
+      if (!e.shiftKey) {
+        emojiPopover.classList.add("hidden");
+        emojiPickerBtn?.setAttribute("aria-expanded", "false");
+      }
     }
   });
   emojiPopover.renderBody = renderBody;
@@ -2135,6 +2182,7 @@ function insertAtCaret(el, text) {
   el.focus();
   el.setSelectionRange(pos, pos);
   autosizeTextarea(el);
+  if (el === chatInput) el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function openEmojiPickerFor(msg, anchorEl) {
@@ -2210,10 +2258,11 @@ function refreshGifStars() {
 }
 
 /** GIFs das mensagens carregadas (inclusive encaminhadas), mais recentes primeiro, sem repetir. */
-function conversationGifs(limit = 60) {
+function conversationGifs(limit = 60, own = false) {
   const found = new Map();
   for (const list of Object.values(state.chatHistory || {})) {
     for (const m of list || []) {
+      if (own && !isOwnMessage(m)) continue;
       for (const att of [...(m.attachments || []), ...(m.forward?.attachments || [])]) {
         if (!isGifAttachment(att)) continue;
         const prev = found.get(att.id);
@@ -2238,6 +2287,7 @@ function buildGifPicker() {
   pop.innerHTML = `
     <div class="gif-picker-head" role="tablist">
       <button type="button" class="gif-tab" data-gif-tab="favorites" role="tab">Favoritos</button>
+      <button type="button" class="gif-tab" data-gif-tab="sent" role="tab">Recentes</button>
       <button type="button" class="gif-tab" data-gif-tab="recent" role="tab">Nas conversas</button>
     </div>
     <input type="search" class="emoji-search gif-search" placeholder="Filtrar pelo nome do arquivo" aria-label="Filtrar GIFs" />
@@ -2262,15 +2312,16 @@ function renderGifGrid() {
   if (!grid) return;
   const favs = favoriteGifIds();
   const recent = conversationGifs();
+  const sent = conversationGifs(60, true);
   const names = new Map(recent.map((g) => [g.id, g.name]));
   pop.querySelectorAll("[data-gif-tab]").forEach((b) => {
     const on = b.dataset.gifTab === gifPicker.tab;
     b.classList.toggle("active", on);
     b.setAttribute("aria-selected", String(on));
-    b.textContent = b.dataset.gifTab === "favorites" ? `Favoritos (${favs.length})` : `Nas conversas (${recent.length})`;
+    b.textContent = b.dataset.gifTab === "favorites" ? `Favoritos (${favs.length})` : b.dataset.gifTab === "sent" ? `Recentes (${sent.length})` : `Nas conversas (${recent.length})`;
   });
   const q = normalizeSearch(pop.querySelector(".gif-search")?.value || "").trim();
-  const items = (gifPicker.tab === "favorites" ? favs.map((id) => ({ id, name: names.get(id) || "GIF favorito" })) : recent)
+  const items = (gifPicker.tab === "favorites" ? favs.map((id) => ({ id, name: names.get(id) || "GIF favorito" })) : gifPicker.tab === "sent" ? sent : recent)
     .filter((g) => !q || normalizeSearch(g.name).includes(q));
   grid.innerHTML = "";
   if (!items.length) {
@@ -2293,7 +2344,8 @@ function renderGifGrid() {
     pick.title = `Enviar ${g.name}`;
     pick.dataset.gifId = g.id;
     const img = document.createElement("img");
-    img.src = gifUrl(g.id);
+    img.dataset.profileSrc = gifUrl(g.id);
+    img.dataset.anim = "1";
     img.alt = g.name;
     img.decoding = "async";
     pick.appendChild(img);
@@ -2311,12 +2363,14 @@ function renderGifGrid() {
     cell.append(pick, star);
     grid.appendChild(cell);
   }
+  refreshAnimatedMedia(grid);
 }
 
 function openGifPicker() {
   buildGifPicker();
   const pop = gifPopoverEl();
   if (!pop) return;
+  if (typeof closeStickerPicker === "function") closeStickerPicker();
   // Sem favoritos, abre direto nos GIFs das conversas.
   if (!favoriteGifIds().length && conversationGifs().length) gifPicker.tab = "recent";
   emojiPopover?.classList.add("hidden");
@@ -2339,6 +2393,7 @@ function sendGif(id) {
   }
   const channelId = getActiveTextChannelId();
   if (!channelId) return;
+  if (!messagePermissions({ channel_id: channelId }).attach_files || currentSlowmodeWait(channelId) > 0) return;
   const sent = sendChatPayload({
     channel_id: channelId,
     content: "",

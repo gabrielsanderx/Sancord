@@ -61,6 +61,8 @@ mod profile_sharing;
 mod cosmetic_collection;
 #[path = "voice_chat_tests.rs"]
 mod voice_chat;
+#[path = "composer_tests.rs"]
+mod composer;
 
 struct TestServer {
     addr: std::net::SocketAddr,

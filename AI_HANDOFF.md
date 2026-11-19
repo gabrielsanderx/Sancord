@@ -1352,3 +1352,182 @@ Documentação viva da arquitetura: `PROFILE_SYSTEM.md`.
   - Verificados ao vivo: login pela interface, criação de servidor com regras, link personalizado (`comunidade-qa`), botão hover de convite nos canais, `InviteModal` Páginas 1 e 2, `InvitePreviewModal` via slug personalizado, `InviteManagementPage` com tabela de 3 convites + toolbar + slug, Central de Configurações com 22 páginas em 4 grupos e IPC Windows Desktop (`winAvailable: true`) em `1366×768` e `1920×1080`, com **0 erros de console** e **0 overflow horizontal**.
   - Quatro refinamentos visuais identificados na primeira captura (alinhamento à esquerda no `InviteModal`, altura do botão `Copiar`, banner full-bleed + botão fechar contrastado no `InvitePreviewModal` e toolbar em linha única no gerenciamento) foram corrigidos em `static/ui.css`, retestados e revalidados em nova rodada de capturas no WebView2.
 - **Próximo passo:** empacotar/publicar `v0.2.3` quando autorizado pelo usuário.
+
+## 19/11/2026 · Refatoração visual de perfis e mural
+
+Implementação local sobre as fontes da v0.2.3.
+
+- `static/js/profile-card.js` centraliza a identidade do cartão, o avatar e a arte versionada de três coleções. `profile-sharing.js` usa esse renderizador no cartão rápido ancorado, com campos filtrados pela resposta `UserProfile`. O perfil completo preserva o mural e as demais abas. `profile.js` e `settings-center.js` usam o mesmo renderizador nas prévias, nos seletores e no formulário por servidor.
+- O editor oferece seis contextos, tema claro/escuro independente, amostras de fontes e efeitos, replay e confirmação ao fechar um rascunho. Selecionar um cosmético ou aceitar o resultado de **Surpreenda-me** prepara o rascunho. **Salvar alterações** continua enviando `UpdateProfile` e preserva a validação de posse existente.
+- Cada arte de referência tem planos específicos para decoração, moldura e efeito. As preferências de movimento por família são locais. A renderização mantém a política do Windows, interrompe reprodução em segundo plano e reaproveita elementos de avatar, garantindo os limites existentes de animação e mídia.
+- Esquema SQLite 20. `Account.created_community` registra a autoria sem exibi-la no JSON público. `restore_first_creation` tenta recuperar criadores antigos pelo convite permanente criado junto com o servidor. Conquistas de mensagem consultam o índice de autor fora do lock de escrita e contam até 500. Os testes cobrem transferência, recuperação e persistência da autoria, contagem e privacidade do mural.
+- Builds locais de `SancordApp.exe` e `sancord.exe` usam `target-review-phase6`. Suítes aprovadas com 199 testes frontend e 173 testes Rust, incluindo desktop e ferramenta de manutenção. Um ensaio de assinatura continua marcado como ignorado no ambiente local. Migração de cópia de v19 para v20 preservou por hash as 32 tabelas existentes e passou a verificação de integridade.
+- `scripts/profile-motion-qa.mjs --art` usa `scripts/profile-art-qa.mjs` para capturar a interface embutida real no WebView2 em 1366×768, 1920×1080 e 2560×1440. O ensaio usa perfis e imagens sintéticos sem usar contas ou banco de produção. A pasta `qa-profile-redesign` é ignorada pelo Git. O ensaio de movimento com 240 perfis confirmou limite de dois GIFs e uma superfície animada, com zero originais e zero superfícies após perda de foco.
+- Pendências de homologação externa incluem webcam física e conexão TURN entre redes independentes. O ensaio local de mídia continua limitado à infraestrutura disponível.
+
+## 19/11/2026 · Composer e chamadas desktop
+
+Implementação local sobre as fontes da v0.2.3. O cliente Windows continua carregando o frontend embutido. O `Welcome` anuncia suporte a figurinhas, mensagem de voz e agendamento. Instalações que apontam para backends anteriores continuam com as ações compatíveis.
+
+- `static/js/composer.js` coordena o menu, as permissões visuais e os rascunhos em memória por conta e conversa. `chat.js` mantém o envio WebSocket, a edição inline e os anexos. Os anexos aguardam o envio na bandeja e o texto é preservado ao trocar de canal. A fila de upload avança em segundo plano sem enviar em outra conversa. O menu e o submenu usam `SancordUI.contextMenu`.
+- `static/js/stickers.js` fornece a coleção original e a importação, com listas de servidor, recentes e favoritos. `static/js/voice-recorder.js` captura uma trilha própria, limita a sessão a cinco minutos e libera as trilhas ao parar, cancelar ou trocar de conversa. `src/uploads.rs` valida e persiste os tipos de apresentação `sticker` e `voice` nos anexos. O runtime reutiliza o MIME e a entrega existentes.
+- `src/scheduled.rs` controla a fila privada. `scheduled_messages` entra no esquema SQLite 21. Publicação e remoção da fila usam a mesma transação do escritor do banco e um ID determinístico. `ws::send_chat_message` aplica o fluxo normal de permissão, AutoMod, menções, modo lento e distribuição também a envios agendados. Falhas permanecem na fila até o usuário remover a entrada. O app aceita agendamentos de texto em até 30 dias.
+- `servers.js` monta as salas e `voice.js` monta os participantes, o menu de volume local, a qualidade WebRTC e os controles da chamada privada. A deteção de fala altera as classes e o ícone da pessoa correspondente. Captura, reprodução, renegociação WebRTC e compartilhamento continuam pelos fluxos existentes.
+- `scripts/profile-motion-qa.mjs --composer-voice` usa `scripts/composer-voice-qa.mjs` para abrir `SancordApp.exe` numa sessão isolada, usar o microfone virtual do WebView2 e gerar capturas em `qa-composer-voice`. As capturas incluem menu e submenu, enquete, figurinhas, anexos e resposta, gravação, dez participantes, volume e chamada privada. `SANCORD_QA_EXE` aponta para builds fora de `target/debug`. O original do banco foi aberto para leitura no ensaio de migração. A cópia de v19 para v21 preservou 32 tabelas por hash.
+- Validação final com 381 testes aprovados e um ensaio de assinatura ignorado. O desktop foi conferido em 1120×730, 1366×768 e 1920×1080, incluindo a reprodução da gravação feita com microfone virtual. Testes WebSocket confirmaram acesso privado à fila, cancelamento, retomada após reinício, publicação com autor desconectado e revalidação de acesso no horário previsto.
+- Clipes e execução de comandos de apps de terceiros ficam para outra etapa. A nova UX de voz continua com homologação pendente em webcam física e TURN entre redes independentes.
+
+## 19/11/2026 · Homologação RTC sem webcam
+
+- `scripts/rtc-qa.mjs` usa dois clientes Windows, contas e backend locais descartáveis, microfone virtual do WebView2 e stream de câmera sintético. O caminho normal de sinalização, RTP, palco e controles passou em conexão direta e com TURN/UDP forçado. Também foram confirmados mute da trilha, encerramento da câmera e saída/retorno à sala.
+- O servidor Pion TURN executou temporariamente com credenciais efêmeras. Ambos os clientes usaram candidato selecionado `relay` nas duas pontas. As evidências ficam em `qa-rtc/direto` e `qa-rtc/relay`. O roteiro e os limites do ensaio estão em `HOMOLOGACAO.md`.
+- O segundo ensaio passou com TURN/UDP por dois NATs virtuais isolados do QEMU e confirmou áudio e vídeo nos dois sentidos. `SANCORD_QA_TURN_URL_B` permite indicar uma rota separada para o segundo cliente. As medições de cada NAT e as estatísticas WebRTC estão em `qa-rtc/nats-isolados`. Seguem pendentes webcam física e TURN com dois acessos independentes à internet.
+
+## 19/11/2026 · Novo ícone do app ("Diálogo em S")
+
+- O ícone antigo era a ilustração em `static/logo.png`: ilegível abaixo de 48 px, e o favicon usava `#5865F2`. Ele foi trocado por uma marca geométrica de dois balões de fala em simetria rotacional. Juntos, os balões formam um S, sem texto, sem rosto e sem elementos do Discord.
+- `branding/ICON_DESIGN.md` registra:
+  - os 3 conceitos e a comparação;
+  - a escolha e o refinamento;
+  - o mini design system: geometria, raios, cores, sombra, versões e regras de uso.
+- As fontes ficam em `branding/icon/`:
+  - SVG mestre, versão pequena de 16–32 px, quadrado sangrado, símbolo para fundo escuro e claro, versão monocromática;
+  - PNGs de 16 a 512;
+  - `sancord.ico` com 16–64 em BMP 32 bits e 128/256 em PNG;
+  - RGBA 64×64.
+- Os conceitos e `comparativo.png` ficam em `branding/concepts/`. `branding/export.html` regenera tudo e depende de um servidor local com `POST /save`.
+- Aplicado em:
+  - `icon.ico` (recurso do `.exe` via `icon.rc`);
+  - `icon_rgba.bin` (ícone da janela);
+  - `static/sancord-icon.svg` (favicon, versão pequena);
+  - `static/logo.png` (quadrado sangrado 512, usado no login, ícone do hub, avatar do sistema e Sobre).
+- Os arquivos antigos foram preservados em `branding/legacy/`.
+- Validação: `cargo build --all-targets`, 176 testes Rust aprovados (1 ignorado) e 205 frontend aprovados. O PNG 256 foi confirmado dentro do `SancordApp.exe` recompilado em `target-dev`. A tela de login foi conferida no navegador.
+- Produção não foi tocada. O novo ícone só chega aos usuários num próximo build/release, que depende de autorização de publicação.- **Cliente do atalho atualizado (autorizado pelo usuário, 19/11/2026):**
+  - `D:\Sancord\Sancord.exe` agora é o bundle release gerado por `scripts/build-desktop.ps1 -OutputDir qa-desktop-icon`, com SHA-256 `5E3251D61E6E…` e 9.779.200 bytes, já com o novo ícone.
+  - O exe anterior ficou em `Sancord-before-icon.exe` (`2A80C90AFF4E…`).
+  - O atalho da área de trabalho passou a apontar o ícone para `Sancord.exe,0`, e o cache de ícones foi renovado com `ie4uinit -show`.
+  - O app abriu normalmente (`SancordDesktop`, janela "Sancord").
+  - `SancordServer.exe`, a produção na porta 3000, não foi parado nem trocado. O `/logo.png` servido por ele aos outros clientes continua o antigo até a próxima atualização do servidor.
+  - **Rollback:** fechar o app e copiar `Sancord-before-icon.exe` de volta para `Sancord.exe`.
+## 19/11/2026 · Compartilhar tela: janelas minimizadas e janelas fantasmas
+
+- **Problema relatado:** a aba Aplicativos não mostrava os programas abertos. Aparecia apenas "Configurações" (duas vezes) e "Experiência de Entrada do Windows".
+- **Causa:** em `src/bin/capture_bridge.rs`, `enum_windows_proc` descartava toda janela minimizada (`IsIconic`) e não filtrava as janelas ocultas pelo DWM (`DWMWA_CLOAKED`): apps UWP suspensos, o painel de entrada e janelas de outras áreas de trabalho. O filtro "Windows Input Experience" só funcionava com o Windows em inglês.
+- **Correção:**
+  - `is_shareable_app_window` aplica a regra do Alt+Tab: janela visível, não oculta pelo DWM, sem `WS_EX_TOOLWINDOW`, sem dono (a não ser com `WS_EX_APPWINDOW`) e de outro processo;
+  - janelas minimizadas entram na lista depois das abertas, com o tamanho de `rcNormalPosition` e uma miniatura com o ícone do app (`WM_GETICON` com timeout, depois o ícone da classe). `CaptureSourceInfo.minimized` sinaliza esses casos;
+  - `start_capture` restaura a janela minimizada com `SW_SHOWNOACTIVATE`, sem roubar o foco. Se ela for minimizada durante a transmissão, os espectadores continuam vendo o último quadro;
+  - adicionada a feature `Win32_Graphics_Dwm` do crate `windows`, sem crate novo e sem mudança no lock;
+  - no frontend, o card ganhou a etiqueta "Minimizada" (`app.js?v=35`, `styles.css?v=21`).
+- **Testes:**
+  - novo `tests/frontend-screen-picker.test.cjs`; frontend com 206 aprovados;
+  - Rust com 176 aprovados;
+  - teste manual ignorado `lista_janelas_reais`, rodado na máquina real: listou Claude, WhatsApp, Brave e Discord, os três últimos minimizados com ícone, e nenhuma "Configurações" fantasma.
+- **Ainda não testado:** transmitir de fato uma janela minimizada numa chamada e ver a restauração.
+- **Instalação local:** `Sancord.exe` do atalho trocado pelo novo release (`EC930121FF0B…`, 9.785.344 bytes). O backup do original segue em `Sancord-before-icon.exe`.
+- **Publicação:** a `v0.2.3` já está no GitHub (tag `af2ff0dd`, publicada em 19/11 às 18:43Z). As mudanças do ícone e desta correção sairão como `0.2.4`. Isso exige subir a versão no `Cargo.toml`/`Cargo.lock`, escrever o CHANGELOG, fazer o commit pela API do GitHub (não há git local) e criar a tag, com autorização do usuário.
+## 19/11/2026 · EM ANDAMENTO (Claude): pedidos do usuário nesta rodada
+
+> Se outra IA continuar daqui: leia esta seção inteira primeiro. Os itens marcados ✅ estão nos fontes, testados e instalados no atalho (`D:\Sancord\Sancord.exe`). Os itens 🔧 estão em andamento. Os itens ⏳ ainda não foram iniciados. Nada foi publicado no GitHub: a `v0.2.3` já existe lá (tag `af2ff0dd`, publicada pela outra IA), então a próxima versão será a **0.2.4**, e só com autorização.
+
+### Ordem pedida pelo usuário
+1. ✅ Novo ícone do app ("Diálogo em S"). Detalhes na seção do ícone acima e em `branding/ICON_DESIGN.md`.
+2. ✅ Compartilhar tela: janelas minimizadas e janelas fantasmas. Ver a seção correspondente acima.
+3. ✅ **Microfone não funcionava nas calls.**
+   - **Causa:** o perfil WebView2 do cliente (`%LOCALAPPDATA%\SancordDesktopData\EBWebView\Default\Preferences`) tinha `media_stream_mic` bloqueado (setting=2) para `http://sancord.localhost:80`. O Windows liberava, e o microfone AOC GH300 estava OK.
+   - **Correção:** novo `src/bin/desktop_permissions.rs`. Ao abrir, o app chama `ICoreWebView2Profile4::SetPermissionState`, com ALLOW de microfone e câmera para `APP_ORIGIN`, e trata `PermissionRequested` liberando só microfone e câmera e só em `desktop_assets::is_app_page`.
+   - Foi adicionada a dependência direta `webview2-com = "0.33"` (mesma versão que o wry usa; o `Cargo.lock` ganhou só essa linha) e a feature `Win32_System_WinRT`.
+   - Há teste unitário da regra.
+   - Instalado no atalho (`Sancord.exe` com hash `75449B5E1054…`). O usuário precisa fechar e reabrir o app. **Ainda não confirmado pelo usuário que voltou a funcionar.**
+4. ✅ **Refazer completamente a interface de personalização de perfil.** O prompt longo do usuário pede 3 colunas no estilo da referência: editor compacto à esquerda, perfil completo real no centro e mural/widgets à direita, com subeditores, prévia ao vivo e salvar só no fim.
+   - O usuário citou 2 imagens de referência que **não chegaram**. Foi implementado e validado seguindo a descrição completa em texto.
+   - **Feito e validado (211 testes frontend + 177 Rust passando = 388 testes):**
+     - `static/index.html`: `#settings-tab-profile` foi reescrito. `.pe-shell` contém:
+       - `.pe-sidebar`, com as views `data-pe-view` = home | name | theme | banner | decoration | frame | effect | nameplate | about | status | collection | board;
+       - `.pe-stage`, com `#live-profile-preview-card.profile-card.profile-modal-2col`: o MESMO cartão do perfil visitado, com coluna esquerda e mural/atividade à direita;
+       - `#pe-context-popover`, o menu "Pré-visualizar em" com cartão rápido, mensagem, membros, DM e painel.
+       - Todos os IDs antigos dos controles foram preservados (só mudaram de lugar).
+       - As abas antigas "Perfil global/Perfis por servidor" ficaram escondidas: o seletor `#pe-profile-target` leva para a página de perfil por servidor.
+     - `static/js/profile-editor.js` (novo, `?v=1`, rota em `desktop_assets.rs`):
+       - navegação `openPeView` / `closePeSubeditor` / `handlePeEscape`;
+       - galerias de decoração e moldura com filtros;
+       - listas de efeito e placa com amostra real (hover reproduz, clique aplica ao rascunho e toca o efeito uma vez no perfil);
+       - abas Fontes/Efeitos/Cores do nome com prévia no hover;
+       - faixa com "Reposicionar e zoom" (reabre o recorte);
+       - `peAfterRefresh`: membro desde, conexões visíveis, "Adicionar pronomes" e "Adicionar uma bio" só no editor, miniaturas de efeito e moldura, atividade;
+       - `onBoardEditorChanged`: mural do rascunho, atalhos de widget e "Ver todos os widgets";
+       - `onProfileEditorShown`, chamado por `switchSettingsTab("profile")`.
+     - `app.js`:
+       - os botões de decoração, moldura, efeito e placa abrem os subeditores, não os modais antigos;
+       - `isProfileDraftDirty = isProfileFieldsDirty || boardIsDirty`;
+       - Salvar envia também o mural (`board-save`), e Redefinir e Descartar também descartam o mural;
+       - Esc volta do subeditor antes de fechar;
+       - `refreshLiveProfilePreview` chama `peAfterRefresh`.
+     - `profile.js`: o contexto "popout" saiu; os contextos não escondem mais o perfil; o replay usa `#preview-effect-layer`.
+     - `profile-board.js`: `renderVisitedBoard(board, msg, root)` e o gancho `onBoardEditorChanged`.
+     - `profile-sharing.js`: `selfProfileLinks` e `renderVisitedProfileLinks(links, wrap, list)`.
+     - `ui.css` (`?v=16`):
+       - bloco "Editor visual de perfil" no fim do arquivo;
+       - layout full-height com rolagem independente;
+       - responsivo por container query (abaixo de 980px some o mural);
+       - pausa de animações fora do hover ou da seleção;
+       - fundo do mural com `color-mix` para o tema do perfil aparecer, valendo também no perfil visitado;
+       - **ajustes finos de CSS pós-QA visual no WebView2:**
+         - `.pe-placeholder-link` com contraste adaptável ao tema do cartão (`color-mix(in srgb, currentColor 86%, var(--accent, var(--brand)))`);
+         - `.pe-widget-grid` com `repeat(auto-fit, minmax(128px, 1fr))` para preencher bem a largura do mural em telas 1080p sem deixar espaço vazio à direita;
+         - `.effect-option-preview:has([data-profile-effect="..."])` com prévia estática colorida para todos os 19 efeitos de perfil (corrigindo miniaturas pretas fora do hover, como "Brasas Carmesim").
+     - Testes atualizados para o novo layout: `frontend-profile-art`, `p1`, `p3` e `p4`.
+5. ✅ (instalado em `D:\Sancord\Sancord.exe`) **Criar canal de voz criava canal de texto.**
+   - **Causa,** confirmada no `audit_log` de uma CÓPIA do banco (`channel_create privadão tipo: text`): o "+" da categoria de voz (e "Criar canal aqui") abria o diálogo já em "Texto".
+   - **Correção:** `categoryChannelKind(srv, cat)` em `servers.js`. Categoria só com voz, ou vazia com nome de voz/call, abre em "Voz".
+   - Também corrigido `ChannelCreated` em `app.js`: anúncio e fórum iam para a lista de voz até recarregar.
+   - Teste novo: `tests/frontend-create-channel.test.cjs`.
+6. ✅ (instalado em `D:\Sancord\Sancord.exe`) **Nome do canal cortado** ("fotos-rand…"): os botões de convite e engrenagem eram invisíveis, mas ocupavam espaço. Agora, em `ui.css`, eles só ocupam espaço no hover ou foco, e o nome usa a largura toda.
+7. ✅ (instalado em `D:\Sancord\Sancord.exe`; corrigido com `voiceStageMatchesView` e `syncVoiceStageContext` em `app.js`, classe `.stage-out-of-context` e teste `frontend-voice-stage-context`) **Painel da call do servidor aparecendo dentro da conversa privada (DM).** O usuário estava numa call ("Call") de outro servidor e, ao abrir a DM com um amigo, o palco da call aparecia em cima do chat da DM. O palco deve aparecer só no servidor e canal da call, ou na DM quando a call é privada com aquela pessoa.
+8. ⏳ Publicação da **0.2.4** (aguardando autorização explícita do usuário):
+   - versão no `Cargo.toml` e no `Cargo.lock`;
+   - CHANGELOG;
+   - commit pela API do GitHub, porque não há git local (ver a seção "Commit 0.2.1 pela API");
+   - tag `v0.2.4`.
+   - O servidor de produção (`SancordServer.exe`, porta 3000, v0.2.3) não foi tocado em nada disso.
+### Atualização 19/11/2026 18:45: QA WebView2 concluído + ajustes finos + build final instalado
+- **QA visual e funcional real no WebView2 (binários release `target/release/sancord.exe` + `target/release/SancordApp.exe`):**
+  - Resoluções testadas: `1366×768` (3 colunas: editor `290 px`, prévia `768 px`, mural `267 px`, sem overflow horizontal), `1920×1080` (grade de widgets preenchida em 4 colunas e miniaturas estáticas de efeito/moldura visíveis) e `900×720` (mural recolhido via container query, sem overflow).
+  - Fluxo completo validado contra servidor real isolado: subeditores (`name`, `theme`, `decoration`, `frame`, `effect`, `about`), popover `"Pré-visualizar em"`, `Salvar alterações` (`#save-profile-btn` persistindo bio, pronomes, decoração `flame-violet`, moldura `core-pulse` e efeito `embers`, limpando barra dirty) e `Redefinir` (`#reset-profile-draft-btn` restaurando estado salvo).
+  - Validados também os itens 5 (`inferredVoiceKind: "voice"` no `+` de categoria de voz) e 6 (`nameWidthRatio: 0.79` em canal de nome longo), com **0 erros de console**.
+- **Testes automatizados após os ajustes finais de CSS:** `211/211` frontend (`node --test tests/frontend-*.test.cjs`) e `177/177` Rust (`cargo test --locked --all-targets --target-dir target-review-phase6`; 2 testes manuais/CI ignorados) = **388 aprovados, 0 falhas**.
+- **Instalado no atalho `D:\Sancord\Sancord.exe`:**
+  - SHA-256: `99CE6DCFB4CC1652CA4DF4F6ED4B8609A161C5651E3782C14F3ACB39504EB03F`
+  - Tamanho: `9.847.296` bytes (gerado via `scripts/build-desktop.ps1 -OutputDir qa-desktop-icon`; backup original preservado em `D:\Sancord\Sancord-before-icon.exe`).
+  - `D:\Sancord\SancordServer.exe` (`v0.2.3`, porta 3000) e `D:\Sancord\data\sancord.db` não foram tocados e seguem saudáveis.
+### Atualização 19/11/2026 19:02: Lista lateral de membros refatorada + build reinstalado
+- ✅ **Agrupamento e apresentação da lista lateral de membros (`static/js/member-list.js`, `static/app.js`, `static/index.html`, `static/ui.css`, `static/js/servers.js`, `src/bin/desktop_assets.rs`):**
+  - Removido o cabeçalho global `MEMBROS ONLINE — X` na visualização de servidor (mantido apenas `MEMBROS DA THREAD — X` em threads); contagem online preservada nos tooltips do servidor.
+  - Função central pura `buildMemberGroups(members, roles, options)` + componentes `MemberList`, `MemberGroup`, `MemberGroupHeader` e `MemberItem` em `static/js/member-list.js`.
+  - Ordem estrita: cargos destacados (`hoist` / `display_separately`) por hierarquia (`position` decrescente) → `Disponível — X` (online/ausente/DND sem cargo destacado) → `Offline — X` (offline/invisível, sem duplicação e com visual apagado/dessaturado legível). Seções vazias omitidas.
+  - Sem hardcode de `FUNDADOR`, `OWNER` ou `BOT'S`; nome exato do cargo preservado (sem `text-transform: uppercase` nem emojis automáticos no cabeçalho).
+  - Cor do nome resolvida pelo cargo mais alto com cor explícita (independente de `hoist`); coroa pequena do proprietário (`SVG`) à direita do nome; badge `APP` para bots/aplicações; atividade em linha única priorizando castigo → canal de voz visível (`🔊 Call Privada`, respeitando `view_channel`) → atividade/status personalizado; decorações compactas sem alterar altura da linha; memoização por assinatura de render para evitar rebuilds desnecessários.
+  - Rótulo da configuração do cargo atualizado para `"Exibir membros deste cargo separadamente na lista de membros"` e novos cargos criados com `hoist: false` por padrão.
+- **Testes automatizados:** `216/216` frontend (incluindo novo `tests/frontend-member-list.test.cjs` com cobertura unitária, DOM e realtime) + `177/177` Rust = **393 aprovados, 0 falhas**.
+- **QA visual no WebView2 (release):** verificado em `1366×768` com `👑 DEUS — 1`, `| 💻 | Bot's — 1`, `Disponível — 2`, `Offline — 3`, coroa pós-nome, badge `APP`, voz `🔊 Call Privada`, 0 duplicatas e 0 erros de console.
+- **Instalado no atalho `D:\Sancord\Sancord.exe`:**
+  - SHA-256: `D8596B5106ABAF2F4D2973576DF923872C461466D17163D86E675DCE1CED0C61`
+  - Tamanho: `9.863.168` bytes (`D:\Sancord\Sancord-before-icon.exe` e `D:\Sancord\SancordServer.exe` `v0.2.3` preservados intactos).
+### Atualização 19/11/2026 19:15: Rebalanceamento espacial e responsividade do Editor de Perfil + build reinstalado
+- ✅ **Proporções, respiro visual e responsividade do novo Editor de Perfil (`static/ui.css`, `static/index.html`, `static/js/profile-editor.js`):**
+  - Tokens consolidados em `.settings-profile-panel`: `--profile-editor-gap`, `--profile-section-gap`, `--profile-card-padding`, `--profile-column-gap`, `--profile-preview-padding`, `--widget-grid-gap`.
+  - Hierarquia de larguras rebalanceada sem alterar o layout em 3 colunas nem mexer no backend:
+    - `1920×1080` (100% DPI): Settings `234 px` | Editor `350 px` | Prévia **`783 px`** (protagonista; cresce para `1272 px` ao ocultar Mural) | Mural **`471 px`** (grade 2×2).
+    - `2560×1440` (100% DPI): Settings `236 px` | Editor `350 px` | Prévia **`1132 px`** | Mural **`600 px`** (centralizado com `max-width: 2120px`).
+    - `1600×900` (100% DPI): Settings `208 px` | Editor `303 px` | Prévia **`628 px`** | Mural **`379 px`** (grade 2×2).
+    - `1366×768` (100% DPI): Settings `208 px` | Editor `300 px` | Prévia **`795 px`** | Mural recolhido por padrão, acessível como gaveta lateral (`420 px`) pelo botão `Mural` (`#pe-mural-toggle`) e fechável por `✕` ou `Esc`.
+    - `1920×1080` @ `125% DPI` (`1536×864`): `208` + `300` + `590` + `357` px (4 áreas equilibradas).
+    - `1920×1080` @ `150% DPI` (`1280×720`): `208` + `300` + `708` px (Mural recolhido via botão).
+    - Janela pequena (`960×720`): botão `☰` (`#pe-nav-toggle`) recolhe a sidebar de Configurações (`208 → 0 px`), preservando Editor (`300 px`) + Prévia (`596 px`) lado a lado; `0` overflow horizontal em todos os cenários.
+  - Respiro interno aumentado: padding `18 px` no editor com superfície sutil, tiles maiores (`min-height: 124 px`) com ellipsis + tooltip `title` automático, banner `132 px`, padding lateral `24 px` na prévia, safe area do avatar/decoração, `profile-card-info-stack` mais espaçoso, scrollbars discretas (`scrollbar-width: thin`) e grid do mural adaptativo (`2 cols → 1 col` abaixo de `310 px`).
+- **Testes automatizados:** `216/216` frontend + `9/9` `SancordApp` aprovados, `0` falhas, `0` erros de console no QA WebView2 multi-resolução.
+- **Instalado no atalho `D:\Sancord\Sancord.exe`:**
+  - SHA-256: `ADC22819FB8791F17462407B916AED0872BD86E33A065F968B82093F7014428B`
+  - Tamanho: `9.871.360` bytes (`D:\Sancord\Sancord-before-icon.exe` e `D:\Sancord\SancordServer.exe` `v0.2.3` preservados intactos).
+- Publicação da `v0.2.4` no GitHub continua aguardando autorização explícita do usuário.

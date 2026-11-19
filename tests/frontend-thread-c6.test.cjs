@@ -81,8 +81,10 @@ test('thread aberta: cabeçalho com membros e lista lateral só com quem segue',
   assert.deepEqual(names, ['Ana', 'Bia']);
   assert.equal(d.getElementById('online-count-title')?.textContent || h.run('onlineCountTitle.textContent'), 'MEMBROS DA THREAD — 2');
 
-  // Fora da thread volta a lista do servidor.
+  // Fora da thread volta a lista do servidor sem cabeçalho global "MEMBROS ONLINE".
   h.run('state.currentTextChannel = "c1"; renderMembersSidebar()');
   assert.equal([...d.querySelectorAll('#members-list .member-name')].length >= 3, true);
-  assert.match(h.run('onlineCountTitle.textContent'), /^MEMBROS ONLINE/);
+  assert.equal(d.getElementById('online-count-title').classList.contains('hidden'), true);
+  assert.equal(d.getElementById('online-count-title').textContent, '');
+  assert.equal(d.querySelector('#members-list .member-group-header').textContent, 'Disponível — 3');
 });

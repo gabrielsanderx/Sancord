@@ -101,6 +101,187 @@ function serverOfVoiceChannel(channelId) {
   return (state.servers || []).find((s) => (s.voice_channels || []).some((c) => c.id === channelId)) || null;
 }
 
+const voiceDetails = document.getElementById("voice-connection-details");
+let voiceStatsGeneration = 0;
+
+function closeVoiceDetails() {
+  if (voiceDetails.classList.contains("hidden")) return false;
+  voiceDetails.classList.add("hidden");
+  voiceSignalBox.setAttribute("aria-expanded", "false");
+  return true;
+}
+
+function updateVoiceDockContext(channelId) {
+  voiceStatsGeneration++;
+  closeVoiceDetails();
+  document.getElementById("voice-connection-scope").textContent = isPrivateVoiceId(channelId)
+    ? "Chamada privada" : serverOfVoiceChannel(channelId)?.name || "Canal de voz";
+}
+
+function summarizeVoiceStats(reports) {
+  const records = [...reports.values()];
+  const pair = records.map(r => r.selectedCandidatePairId && reports.get(r.selectedCandidatePairId)).find(Boolean) ||
+    records.find(r => r.type === "candidate-pair" && r.state === "succeeded" && (r.nominated || r.selected));
+  const audio = records.find(r => r.type === "inbound-rtp" && (r.kind || r.mediaType) === "audio");
+  const codec = reports.get(audio?.codecId)?.mimeType;
+  const candidate = reports.get(pair?.localCandidateId);
+  const remote = reports.get(pair?.remoteCandidateId);
+  const total = audio ? audio.packetsReceived + Math.max(0, audio.packetsLost || 0) : 0;
+  return {
+    rtt: Number.isFinite(pair?.currentRoundTripTime) ? Math.round(pair.currentRoundTripTime * 1000) : null,
+    jitter: Number.isFinite(audio?.jitter) ? Math.round(audio.jitter * 1000) : null,
+    loss: total > 0 ? Math.max(0, audio.packetsLost || 0) * 100 / total : null,
+    codec: codec?.split("/").at(-1) || null,
+    transport: candidate?.protocol ? `${candidate.protocol.toUpperCase()} · ${[candidate.candidateType, remote?.candidateType].includes("relay") ? "TURN" : "Direto"}` : null,
+    capacity: Number.isFinite(pair?.availableOutgoingBitrate) ? Math.round(pair.availableOutgoingBitrate / 1000) : null,
+  };
+}
+
+async function refreshVoiceConnectionDetails() {
+  const channelId = state.currentVoiceChannel;
+  if (!channelId) return;
+  const generation = ++voiceStatsGeneration;
+  const replies = await Promise.allSettled([...state.peers.values()].map(async ({ pc }) => summarizeVoiceStats(await pc.getStats())));
+  if (generation !== voiceStatsGeneration || channelId !== state.currentVoiceChannel) return;
+  const samples = replies.filter(result => result.status === "fulfilled").map(result => result.value);
+  const measured = samples.filter(sample => sample.rtt != null).sort((a, b) => b.rtt - a.rtt);
+  const sample = measured[0] || samples[0];
+  const quality = measured.some(s => s.rtt >= 180 || s.loss >= 5) ? ["Instável", "sig-bad"] :
+    measured.some(s => s.rtt >= 80 || s.loss >= 2) ? ["Boa", "sig-warn"] :
+      measured.length ? ["Excelente", "sig-good"] : [state.peers.size ? "Medindo conexão" : "Aguardando participantes", ""];
+  voiceSignalBox.className = `voice-signal-box ${quality[1]}`.trim();
+  voiceSignalBox.title = `${quality[0]} · Detalhes da conexão`;
+  voiceSignalBox.setAttribute("aria-label", voiceSignalBox.title);
+  const heading = document.createElement("strong");
+  heading.textContent = quality[0];
+  voiceDetails.replaceChildren(heading);
+  const details = [
+    ["Ping", sample?.rtt, " ms"], ["Jitter", sample?.jitter, " ms"],
+    ["Perda acumulada", sample?.loss?.toFixed(1), "%"], ["Codec", sample?.codec, ""],
+    ["Transporte", sample?.transport, ""], ["Capacidade estimada", sample?.capacity, " kbps"],
+  ].filter(([, value]) => value != null);
+  if (details.length) {
+    const list = document.createElement("dl");
+    for (const [name, value, unit] of details) {
+      const label = document.createElement("dt");
+      label.textContent = name;
+      const text = document.createElement("dd");
+      text.textContent = `${value}${unit}`;
+      list.append(label, text);
+    }
+    voiceDetails.append(list);
+  }
+}
+
+function syncPrivateStageControls() {
+  const controls = document.getElementById("private-stage-controls");
+  const privateCall = isPrivateVoiceId(state.currentVoiceChannel);
+  controls.classList.toggle("hidden", !privateCall);
+  document.getElementById("stage-open-voice-chat-btn")?.classList.toggle("hidden", privateCall);
+  if (!privateCall) return;
+  const actions = [
+    ["mute", state.muted ? "mic-off" : "mic", state.muted ? "Ativar microfone" : "Silenciar microfone", toggleMuteBtn, state.muted],
+    ["deafen", state.deafened ? "headphones-off" : "headphones", state.deafened ? "Ativar som" : "Desativar som", toggleDeafenBtn, state.deafened],
+    ["video", "camera", "Vídeo", toggleCameraBtn, Boolean(state.localCameraStream)],
+    ["screen", "screen", "Compartilhar tela", shareScreenBtn, Boolean(state.localScreenStream)],
+    ["leave", "disconnect", "Encerrar chamada", leaveVoiceBtn, null],
+  ];
+  for (const [key, icon, label, action, pressed] of actions) {
+    let button = controls.querySelector(`[data-call-control="${key}"]`);
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = `voice-action-btn${key === "leave" ? " voice-disconnect" : ""}`;
+      button.dataset.callControl = key;
+      button.addEventListener("click", () => action.click());
+      controls.append(button);
+    }
+    button.disabled = action.disabled;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    if (pressed !== null) button.setAttribute("aria-pressed", String(pressed));
+    if (button.dataset.icon !== icon) {
+      button.replaceChildren(SancordIcons.node(icon));
+      button.dataset.icon = icon;
+    }
+  }
+}
+
+voiceSignalBox?.addEventListener("click", () => {
+  if (closeVoiceDetails()) return;
+  voiceDetails.classList.remove("hidden");
+  voiceSignalBox.setAttribute("aria-expanded", "true");
+  refreshVoiceConnectionDetails();
+});
+activeVoiceChannelName?.addEventListener("click", () => voiceStage.classList.toggle("hidden"));
+document.addEventListener("mousedown", e => {
+  if (!voiceSignalBox?.contains(e.target) && !voiceDetails.contains(e.target)) closeVoiceDetails();
+});
+
+function voiceUserIndicators(user) {
+  return [
+    ["noise", "Falando", "voice-speaking-glyph"],
+    user.camera_on && ["camera", "Câmera ligada"],
+    user.screen_sharing && [null, "Ao vivo", "voice-live-label"],
+    (user.server_muted || user.muted) && ["mic-off", user.server_muted ? "Silenciado pelo servidor" : "Microfone silenciado"],
+    (user.server_deafened || user.deafened) && ["headphones-off", user.server_deafened ? "Ensurdecido pelo servidor" : "Som desativado"],
+    isLocallyMuted(user.id) && ["bell-off", "Silenciado só para você"],
+  ].filter(Boolean).map(([icon, label, cls]) => {
+    const el = document.createElement("span");
+    el.className = cls || "voice-user-state";
+    el.title = label;
+    if (icon) {
+      el.setAttribute("role", "img");
+      el.setAttribute("aria-label", label);
+      el.append(SancordIcons.node(icon));
+    } else el.textContent = label;
+    return el;
+  });
+}
+
+function buildVoiceUserItem(srv, user) {
+  const row = document.createElement("li");
+  row.className = "voice-member-row voice-user-row";
+  row.dataset.speakingUser = user.id;
+  row.classList.toggle("speaking", state.speakingUsers.has(user.id));
+  const name = memberNickname(srv, user.username) || user.display_name || user.username;
+  const profile = document.createElement("button");
+  profile.type = "button";
+  profile.className = "voice-user-main";
+  profile.title = `${name} · @${user.username}`;
+  profile.setAttribute("aria-label", `Abrir perfil de ${name}`);
+  const avatar = document.createElement("span");
+  avatar.className = "avatar-small";
+  avatar.style.background = user.avatar_color || "var(--accent)";
+  avatar.innerHTML = renderAvatarInner(user.username, user.avatar_url, user.avatar_animated);
+  const label = document.createElement("span");
+  label.className = "voice-user-name";
+  label.textContent = name;
+  const flags = document.createElement("span");
+  flags.className = "voice-user-flags";
+  flags.append(...voiceUserIndicators(user));
+  profile.append(avatar, label, flags);
+  profile.addEventListener("click", () => openCompactProfile(user.id, { author_name: user.username, channel_id: user.voice_channel_id }, profile));
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "voice-user-more";
+  more.setAttribute("aria-label", `Opções de ${name}`);
+  more.setAttribute("aria-haspopup", "menu");
+  more.append(SancordIcons.node("more"));
+  SancordUI.tooltip(more, "Opções de voz", "top");
+  more.addEventListener("click", () => {
+    const rect = more.getBoundingClientRect();
+    openVoiceUserMenu({ clientX: rect.right, clientY: rect.top }, user.id);
+  });
+  row.addEventListener("contextmenu", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    openVoiceUserMenu(e, user.id);
+  });
+  row.append(profile, more);
+  return row;
+}
+
 /** Menu de botão direito de um participante da voz. */
 function openVoiceUserMenu(e, uid) {
   const user = state.users.get(uid);
@@ -110,19 +291,31 @@ function openVoiceUserMenu(e, uid) {
   const items = [{ header: name }];
   items.push({
     label: "Ver perfil",
-    icon: "👤",
-    onSelect: () => openMemberProfilePopover(uid, { author_name: user.username, author_color: user.avatar_color, author_avatar: user.avatar_url }),
+    icon: "user",
+    onSelect: () => openCompactProfile(uid, { author_name: user.username, channel_id: user.voice_channel_id }),
   });
 
   if (!isSelf) {
     const vol = getPeerVolume(uid);
-    items.push({ separator: true }, { header: `Volume para você — ${vol}%` });
-    for (const pct of [50, 100, 150, 200]) {
-      items.push({ label: `${pct}%`, icon: pct === vol ? "✓" : "🔊", onSelect: () => setPeerVolume(uid, pct) });
-    }
+    items.push({ label: "Mensagem", icon: "chat", onSelect: () => sendWs("OpenDm", { target_username: user.username }) });
+    const volume = document.createElement("label");
+    volume.className = "voice-menu-volume";
+    const title = document.createElement("span");
+    title.textContent = `Volume para você · ${vol}%`;
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = 0;
+    slider.max = 200;
+    slider.value = vol;
+    slider.addEventListener("input", () => {
+      setPeerVolume(uid, slider.value);
+      title.textContent = `Volume para você · ${slider.value}%`;
+    });
+    volume.append(title, slider);
+    items.push({ separator: true }, { control: volume });
     items.push({
       label: isLocallyMuted(uid) ? "Ouvir novamente" : "Silenciar para mim",
-      icon: "🔕",
+      icon: "bell-off",
       hint: "só neste aparelho",
       onSelect: () => toggleLocalMute(uid),
     });
@@ -130,7 +323,7 @@ function openVoiceUserMenu(e, uid) {
 
   // Moderação (só em canais de servidor e com a permissão correspondente).
   const srv = serverOfVoiceChannel(user.voice_channel_id);
-  if (srv) {
+  if (srv && !isSelf) {
     const perms = getServerPermissionsFor(srv, state.selfUser?.username);
     const act = (action, extra = {}) =>
       sendWs("ModerateVoice", { server_id: srv.id, target_username: user.username, action, ...extra });

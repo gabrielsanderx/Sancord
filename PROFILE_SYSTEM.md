@@ -209,7 +209,7 @@ A revisão corrigiu duas regressões no cartão existente. Os campos de aparênc
 - Em **Configurações → Perfil → Minha Coleção**, os cosméticos possuídos aparecem agrupados por conjunto, com filtros de categoria, coleção e favoritos. **Equipado** indica o visual ativo da conta. **Novo** indica um item que ainda não foi visto na coleção. Abra sua prévia ou escolha **Marcar todos como vistos** para registrar a visualização.
 - A estrela alterna o favorito da conta. Selecionar um item abre a prévia. **Usar no editor** seleciona aquele item para o próximo salvamento do perfil.
 - **Salvar visual como preset** guarda os cosméticos, o tema e as cores do nome presentes no editor. É possível guardar até 12 combinações com nomes distintos, aplicar cada uma em um clique ou excluir uma combinação.
-- **Surpreenda-me** monta uma combinação só com itens possuídos e mantém as cores do editor. A prévia usa as camadas de nome, efeito, decoração, moldura e placa do próprio perfil. **Aplicar combinação** envia o visual escolhido para validação.
+- **Surpreenda-me** monta uma combinação de itens possuídos e sugere uma paleta. A prévia mostra as camadas de nome, efeito, decoração, moldura e placa. **Usar no editor** prepara o rascunho. **Salvar perfil** envia o visual para validação.
 - Favoritos, itens vistos e presets são particulares, persistidos no JSON da conta em SQLite e sincronizados entre as sessões da conta. O servidor valida todos os cosméticos e as cores antes de gravar o visual. Se o acesso a algum item tiver mudado, o visual anterior é preservado. Bio, presença, nome de exibição e mídia ficam fora dos presets.
 
 ## Polimento e acessibilidade (Fase 8)
@@ -243,3 +243,22 @@ Após simular perda de foco, o ensaio confirmou zero GIFs originais e zero área
 - Gradiente Personalizado usa duas cores e quatro direções. `name_color` mantém a primeira cor. `name_color_secondary` e `name_gradient_direction` são campos opcionais no JSON da conta e em `UpdateProfile`. A cor secundária aceita hex de seis dígitos, a direção passa por lista fechada e a ausência mantém o valor anterior. As mudanças de nome são sincronizadas também entre sessões da mesma conta. Sem migração de SQLite.
 - Animações de nome e das três placas com reflexo são breves e acionadas ao passar o mouse ou focar os controles relevantes. A configuração de movimento e as preferências do Windows desativam essas animações. O gradiente combina as cores escolhidas com a cor legível do contexto e o alto contraste usa a cor do sistema.
 - Em **Configurações → Aparência**, a opção **Exibir estilos de nomes personalizados** pode ser desligada neste aparelho. Apelidos, identificadores, cores de cargo e selos permanecem disponíveis. A prévia do editor continua reproduzindo o rascunho.
+
+## Refatoração visual de perfis desktop
+
+O cartão rápido se ancora ao membro ou autor, limita sua posição à janela e usa um banner de ponta a ponta. O avatar sobrepõe a faixa na esquerda. A identidade, a bio, os cargos e os links usam a mesma hierarquia na prévia. O perfil completo mantém as abas, ações sociais e o mural.
+
+`static/js/profile-card.js` concentra as receitas versionadas de arte, o avatar decorado e a identidade reutilizada no cartão rápido, perfil completo, editor, seletores e perfil por servidor. SVG embutido fornece os planos anterior e posterior da decoração. A moldura mantém cantos e acentos próprios em CSS, com composição ampliada no perfil completo. Os efeitos independentes podem ser reproduzidos no seletor e no editor. A primeira abertura autorizada pode tocar o efeito, e atualizar o conteúdo preserva o estado de reprodução.
+
+| Coleção | Decoração | Moldura | Efeito |
+|---|---|---|---|
+| Sancord Core | `core-orbit` | `core-pulse` | `core-signal` |
+| Cosmic | `galaxy-portal` | `cosmic-drift` | `star-trail` |
+| Sakura | `sakura-glow` | `sakura-wind` | `petal-drift` |
+
+- **Perfis → Perfil global** tem prévia de cartão, perfil completo, chat, membros, DM e painel inferior. O seletor de tema afeta somente essa prévia. As amostras de fontes e efeitos usam o nome e as cores do rascunho.
+- **Perfis por servidor** compara a aparência efetiva com o perfil principal e mostra as mudanças do formulário antes de salvar. Campos limpos voltam à herança global. Imagens pendentes utilizam URLs temporários que são liberados ao fechar o formulário.
+- **Aparência** permite interromper separadamente o movimento de decoração, moldura e nome. As preferências globais de movimento e a opção do Windows continuam tendo prioridade. O orçamento continua em uma superfície cosmética ativa e dois GIFs originais. A arte de referência é embutida no executável e os anexos preservam o cache existente.
+- O mural mantém o marco de comunidade criada após transferência de posse. Para contas antigas, o servidor recupera a autoria quando o convite de origem está disponível. A contagem de mensagens do mural usa o índice SQLite do esquema 20, fora do lock do estado, com limite de 500.
+
+Para reproduzir o ensaio desktop, compile `SancordApp` e execute `node scripts/profile-motion-qa.mjs --art` na raiz. Defina `SANCORD_QA_EXE` se o executável estiver fora de `target/debug`. As imagens são gravadas em `qa-profile-redesign` por padrão. `SANCORD_QA_SCREENSHOTS` permite escolher outra pasta. A execução usa perfis sintéticos e dados temporários do WebView2.

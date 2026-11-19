@@ -92,7 +92,102 @@ fn display_of(st: &ServerState, lower: &str) -> String {
         .unwrap_or_else(|| lower.to_string())
 }
 
+async fn send_profile(user_id: &str, username: String, server_id: Option<String>, state: &SharedState) {
+    let target = username.trim().to_lowercase();
+    let db = {
+        let st = state.read().await;
+        let Some(me) = me_lower(&st, user_id) else { return };
+        (crate::profile_sharing::access(&st, &me, &target).board
+            && crate::profile_board::needs_message_count(&st, &me, &target)).then(|| st.db.clone())
+    };
+    let message_count = if let Some(db) = db {
+        let author = target.clone();
+        // A consulta usa o índice de autor e nunca mantém o lock do estado.
+        tokio::task::spawn_blocking(move || db.count_messages_by_author(&author)).await
+            .ok().and_then(Result::ok).unwrap_or_default()
+    } else { 0 };
+    let st = state.read().await;
+    let Some(me) = me_lower(&st, user_id) else { return };
+    let Some(user) = st.resolve_friend_info(&target) else {
+        st.feedback(user_id, false, "user_profile", "Usuário não encontrado.");
+        return;
+    };
+    let fs = &st.friends_store;
+    let relationship = if target == me {
+        "self"
+    } else if fs.has_blocked(&me, &target) {
+        "blocked"
+    } else if fs.are_friends(&me, &target) {
+        "friend"
+    } else if fs.incoming_requests.get(&me).is_some_and(|l| l.contains(&target)) {
+        "incoming"
+    } else if fs.outgoing_requests.get(&me).is_some_and(|l| l.contains(&target)) {
+        "outgoing"
+    } else {
+        "none"
+    };
+    let scope = crate::profile_sharing::access(&st, &me, &target);
+    let (mutual_servers, mutual_friends) = if target == me || !scope.details {
+        (Vec::new(), Vec::new())
+    } else {
+        let servers: Vec<_> = st
+            .servers
+            .iter()
+            .filter(|s| s.id != "sancord" && s.is_member(&me) && s.is_member(&target))
+            .map(|s| MutualServer {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                icon_url: s.icon_url.clone(),
+                icon_color: s.icon_color.clone(),
+            })
+            .collect();
+        let friends = fs
+            .friends
+            .get(&me)
+            .map(|l| {
+                l.iter()
+                    .filter(|f| fs.are_friends(f, &target))
+                    .filter_map(|f| st.resolve_friend_info(f))
+                    .collect()
+            })
+            .unwrap_or_default();
+        (servers, friends)
+    };
+    // Só revela a data de entrada num servidor do qual quem pergunta também é membro.
+    let joined_server_at = server_id.as_deref().filter(|_| scope.details).and_then(|sid| {
+        st.find_server(sid)
+            .filter(|s| s.is_member(&me) && s.is_member(&target))
+            .and_then(|s| s.member_joined_at.get(&target).copied())
+    });
+    let badges: Vec<_> = user.profile.badges.iter().filter(|badge| {
+        scope.badges || crate::cosmetics::badge(badge).is_some_and(|def| def.category == "trust")
+    }).cloned().collect();
+    let board = scope.board.then(|| crate::profile_board::view(&st, &me, &target, !mutual_servers.is_empty(), &badges, message_count)).flatten();
+    let links = crate::profile_sharing::public_links(&st, &target, scope);
+    st.send_to(
+        user_id,
+        ServerMessage::UserProfile {
+            user,
+            details_visible: scope.details,
+            activity_visible: scope.activity,
+            bio_visible: scope.bio,
+            banner_visible: scope.banner,
+            links,
+            board,
+            relationship: relationship.to_string(),
+            mutual_servers,
+            mutual_friends,
+            joined_server_at,
+            server_id,
+        },
+    );
+}
+
 pub(crate) async fn handle(user_id: &str, msg: ClientMessage, state: &SharedState) {
+    if let ClientMessage::GetUserProfile { username, server_id } = msg {
+        send_profile(user_id, username, server_id, state).await;
+        return;
+    }
     let mut st = state.write().await;
     let Some(me) = me_lower(&st, user_id) else {
         return;
@@ -316,83 +411,6 @@ pub(crate) async fn handle(user_id: &str, msg: ClientMessage, state: &SharedStat
             }
             st.enforce_voice_access();
             sync_all(&st, &g.members);
-        }
-
-        ClientMessage::GetUserProfile { username, server_id } => {
-            let target = username.trim().to_lowercase();
-            let Some(user) = st.resolve_friend_info(&target) else {
-                st.feedback(user_id, false, "user_profile", "Usuário não encontrado.");
-                return;
-            };
-            let fs = &st.friends_store;
-            let relationship = if target == me {
-                "self"
-            } else if fs.has_blocked(&me, &target) {
-                "blocked"
-            } else if fs.are_friends(&me, &target) {
-                "friend"
-            } else if fs.incoming_requests.get(&me).is_some_and(|l| l.contains(&target)) {
-                "incoming"
-            } else if fs.outgoing_requests.get(&me).is_some_and(|l| l.contains(&target)) {
-                "outgoing"
-            } else {
-                "none"
-            };
-            let scope = crate::profile_sharing::access(&st, &me, &target);
-            let (mutual_servers, mutual_friends) = if target == me || !scope.details {
-                (Vec::new(), Vec::new())
-            } else {
-                let servers: Vec<_> = st
-                    .servers
-                    .iter()
-                    .filter(|s| s.id != "sancord" && s.is_member(&me) && s.is_member(&target))
-                    .map(|s| MutualServer {
-                        id: s.id.clone(),
-                        name: s.name.clone(),
-                        icon_url: s.icon_url.clone(),
-                        icon_color: s.icon_color.clone(),
-                    })
-                    .collect();
-                let friends = fs
-                    .friends
-                    .get(&me)
-                    .map(|l| {
-                        l.iter()
-                            .filter(|f| fs.are_friends(f, &target))
-                            .filter_map(|f| st.resolve_friend_info(f))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                (servers, friends)
-            };
-            // Só revela a data de entrada num servidor do qual quem pergunta também é membro.
-            let joined_server_at = server_id.as_deref().filter(|_| scope.details).and_then(|sid| {
-                st.find_server(sid)
-                    .filter(|s| s.is_member(&me) && s.is_member(&target))
-                    .and_then(|s| s.member_joined_at.get(&target).copied())
-            });
-            let badges: Vec<_> = user.profile.badges.iter().filter(|badge| {
-                scope.badges || crate::cosmetics::badge(badge).is_some_and(|def| def.category == "trust")
-            }).cloned().collect();
-            let board = scope.board.then(|| crate::profile_board::view(&st, &me, &target, !mutual_servers.is_empty(), &badges)).flatten();
-            let links = crate::profile_sharing::public_links(&st, &target, scope);
-            st.send_to(
-                user_id,
-                ServerMessage::UserProfile {
-                    user,
-                    details_visible: scope.details,
-                    activity_visible: scope.activity,
-                    bio_visible: scope.bio,
-                    banner_visible: scope.banner,
-                    links,
-                    board,
-                    relationship: relationship.to_string(),
-                    mutual_servers,
-                    mutual_friends,
-                    joined_server_at,
-                    server_id,
-                },
-            );
         }
 
         ClientMessage::ReportUser { username, reason, message_id } => {

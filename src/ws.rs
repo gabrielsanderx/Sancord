@@ -606,6 +606,7 @@ async fn join_authenticated(user_id: &str, mut acc: Account, state: &SharedState
             let read_states = st.read_states_for(&account_id, &final_lower);
 
             let welcome = ServerMessage::Welcome {
+                composer_capabilities: vec!["media_v1".into(), "scheduling_v1".into()],
                 user: user_info.clone(),
                 text_channels: st.text_channels.clone(),
                 voice_channels: st.voice_channels.clone(),
@@ -727,6 +728,322 @@ pub(crate) fn mutate_message(
     };
     st.persist_message(&updated);
     Some(updated)
+}
+
+async fn send_chat_message(
+    user_id: &str,
+    message: ClientMessage,
+    state: &SharedState,
+    scheduled_id: Option<&str>,
+) -> Result<(), String> {
+    let ClientMessage::SendChat {
+        channel_id,
+        content,
+        image_url,
+        reply_to_id,
+        nonce,
+        attachment_ids,
+        poll,
+        reply_mention,
+        forward,
+    } = message else { return Ok(()) };
+    let nonce: Option<String> = nonce.map(|n| n.chars().take(64).collect());
+    // Mensagem respondida pode estar fora do cache: busca antes de travar o estado.
+    // Encaminhar não é responder: com `forward`, a resposta é ignorada.
+    let reply_target = match (&reply_to_id, &forward) {
+        (Some(rid), None) => fetch_message_for_mutation(state, &channel_id, rid).await,
+        _ => None,
+    };
+    let forward_source = match &forward {
+        Some(f) => fetch_message_for_mutation(state, &f.channel_id, &f.message_id).await,
+        None => None,
+    };
+    let trimmed = content.trim();
+    let image_url = image_url.filter(|s| !s.is_empty());
+    if let Some(img) = &image_url {
+        if let Err(e) = validate_image_data_url(img, MAX_CHAT_IMAGE_BYTES) {
+            return Err(e.user_message().to_string());
+        }
+    }
+    let valid_img = image_url.is_some();
+
+    // Enquete (Fase 8): validada antes de qualquer outra coisa; a pergunta vira o texto.
+    let poll = match poll {
+        Some(input) => match crate::community::build_poll(input, crate::auth::now_ms()) {
+            Ok(p) => Some(p),
+            Err(msg) => {
+                return Err(msg.to_string());
+            }
+        },
+        None => None,
+    };
+    let trimmed = if trimmed.is_empty() { poll.as_ref().map(|p| p.question.as_str()).unwrap_or("") } else { trimmed };
+
+    if trimmed.is_empty() && !valid_img && attachment_ids.is_empty() && forward.is_none() {
+        return Ok(());
+    }
+
+    let mut st = state.write().await;
+    let (author_id, username, avatar_color, avatar_url) = if let Some(id) = scheduled_id {
+        let Some(job) = st.scheduled_messages.get(id).filter(|job| job.error.is_none()) else { return Ok(()) };
+        let Some(account) = st.account_by_id(&job.account_id) else {
+            return Err("A conta que agendou esta mensagem foi removida.".into());
+        };
+        (account.id.clone(), account.username.clone(), account.avatar_color.clone(), account.avatar_url.clone())
+    } else {
+        let Some(user) = st.users.get(user_id) else { return Ok(()) };
+        (user.id.clone(), user.username.clone(), user.avatar_color.clone(), user.avatar_url.clone())
+    };
+    let me_lower = username.to_lowercase();
+    if !st.rates.entry(author_id.clone()).or_default().allow_message(crate::auth::now_ms()) {
+        return Err("Você está enviando mensagens rápido demais. Aguarde um instante.".into());
+    }
+    if attachment_ids.len() > MAX_ATTACHMENTS_PER_MESSAGE {
+        return Err("No máximo 10 anexos por mensagem.".into());
+    }
+    let mut attachments = Vec::new();
+    for id in &attachment_ids {
+        match st.attachments.get(id) {
+            Some(rec) if !attachments.iter().any(|a: &crate::models::Attachment| &a.id == id) => {
+                attachments.push(rec.to_public())
+            }
+            Some(_) => {}
+            None => {
+                return Err("Um dos anexos não foi encontrado. Envie o arquivo novamente.".into());
+            }
+        }
+    }
+    // Encaminhar (Etapa C2): cópia congelada, só de mensagem que a pessoa pode ler.
+    let forward_snapshot = match &forward {
+        None => None,
+        Some(req) => {
+            if poll.is_some() {
+                return Err("Não é possível encaminhar junto com uma enquete.".into());
+            }
+            let Some(src) = forward_source.as_ref().filter(|m| m.channel_id == req.channel_id) else {
+                return Err("A mensagem que você quer encaminhar não existe mais.".into());
+            };
+            if !st.can_read_text_channel(&me_lower, &req.channel_id) {
+                return Err("Você não tem acesso à mensagem que quer encaminhar.".into());
+            }
+            if src.poll.is_some() {
+                return Err("Enquetes não podem ser encaminhadas.".into());
+            }
+            // Reencaminhar mantém a cópia original (sem encaminhamento dentro de encaminhamento).
+            let snapshot = src.forward.clone().unwrap_or_else(|| crate::models::ForwardSnapshot {
+                source_channel_id: src.channel_id.clone(),
+                source_message_id: src.id.clone(),
+                source_label: forward_label(&st, &src.channel_id),
+                original_created_at: src.created_at,
+                content: src.content.clone(),
+                attachments: src.attachments.clone(),
+                embeds: src.embeds.clone(),
+            });
+            if snapshot.content.trim().is_empty() && snapshot.attachments.is_empty() && snapshot.embeds.is_empty() {
+                return Err("Esta mensagem não pode ser encaminhada.".into());
+            }
+            Some(snapshot)
+        }
+    };
+    let has_files = valid_img || !attachments.is_empty() || forward_snapshot.as_ref().is_some_and(|f| !f.attachments.is_empty());
+    let is_dm = ServerState::is_private_text(&channel_id);
+    let mut target_server_id: Option<String> = None;
+    // Canal com modo lento: registra o envio só depois de a mensagem ser aceita.
+    let mut slowmode_key: Option<(String, String)> = None;
+    // DM 1:1: o outro participante e se a mensagem vira solicitação para ele.
+    let mut dm_peer: Option<(String, bool)> = None;
+    if is_dm {
+        if !st.is_private_participant(&channel_id, &me_lower) {
+            return Err("Você não participa desta conversa.".into());
+        }
+        if let Some((a, b)) = ServerState::parse_dm_participants(&channel_id) {
+            let peer = if a == me_lower { b } else { a };
+            match st.dm_delivery(&me_lower, &peer, &channel_id) {
+                Ok(is_request) => dm_peer = Some((peer, is_request)),
+                Err(msg) => {
+                    return Err(msg.to_string());
+                }
+            }
+        }
+    } else {
+        let Some(srv) = st.find_server_by_text_channel(&channel_id) else {
+            return Err("Este canal não existe mais.".into());
+        };
+        if !srv.is_member(&me_lower) {
+            return Err("Você não é membro deste servidor.".into());
+        }
+        let perms = srv.channel_permissions(&me_lower, &channel_id);
+        if !perms.view_channel { return Err("Você não tem acesso a este canal.".into()); }
+        if !perms.send_messages {
+            // Castigo tem aviso próprio, com o tempo restante (independe do fuso).
+            let now = crate::auth::now_ms();
+            if let Some(until) = srv.timeout_until(&me_lower, now) {
+                return Err((&format!("Você está de castigo neste servidor por mais {}.", crate::timeouts::describe_remaining(until - now))).to_string());
+            }
+            return Err("Você não tem permissão para enviar mensagens neste servidor.".into());
+        }
+        if has_files && !perms.attach_files {
+            return Err("Seu cargo não possui permissão para enviar imagens/anexos.".into());
+        }
+        if srv.find_channel(&channel_id).is_some_and(|c| !c.kind.accepts_messages()) {
+            return Err("Neste fórum, publique criando uma postagem.".into());
+        }
+        let is_announcement = srv
+            .find_channel(&channel_id)
+            .is_some_and(|c| c.kind == ChannelKind::Announcement);
+        if is_announcement && !(perms.manage_messages || perms.administrator) {
+            return Err("Somente moderadores podem publicar em canais de anúncios.".into());
+        }
+        if is_announcement && forward_snapshot.is_some() {
+            return Err("Não é possível encaminhar para canais de anúncios.".into());
+        }
+        // Modo lento: quem gerencia mensagens ou canais não espera.
+        let slow = srv.slowmode_for(&channel_id);
+        if slow > 0 && !(perms.manage_messages || perms.manage_channels || perms.administrator) {
+            let key = (channel_id.clone(), me_lower.clone());
+            let now = crate::auth::now_ms();
+            if let Some(wait) = crate::slowmode::remaining(st.slowmode_last.get(&key).copied(), slow, now) {
+                return Err((&format!("Modo lento: aguarde {} para enviar de novo neste canal.", crate::slowmode::describe_wait(wait))).to_string());
+            }
+            slowmode_key = Some(key);
+        }
+        target_server_id = Some(srv.id.clone());
+    }
+
+    let reply_to = reply_target.as_ref().filter(|t| t.channel_id == channel_id).map(|target| {
+        let preview_src = if !target.content.is_empty() {
+            target.content.chars().take(70).collect()
+        } else if !target.attachments.is_empty() {
+            format!("[{} anexo(s)]", target.attachments.len())
+        } else {
+            "[Imagem]".to_string()
+        };
+        ReplyRef {
+            id: target.id.clone(),
+            author_name: target.author_name.clone(),
+            preview: preview_src,
+            mention: reply_mention,
+        }
+    });
+    let content: String = trimmed.chars().take(2000).collect();
+    // Emojis de servidor: só os que o autor pode usar continuam como imagem.
+    let content: String = crate::emojis::normalize_content(&st, &me_lower, &content).chars().take(2000).collect();
+    // Resposta sem menção: o autor original não é notificado (salvo um @ explícito no texto).
+    let reply_author_lower = reply_target
+        .as_ref()
+        .filter(|t| t.author_id != "system" && reply_mention)
+        .map(|t| t.author_name.to_lowercase());
+    let mentions = compute_mentions(&st, &channel_id, &content, &me_lower, reply_author_lower.as_deref());
+
+    // AutoMod (Fase 8): aplicado no servidor, antes de gravar ou distribuir.
+    if let Some(srv_id) = target_server_id.clone() {
+        let mut checked = match &poll {
+            Some(p) => format!("{content} {}", crate::community::poll_text(p)),
+            None => content.clone(),
+        };
+        // O conteúdo encaminhado também passa pelas regras do servidor de destino.
+        if let Some(f) = &forward_snapshot {
+            checked = format!("{checked} {}", f.content);
+        }
+        if let Err((rule, reason)) = crate::moderation::check_message(&mut st, &srv_id, &me_lower, &checked, &mentions) {
+                        crate::moderation::report_violation(&mut st, &srv_id, &me_lower, &channel_id, rule, &content);
+            return Err(reason.to_string());
+        }
+    }
+
+    let chat_msg = ChatMessage {
+        id: scheduled_id.map(str::to_owned).unwrap_or_else(|| Uuid::new_v4().to_string()),
+        channel_id: channel_id.clone(),
+        author_id: author_id.clone(),
+        author_name: username,
+        author_color: avatar_color,
+        author_avatar: avatar_url,
+        content,
+        image_url,
+        reply_to,
+        reactions: std::collections::HashMap::new(),
+        edited: false,
+        pinned: false,
+        timestamp: Local::now().format("%H:%M").to_string(),
+        created_at: st.next_message_ts(),
+        nonce: nonce.clone(),
+        attachments,
+        mentions,
+        poll,
+        author_kind: crate::models::AuthorKind::User,
+        embeds: Vec::new(),
+        forward: forward_snapshot,
+    };
+
+    // Estado social antes de contar menções: solicitações não notificam.
+    if let Some((peer, is_request)) = &dm_peer {
+        use crate::models::FriendsStore as Fs;
+        let fs = &mut st.friends_store;
+        Fs::push_unique(&mut fs.open_dms, &me_lower, &channel_id);
+        // Responder a uma solicitação recebida equivale a aceitá-la.
+        Fs::remove_from(&mut fs.dm_requests, &me_lower, &channel_id);
+        Fs::remove_from(&mut fs.ignored_dms, &me_lower, &channel_id);
+        if *is_request {
+            // Se ele ignorou, a conversa continua oculta e silenciosa.
+            if !fs.is_ignored(peer, &channel_id) {
+                Fs::push_unique(&mut fs.dm_requests, peer, &channel_id);
+            }
+        } else {
+            Fs::push_unique(&mut fs.open_dms, peer, &channel_id);
+        }
+        st.save_friends();
+    }
+
+    // Persiste (fila do banco) e mantém só as recentes no cache.
+    // Antes, o histórico era truncado em 200 e as antigas eram perdidas.
+    if let Some(id) = scheduled_id {
+        st.publish_scheduled_message(id.to_string(), chat_msg.clone());
+        crate::scheduled::notify_account(&st, &author_id);
+    } else {
+        st.insert_message(chat_msg.clone());
+    }
+    if let Some(key) = slowmode_key {
+        st.slowmode_last.insert(key, crate::auth::now_ms());
+    }
+    if !is_dm {
+        // Thread: atividade, contador e desarquivar (no-op para canais comuns).
+        crate::threads::on_message(&mut st, &channel_id, chat_msg.created_at, Some(&me_lower));
+    }
+    // Menções pendentes para os destinatários; o autor já leu a própria mensagem.
+    st.bump_mentions(&channel_id, &me_lower, &chat_msg.mentions);
+    if let Some(acc) = st.account_id_for(&me_lower) {
+        st.mark_read(&acc, &channel_id, chat_msg.created_at);
+    }
+
+    // Prévias de links: em segundo plano, chegam como atualização da mensagem.
+    crate::link_preview::spawn_for_message(state.clone(), &chat_msg);
+    if is_dm {
+        st.send_to_dm_participants(&channel_id, ServerMessage::NewChatMessage { message: chat_msg });
+        if let Some((peer, _)) = &dm_peer {
+            // Lista de DMs/solicitações dos dois lados (pré-visualização e classificação).
+            st.send_friends_sync_to_username(&me_lower);
+            st.send_friends_sync_to_username(peer);
+        }
+    } else if let Some(srv_id) = target_server_id {
+        st.broadcast_to_server(&srv_id, ServerMessage::NewChatMessage { message: chat_msg });
+    }
+    Ok(())
+}
+
+pub(crate) async fn deliver_scheduled(state: &SharedState, id: &str) -> Result<(), String> {
+    let Some(job) = state.read().await.scheduled_messages.get(id).cloned() else { return Ok(()) };
+    let message = ClientMessage::SendChat {
+        channel_id: job.channel_id,
+        content: job.content,
+        image_url: None,
+        reply_to_id: None,
+        nonce: None,
+        attachment_ids: Vec::new(),
+        poll: None,
+        reply_mention: false,
+        forward: None,
+    };
+    send_chat_message("", message, state, Some(id)).await
 }
 
 async fn process_client_message(user_id: &str, msg: ClientMessage, state: &SharedState) {
@@ -1170,317 +1487,16 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             st.broadcast_friends_sync_all();
         }
 
-        ClientMessage::SendChat {
-            channel_id,
-            content,
-            image_url,
-            reply_to_id,
-            nonce,
-            attachment_ids,
-            poll,
-            reply_mention,
-            forward,
-        } => {
-            let nonce: Option<String> = nonce.map(|n| n.chars().take(64).collect());
-            // Mensagem respondida pode estar fora do cache: busca antes de travar o estado.
-            // Encaminhar não é responder: com `forward`, a resposta é ignorada.
-            let reply_target = match (&reply_to_id, &forward) {
-                (Some(rid), None) => fetch_message_for_mutation(state, &channel_id, rid).await,
-                _ => None,
-            };
-            let forward_source = match &forward {
-                Some(f) => fetch_message_for_mutation(state, &f.channel_id, &f.message_id).await,
-                None => None,
-            };
-            let fail = |st: &ServerState, message: &str| {
-                st.send_to(
-                    user_id,
-                    ServerMessage::SendFailed {
-                        nonce: nonce.clone(),
-                        channel_id: channel_id.clone(),
-                        message: message.to_string(),
-                    },
-                );
-            };
-            let trimmed = content.trim();
-            let image_url = image_url.filter(|s| !s.is_empty());
-            if let Some(img) = &image_url {
-                if let Err(e) = validate_image_data_url(img, MAX_CHAT_IMAGE_BYTES) {
-                    fail(&*state.read().await, e.user_message());
-                    return;
-                }
+        chat @ ClientMessage::SendChat { .. } => {
+            let ClientMessage::SendChat { channel_id, nonce, .. } = &chat else { return };
+            let channel_id = channel_id.clone();
+            let nonce = nonce.as_ref().map(|value| value.chars().take(64).collect());
+            if let Err(message) = send_chat_message(user_id, chat, state, None).await {
+                state.read().await.send_to(user_id, ServerMessage::SendFailed { channel_id, nonce, message });
             }
-            let valid_img = image_url.is_some();
-
-            // Enquete (Fase 8): validada antes de qualquer outra coisa; a pergunta vira o texto.
-            let poll = match poll {
-                Some(input) => match crate::community::build_poll(input, crate::auth::now_ms()) {
-                    Ok(p) => Some(p),
-                    Err(msg) => {
-                        fail(&*state.read().await, msg);
-                        return;
-                    }
-                },
-                None => None,
-            };
-            let trimmed = if trimmed.is_empty() { poll.as_ref().map(|p| p.question.as_str()).unwrap_or("") } else { trimmed };
-
-            if trimmed.is_empty() && !valid_img && attachment_ids.is_empty() && forward.is_none() {
-                return;
-            }
-
-            let mut st = state.write().await;
-            let Some(user) = st.users.get(user_id).cloned() else {
-                return;
-            };
-            let me_lower = user.username.to_lowercase();
-            if !st.rates.entry(user_id.to_string()).or_default().allow_message(crate::auth::now_ms()) {
-                fail(&st, "Você está enviando mensagens rápido demais. Aguarde um instante.");
-                return;
-            }
-            if attachment_ids.len() > MAX_ATTACHMENTS_PER_MESSAGE {
-                fail(&st, "No máximo 10 anexos por mensagem.");
-                return;
-            }
-            let mut attachments = Vec::new();
-            for id in &attachment_ids {
-                match st.attachments.get(id) {
-                    Some(rec) if !attachments.iter().any(|a: &crate::models::Attachment| &a.id == id) => {
-                        attachments.push(rec.to_public())
-                    }
-                    Some(_) => {}
-                    None => {
-                        fail(&st, "Um dos anexos não foi encontrado. Envie o arquivo novamente.");
-                        return;
-                    }
-                }
-            }
-            // Encaminhar (Etapa C2): cópia congelada, só de mensagem que a pessoa pode ler.
-            let forward_snapshot = match &forward {
-                None => None,
-                Some(req) => {
-                    if poll.is_some() {
-                        fail(&st, "Não é possível encaminhar junto com uma enquete.");
-                        return;
-                    }
-                    let Some(src) = forward_source.as_ref().filter(|m| m.channel_id == req.channel_id) else {
-                        fail(&st, "A mensagem que você quer encaminhar não existe mais.");
-                        return;
-                    };
-                    if !st.can_read_text_channel(&me_lower, &req.channel_id) {
-                        fail(&st, "Você não tem acesso à mensagem que quer encaminhar.");
-                        return;
-                    }
-                    if src.poll.is_some() {
-                        fail(&st, "Enquetes não podem ser encaminhadas.");
-                        return;
-                    }
-                    // Reencaminhar mantém a cópia original (sem encaminhamento dentro de encaminhamento).
-                    let snapshot = src.forward.clone().unwrap_or_else(|| crate::models::ForwardSnapshot {
-                        source_channel_id: src.channel_id.clone(),
-                        source_message_id: src.id.clone(),
-                        source_label: forward_label(&st, &src.channel_id),
-                        original_created_at: src.created_at,
-                        content: src.content.clone(),
-                        attachments: src.attachments.clone(),
-                        embeds: src.embeds.clone(),
-                    });
-                    if snapshot.content.trim().is_empty() && snapshot.attachments.is_empty() && snapshot.embeds.is_empty() {
-                        fail(&st, "Esta mensagem não pode ser encaminhada.");
-                        return;
-                    }
-                    Some(snapshot)
-                }
-            };
-            let has_files = valid_img || !attachments.is_empty() || forward_snapshot.as_ref().is_some_and(|f| !f.attachments.is_empty());
-            let is_dm = ServerState::is_private_text(&channel_id);
-            let mut target_server_id: Option<String> = None;
-            // Canal com modo lento: registra o envio só depois de a mensagem ser aceita.
-            let mut slowmode_key: Option<(String, String)> = None;
-            // DM 1:1: o outro participante e se a mensagem vira solicitação para ele.
-            let mut dm_peer: Option<(String, bool)> = None;
-            if is_dm {
-                if !st.is_private_participant(&channel_id, &me_lower) {
-                    fail(&st, "Você não participa desta conversa.");
-                    return;
-                }
-                if let Some((a, b)) = ServerState::parse_dm_participants(&channel_id) {
-                    let peer = if a == me_lower { b } else { a };
-                    match st.dm_delivery(&me_lower, &peer, &channel_id) {
-                        Ok(is_request) => dm_peer = Some((peer, is_request)),
-                        Err(msg) => {
-                            fail(&st, msg);
-                            return;
-                        }
-                    }
-                }
-            } else {
-                let Some(srv) = st.find_server_by_text_channel(&channel_id) else {
-                    fail(&st, "Este canal não existe mais.");
-                    return;
-                };
-                if !srv.is_member(&me_lower) {
-                    fail(&st, "Você não é membro deste servidor.");
-                    return;
-                }
-                let perms = srv.channel_permissions(&me_lower, &channel_id);
-                if !perms.view_channel { fail(&st, "Você não tem acesso a este canal."); return; }
-                if !perms.send_messages {
-                    // Castigo tem aviso próprio, com o tempo restante (independe do fuso).
-                    let now = crate::auth::now_ms();
-                    if let Some(until) = srv.timeout_until(&me_lower, now) {
-                        fail(&st, &format!("Você está de castigo neste servidor por mais {}.", crate::timeouts::describe_remaining(until - now)));
-                        return;
-                    }
-                    fail(&st, "Você não tem permissão para enviar mensagens neste servidor.");
-                    return;
-                }
-                if has_files && !perms.attach_files {
-                    fail(&st, "Seu cargo não possui permissão para enviar imagens/anexos.");
-                    return;
-                }
-                if srv.find_channel(&channel_id).is_some_and(|c| !c.kind.accepts_messages()) {
-                    fail(&st, "Neste fórum, publique criando uma postagem.");
-                    return;
-                }
-                let is_announcement = srv
-                    .find_channel(&channel_id)
-                    .is_some_and(|c| c.kind == ChannelKind::Announcement);
-                if is_announcement && !(perms.manage_messages || perms.administrator) {
-                    fail(&st, "Somente moderadores podem publicar em canais de anúncios.");
-                    return;
-                }
-                if is_announcement && forward_snapshot.is_some() {
-                    fail(&st, "Não é possível encaminhar para canais de anúncios.");
-                    return;
-                }
-                // Modo lento: quem gerencia mensagens ou canais não espera.
-                let slow = srv.slowmode_for(&channel_id);
-                if slow > 0 && !(perms.manage_messages || perms.manage_channels || perms.administrator) {
-                    let key = (channel_id.clone(), me_lower.clone());
-                    let now = crate::auth::now_ms();
-                    if let Some(wait) = crate::slowmode::remaining(st.slowmode_last.get(&key).copied(), slow, now) {
-                        fail(&st, &format!("Modo lento: aguarde {} para enviar de novo neste canal.", crate::slowmode::describe_wait(wait)));
-                        return;
-                    }
-                    slowmode_key = Some(key);
-                }
-                target_server_id = Some(srv.id.clone());
-            }
-
-            let reply_to = reply_target.as_ref().filter(|t| t.channel_id == channel_id).map(|target| {
-                let preview_src = if !target.content.is_empty() {
-                    target.content.chars().take(70).collect()
-                } else if !target.attachments.is_empty() {
-                    format!("[{} anexo(s)]", target.attachments.len())
-                } else {
-                    "[Imagem]".to_string()
-                };
-                ReplyRef {
-                    id: target.id.clone(),
-                    author_name: target.author_name.clone(),
-                    preview: preview_src,
-                    mention: reply_mention,
-                }
-            });
-            let content: String = trimmed.chars().take(2000).collect();
-            // Emojis de servidor: só os que o autor pode usar continuam como imagem.
-            let content: String = crate::emojis::normalize_content(&st, &me_lower, &content).chars().take(2000).collect();
-            // Resposta sem menção: o autor original não é notificado (salvo um @ explícito no texto).
-            let reply_author_lower = reply_target
-                .as_ref()
-                .filter(|t| t.author_id != "system" && reply_mention)
-                .map(|t| t.author_name.to_lowercase());
-            let mentions = compute_mentions(&st, &channel_id, &content, &me_lower, reply_author_lower.as_deref());
-
-            // AutoMod (Fase 8): aplicado no servidor, antes de gravar ou distribuir.
-            if let Some(srv_id) = target_server_id.clone() {
-                let mut checked = match &poll {
-                    Some(p) => format!("{content} {}", crate::community::poll_text(p)),
-                    None => content.clone(),
-                };
-                // O conteúdo encaminhado também passa pelas regras do servidor de destino.
-                if let Some(f) = &forward_snapshot {
-                    checked = format!("{checked} {}", f.content);
-                }
-                if let Err((rule, reason)) = crate::moderation::check_message(&mut st, &srv_id, &me_lower, &checked, &mentions) {
-                    fail(&st, reason);
-                    crate::moderation::report_violation(&mut st, &srv_id, &me_lower, &channel_id, rule, &content);
-                    return;
-                }
-            }
-
-            let chat_msg = ChatMessage {
-                id: Uuid::new_v4().to_string(),
-                channel_id: channel_id.clone(),
-                author_id: user.id.clone(),
-                author_name: user.username,
-                author_color: user.avatar_color,
-                author_avatar: user.avatar_url,
-                content,
-                image_url,
-                reply_to,
-                reactions: std::collections::HashMap::new(),
-                edited: false,
-                pinned: false,
-                timestamp: Local::now().format("%H:%M").to_string(),
-                created_at: st.next_message_ts(),
-                nonce: nonce.clone(),
-                attachments,
-                mentions,
-                poll,
-                author_kind: crate::models::AuthorKind::User,
-                embeds: Vec::new(),
-                forward: forward_snapshot,
-            };
-
-            // Estado social antes de contar menções: solicitações não notificam.
-            if let Some((peer, is_request)) = &dm_peer {
-                use crate::models::FriendsStore as Fs;
-                let fs = &mut st.friends_store;
-                Fs::push_unique(&mut fs.open_dms, &me_lower, &channel_id);
-                // Responder a uma solicitação recebida equivale a aceitá-la.
-                Fs::remove_from(&mut fs.dm_requests, &me_lower, &channel_id);
-                Fs::remove_from(&mut fs.ignored_dms, &me_lower, &channel_id);
-                if *is_request {
-                    // Se ele ignorou, a conversa continua oculta e silenciosa.
-                    if !fs.is_ignored(peer, &channel_id) {
-                        Fs::push_unique(&mut fs.dm_requests, peer, &channel_id);
-                    }
-                } else {
-                    Fs::push_unique(&mut fs.open_dms, peer, &channel_id);
-                }
-                st.save_friends();
-            }
-
-            // Persiste (fila do banco) e mantém só as recentes no cache.
-            // Antes, o histórico era truncado em 200 e as antigas eram perdidas.
-            st.insert_message(chat_msg.clone());
-            if let Some(key) = slowmode_key {
-                st.slowmode_last.insert(key, crate::auth::now_ms());
-            }
-            if !is_dm {
-                // Thread: atividade, contador e desarquivar (no-op para canais comuns).
-                crate::threads::on_message(&mut st, &channel_id, chat_msg.created_at, Some(&me_lower));
-            }
-            // Menções pendentes para os destinatários; o autor já leu a própria mensagem.
-            st.bump_mentions(&channel_id, &me_lower, &chat_msg.mentions);
-            if let Some(acc) = st.account_id_for(&me_lower) {
-                st.mark_read(&acc, &channel_id, chat_msg.created_at);
-            }
-
-            // Prévias de links: em segundo plano, chegam como atualização da mensagem.
-            crate::link_preview::spawn_for_message(state.clone(), &chat_msg);
-            if is_dm {
-                st.send_to_dm_participants(&channel_id, ServerMessage::NewChatMessage { message: chat_msg });
-                if let Some((peer, _)) = &dm_peer {
-                    // Lista de DMs/solicitações dos dois lados (pré-visualização e classificação).
-                    st.send_friends_sync_to_username(&me_lower);
-                    st.send_friends_sync_to_username(peer);
-                }
-            } else if let Some(srv_id) = target_server_id {
-                st.broadcast_to_server(&srv_id, ServerMessage::NewChatMessage { message: chat_msg });
-            }
+        }
+        job @ (ClientMessage::ListScheduledMessages | ClientMessage::ScheduleMessage { .. } | ClientMessage::CancelScheduledMessage { .. }) => {
+            crate::scheduled::handle(state, user_id, job).await;
         }
 
         ClientMessage::EditChat {
@@ -3056,6 +3072,12 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             st.insert_message(welcome_msg);
             st.servers.push(srv.clone());
             st.save_servers();
+            if let Some(account) = st.accounts.get_mut(&me_lower) {
+                if !account.created_community {
+                    account.created_community = true;
+                    st.save_accounts();
+                }
+            }
             // Convite padrão permanente (gravado depois do servidor por causa da chave estrangeira).
             st.register_invite(Invite {
                 code: srv.invite_code.clone(),

@@ -279,3 +279,21 @@ comprova apenas `c1941fd`, não o commit desta consolidação.
 - O WebView2 confirmou a entrega de uma notificação real do teste de DM. O clique foi simulado e encaminhou o ID correto da mensagem. A permissão foi concedida no perfil temporário de QA.
 - O executável 0.2.3 extraído pelo empacotador abriu os dois cartões, a aba de privacidade e as conexões. O ZIP contém somente o cliente. `cargo check --locked --all-targets` e 344 testes passaram, incluindo o ensaio separado com o pacote oficial assinado.
 - Permanecem pendentes webcam física e um ensaio em redes distintas com TURN provisionado. As regras de prova e visibilidade do GitHub passaram em testes. A verificação ao vivo depende de publicar temporariamente o código na bio de uma conta própria.
+
+## RTC com dispositivos virtuais e TURN local — 19/11/2026
+
+- `scripts/rtc-qa.mjs` abriu duas instâncias do `SancordApp.exe`, autenticou contas descartáveis e entrou na mesma sala de um backend Rust isolado. A sinalização passou pelo WebSocket real. O microfone veio da fonte virtual do WebView2 e a câmera de um Canvas animado com quadros distintos para cada instância.
+- A chamada direta e a chamada com TURN/UDP entregaram áudio e vídeo nos dois sentidos. O ensaio verificou pacotes RTP recebidos, quadros decodificados, quadros apresentados no palco, silêncio na trilha local, retirada do vídeo ao desligar e nova entrada depois de desconectar.
+- O relay de QA foi um Pion TURN v4.1.4 temporário, com autenticação efêmera e tráfego limitado a este computador. A política ICE `relay` foi aplicada somente nas duas instâncias de QA. O par selecionado apresentou candidato `relay` local e remoto em ambos os clientes, e o painel do aplicativo informou TURN. [Implementação Pion TURN](https://github.com/pion/turn) · [Estatísticas WebRTC](https://www.w3.org/TR/webrtc-stats/)
+- As capturas e as medições ficam em `qa-rtc/direto` e `qa-rtc/relay`, pastas ignoradas pelo Git. O processo TURN temporário foi encerrado após o ensaio. A saída do teste descreve tipos de candidato e contadores, sem endereços nem credenciais.
+- A homologação de webcam física ainda precisa cobrir driver e permissões do dispositivo. O vídeo do Canvas verifica o caminho a partir do stream de câmera entregue ao aplicativo.
+
+Depois de compilar `SancordApp` e `sancord`, execute `node scripts/rtc-qa.mjs` na raiz. `SANCORD_QA_BIN_DIR` muda a pasta dos binários e `SANCORD_QA_RTC_PORT` muda a porta do backend descartável. Para repetir em modo relay, configure `SANCORD_QA_TURN_URL`, `SANCORD_QA_TURN_USERNAME` e `SANCORD_QA_TURN_CREDENTIAL` com um relay de teste acessível. O script inicia e encerra somente seus próprios clientes e backend.
+
+## TURN/UDP por dois NATs virtuais isolados — 19/11/2026
+
+- Duas VMs Alpine no QEMU usaram sub-redes e instâncias de NAT separadas, `10.207.31.0/24` e `10.207.32.0/24`. Cada `SancordApp.exe` acessou um encaminhador UDP diferente. Os encaminhadores passaram os datagramas ao mesmo Pion TURN, executado no host Windows, fora das duas VMs. A sinalização WebSocket continuou no backend de QA local. [Rede em modo usuário do QEMU](https://www.qemu.org/docs/master/system/devices/net.html)
+- Os encaminhadores registraram 302 envios e 339 retornos na primeira VM e 342 envios e 302 retornos na segunda. Os dois clientes selecionaram `relay` local e remoto. Ambos receberam áudio e apresentaram quadros novos de vídeo. Silenciar, desligar a câmera, sair e reentrar na chamada também passaram.
+- Os contadores dos encaminhadores estão em `qa-rtc/nats-isolados/redes.json`. As métricas WebRTC e a captura do painel TURN estão em `qa-rtc/nats-isolados/relay`. As VMs, o servidor TURN e o backend temporário foram encerrados.
+- Para repetir o QA com duas rotas isoladas, configure também `SANCORD_QA_TURN_URL_B` com o endereço TURN acessível pela segunda rota. Com essa variável, o primeiro cliente usa `SANCORD_QA_TURN_URL` e o segundo usa `SANCORD_QA_TURN_URL_B`. Os dois usam as mesmas credenciais efêmeras de teste.
+- O ensaio compartilhou um único host físico. A prova externa com dois acessos independentes à internet e um TURN público de homologação continua pendente, incluindo comportamento com CGNAT e bloqueio de UDP.

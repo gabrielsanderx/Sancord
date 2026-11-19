@@ -1,5 +1,15 @@
 # Histórico de versões
 
+## 0.2.4
+
+- Novo ícone do aplicativo Sancord ("Diálogo em S", `icon.ico`, `static/sancord-icon.svg`, `static/logo.png` e pacote de marca em `branding/`).
+- Novo editor visual de perfil em 3 colunas (`static/js/profile-editor.js`): lateral de edição com subeditores (`← Voltar` / `Esc`), prévia completa protagonista ao vivo, menu "Pré-visualizar em", mural recolhível (`Mural` / gaveta lateral em telas menores), responsividade progressiva (1366×768, 1600×900, 1920×1080, 2560×1440 e DPIs 100/125/150%), amostras estáticas para os 19 efeitos de perfil e tokens de espaçamento consolidados.
+- Refatoração do cartão de perfil e mural (`static/js/profile-card.js`, esquema SQLite `v20`), composer aprimorado com stickers, gravação de áudio e mensagens agendadas (`src/scheduled.rs`, `static/js/scheduled.js`, esquema SQLite `v21`) e melhoria de chamadas desktop/WebRTC.
+- Lista lateral de membros refatorada (`static/js/member-list.js`): remoção do cabeçalho global `MEMBROS ONLINE`, agrupamento central sem duplicação por cargos destacados (`hoist`) segundo hierarquia → `Disponível` → `Offline`, cor do nome independente de agrupamento, coroa discreta do proprietário à direita do nome, badge `APP`, linha única de atividade respeitando permissão de canal de voz e atualização realtime otimizada.
+- Permissões de microfone e câmera no WebView2 (`src/bin/desktop_permissions.rs`, `webview2-com = "0.33"`) corrigindo chamadas sem áudio no aplicativo Windows.
+- Compartilhamento de tela no Windows: suporte a janelas minimizadas e filtragem de janelas fantasmas/DWM-cloaked (`src/bin/capture_bridge.rs`).
+- Correções de canais e voz: criação de canal pelo `+` de categoria de voz já seleciona `Voz`, nomes longos de canal não cortam com botões ocultos de hover, e o palco da chamada de servidor não aparece fora de contexto dentro de conversas privadas (DM).
+
 ## 0.2.3
 
 - Perfil desktop com cartão rápido, perfil completo e prévias para chat, membros, DMs e painel inferior.

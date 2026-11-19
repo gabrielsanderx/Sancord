@@ -1161,6 +1161,8 @@ pub struct Account {
     pub cosmetic_collection: CosmeticCollection,
     #[serde(default)]
     pub profile_board: ProfileBoard,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub created_community: bool,
     #[serde(default)]
     pub profile_sharing: ProfileSharing,
     #[serde(flatten, default)]
@@ -1467,7 +1469,7 @@ pub struct Attachment {
     pub id: String,
     pub filename: String,
     pub content_type: String,
-    /// "image" | "video" | "audio" | "file"
+    /// "image" | "video" | "audio" | "file" | "sticker" | "voice"
     pub kind: String,
     pub size: u64,
     #[serde(default)]
@@ -1633,6 +1635,9 @@ pub struct DmConversation {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum ClientMessage {
+    ListScheduledMessages,
+    ScheduleMessage { channel_id: String, content: String, send_at: i64 },
+    CancelScheduledMessage { id: String },
     /// Identificação inicial do usuário ao entrar no servidor (via token de conta ou nome)
     JoinServer {
         token: Option<String>,
@@ -2376,8 +2381,11 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum ServerMessage {
+    ScheduledMessages { messages: Vec<crate::scheduled::ScheduledMessage> },
     /// Estado completo inicial enviado quando o usuário conecta
     Welcome {
+        #[serde(default)]
+        composer_capabilities: Vec<String>,
         user: UserInfo,
         text_channels: Vec<Channel>,
         voice_channels: Vec<Channel>,

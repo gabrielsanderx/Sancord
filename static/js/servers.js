@@ -127,6 +127,7 @@ let slowmodeTimer = null;
 /** Aviso acima do campo de mensagem; só agenda nova atualização enquanto há espera. */
 function refreshSlowmodeIndicator() {
   clearTimeout(slowmodeTimer);
+  if (typeof updateComposerSendButton === "function") updateComposerSendButton();
   const el = document.getElementById("slowmode-indicator");
   if (!el) return;
   const channelId = getActiveTextChannelId();
@@ -330,7 +331,7 @@ function buildCategoryHeader(srv, cat, isCollapsed, canManage) {
     SancordUI.tooltip(add, `Criar canal em ${cat.name}`, "top");
     add.addEventListener("click", (e) => {
       e.stopPropagation();
-      openCreateChannelDialog({ categoryId: cat.id });
+      openCreateChannelDialog({ categoryId: cat.id, kind: categoryChannelKind(srv, cat) });
     });
     head.appendChild(add);
   }
@@ -536,11 +537,18 @@ function buildVoiceChannelNode(srv, ch, canManage) {
 
   const unreadInfo = typeof channelUnreadInfo === "function" ? channelUnreadInfo(ch.id) : { unread: false, mentions: 0 };
   const chatOpen = state.activeView === "server" && state.currentTextChannel === ch.id;
+  const vPerms = getChannelPermissions(srv, ch);
   const row = document.createElement("div");
   row.className = `channel-item ${ch.id === state.currentVoiceChannel ? "active" : ""} ${chatOpen ? "voice-chat-open" : ""} ${unreadInfo.unread ? "has-unread" : ""} kind-voice`;
   row.dataset.channelId = ch.id;
-  row.tabIndex = 0;
-  row.appendChild(buildChannelLabel(ch));
+  const join = document.createElement("button");
+  join.type = "button";
+  join.className = "voice-channel-join";
+  join.disabled = vPerms.connect_voice === false;
+  join.title = join.disabled ? `${ch.name} · Você não pode entrar nesta sala` : ch.name;
+  join.setAttribute("aria-pressed", String(ch.id === state.currentVoiceChannel));
+  join.appendChild(buildChannelLabel(ch));
+  row.append(join);
   if (unreadInfo.mentions > 0) {
     const badge = document.createElement("span");
     badge.className = "unread-mention-badge";
@@ -557,21 +565,24 @@ function buildVoiceChannelNode(srv, ch, canManage) {
   }
   const chatBtn = document.createElement("button");
   chatBtn.type = "button";
-  chatBtn.className = `channel-edit-btn voice-chat-open-btn${chatOpen ? " active" : ""}`;
-  chatBtn.textContent = "💬";
+  chatBtn.className = `voice-channel-action voice-chat-open-btn${chatOpen ? " active" : ""}`;
+  chatBtn.append(SancordIcons.node("chat"));
   chatBtn.title = "Abrir chat de texto";
   chatBtn.setAttribute("aria-label", `Abrir chat de texto de ${ch.name}`);
   chatBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     openVoiceTextChat(ch.id, srv.id);
   });
-  row.appendChild(chatBtn);
-  const vPerms = typeof getChannelPermissions === "function" ? getChannelPermissions(srv, ch) : { create_invites: true };
-  if (vPerms.create_invites) row.appendChild(buildChannelInviteButton(srv, ch));
-  if (canManage) row.appendChild(buildEditButton(srv, ch));
-  row.addEventListener("click", () => joinVoiceChannel(ch.id));
-  row.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") joinVoiceChannel(ch.id);
+  const actions = document.createElement("span");
+  actions.className = "voice-channel-actions";
+  actions.append(chatBtn);
+  if (vPerms.create_invites) actions.appendChild(buildChannelInviteButton(srv, ch));
+  if (canManage) actions.appendChild(buildEditButton(srv, ch));
+  row.append(actions);
+  row.addEventListener("click", (e) => {
+    if (join.disabled || actions.contains(e.target)) return;
+    if (state.currentVoiceChannel === ch.id) voiceStage.classList.remove("hidden");
+    else joinVoiceChannel(ch.id);
   });
   row.addEventListener("contextmenu", (e) => {
     e.preventDefault();
@@ -587,30 +598,7 @@ function buildVoiceChannelNode(srv, ch, canManage) {
     for (const uid of memberIds) {
       const u = state.users.get(uid);
       if (!u) continue;
-      const memberLi = document.createElement("li");
-      memberLi.className = "voice-member-row";
-      const isSpeaking = state.speakingUsers?.has(u.id);
-      memberLi.innerHTML = `
-        <div class="voice-member-left">
-          <div class="avatar-small ${isSpeaking ? "speaking" : ""}" data-speaking-user="${escapeHtml(u.id)}" style="background: ${escapeHtml(u.avatar_color)}">
-            ${renderAvatarInner(u.username, u.avatar_url)}
-          </div>
-          <span>${escapeHtml(u.username)}</span>
-        </div>
-        <div class="voice-badges">
-          ${u.camera_on ? `<span class="cam-badge">CÂM</span>` : ""}
-          ${u.screen_sharing ? `<span class="live-badge">AO VIVO</span>` : ""}
-          ${u.server_muted ? `<span class="server-mod-badge" title="Silenciado pelo servidor">${SVG_ICONS.micOffTiny}</span>` : u.muted ? `<span title="Mutado">${SVG_ICONS.micOffTiny}</span>` : ""}
-          ${u.server_deafened ? `<span class="server-mod-badge" title="Ensurdecido pelo servidor">${SVG_ICONS.headOffTiny}</span>` : u.deafened ? `<span title="Áudio desativado">${SVG_ICONS.headOffTiny}</span>` : ""}
-          ${isLocallyMuted(u.id) ? `<span title="Silenciado só para você">🔕</span>` : ""}
-        </div>
-      `;
-      memberLi.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openVoiceUserMenu(e, u.id);
-      });
-      subList.appendChild(memberLi);
+      subList.appendChild(buildVoiceUserItem(srv, u));
     }
     wrapper.appendChild(subList);
   }
@@ -627,13 +615,15 @@ async function channelLink(srv, ch) {
 
 function openChannelMenu(e, srv, ch) {
   const perms = myPerms(srv);
+  const channelPerms = getChannelPermissions(srv, ch);
   const isVoice = ch.kind === "voice";
   const inVoice = state.currentVoiceChannel === ch.id;
   SancordUI.contextMenu(e.clientX, e.clientY, [
     isVoice
-      ? { label: inVoice ? "Sair da chamada" : "Entrar no canal de voz", icon: "🔊", onSelect: () => (inVoice ? leaveVoiceChannel() : joinVoiceChannel(ch.id)) }
+      ? (inVoice || channelPerms.connect_voice !== false) && { label: inVoice ? "Sair da chamada" : "Entrar no canal de voz", icon: "voice", onSelect: () => (inVoice ? leaveVoiceChannel() : joinVoiceChannel(ch.id)) }
       : { label: "Abrir canal", icon: "#", onSelect: () => { state.currentTextChannel = ch.id; switchToServerView(); } },
     isVoice && { label: "Abrir chat de texto", icon: "💬", onSelect: () => openVoiceTextChat(ch.id, srv.id) },
+    channelPerms.create_invites && { label: "Convidar", icon: "user-plus", onSelect: () => openInviteServerModal(srv.id, ch.id) },
     {
       label: "Marcar como lido",
       icon: "✔️",
@@ -694,7 +684,7 @@ function openCategoryMenu(e, srv, cat, isCollapsed) {
     },
     ...(typeof muteMenuItems === "function" ? muteMenuItems(cat.id, "categoria", cat.name, { x: e.clientX, y: e.clientY }) : []),
     perms.manage_channels && { separator: true },
-    perms.manage_channels && { label: "Criar canal aqui", icon: "＋", onSelect: () => openCreateChannelDialog({ categoryId: cat.id }) },
+    perms.manage_channels && { label: "Criar canal aqui", icon: "＋", onSelect: () => openCreateChannelDialog({ categoryId: cat.id, kind: categoryChannelKind(srv, cat) }) },
     perms.manage_channels && { label: "Renomear categoria", icon: "✏️", onSelect: () => openRenameCategoryDialog(srv, cat) },
     perms.manage_channels && { label: "Permissões da categoria", icon: "🔒", onSelect: () => openPermissionsDialog(srv, cat, true) },
     perms.manage_channels && idx > 0 && { label: "Mover para cima", icon: "↑", onSelect: () => moveCategory(srv, cat.id, { beforeId: cats[idx - 1].id }) },
@@ -789,6 +779,16 @@ function categoryOptions(srv) {
     { value: "", label: "Sem categoria" },
     ...[...(srv.categories || [])].sort(byPosition).map((c) => ({ value: c.id, label: c.name })),
   ];
+}
+
+/** Tipo inicial ao criar dentro de uma categoria: o dos canais que ela já tem
+ *  (só voz → voz). Vazia, segue o nome ("Voz", "Calls"...). O usuário ainda pode trocar. */
+function categoryChannelKind(srv, cat) {
+  const inCat = (list) => (list || []).filter((c) => c.category_id === cat.id).length;
+  const voice = inCat(srv?.voice_channels), text = inCat(srv?.text_channels);
+  if (voice && !text) return "voice";
+  if (text && !voice) return "text";
+  return !voice && /\b(voz|voice|calls?|chamadas?|[aá]udio)\b/i.test(cat.name || "") ? "voice" : "text";
 }
 
 async function openCreateChannelDialog({ kind = "text", categoryId = null } = {}) {
@@ -1138,7 +1138,11 @@ function buildRailServerItem(srv, folderId = null) {
   }
   if (isActive) btn.setAttribute("aria-current", "page");
   const owner = isServerOwner(srv, state.selfUser?.username);
-  SancordUI.tooltip(btn, `${srv.name}${owner ? " (seu servidor)" : ""}${isServerMuted(srv.id) ? " • silenciado" : ""}`, "right");
+  const onlineInSrv = typeof sidebarMemberRows === "function" && typeof SancordMemberList !== "undefined"
+    ? sidebarMemberRows(srv, state.users?.values?.() || []).filter((u) => !SancordMemberList.isMemberOffline(u)).length
+    : null;
+  const onlineHint = onlineInSrv !== null ? ` • ${onlineInSrv} online` : "";
+  SancordUI.tooltip(btn, `${srv.name}${owner ? " (seu servidor)" : ""}${onlineHint}${isServerMuted(srv.id) ? " • silenciado" : ""}`, "right");
   btn.addEventListener("click", () => switchToServerId(srv.id));
   btn.addEventListener("contextmenu", (e) => {
     e.preventDefault();
@@ -1317,6 +1321,7 @@ function applyChannelHeader(srv, ch) {
       : isAnn
       ? `Somente moderadores publicam em #${name}`
       : ch ? `Você não tem permissão para enviar mensagens em ${isVoice ? name : `#${name}`}` : "Nenhum canal acessível neste servidor";
+  if (typeof syncComposerChrome === "function") syncComposerChrome();
 }
 
 // ---------------------------------------------------------------------------

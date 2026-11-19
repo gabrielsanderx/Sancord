@@ -63,6 +63,7 @@ pub struct ServerState {
     pub peers: HashMap<String, Peer>,       // connection_id -> Peer
     /// Cache das mensagens recentes por canal (no máximo `MESSAGE_CACHE_PER_CHANNEL`).
     pub chat_history: HashMap<String, Vec<ChatMessage>>,
+    pub scheduled_messages: HashMap<String, crate::scheduled::ScheduledMessage>,
     pub friends_store: FriendsStore,
     /// token_hash -> sessão
     pub sessions: HashMap<String, SessionRecord>,
@@ -291,6 +292,7 @@ impl ServerState {
 
         let mut st = Self {
             config: Arc::new(config),
+            scheduled_messages: db.load_scheduled()?.into_iter().map(|job| (job.id.clone(), job)).collect(),
             db,
             text_channels,
             voice_channels,
@@ -340,6 +342,7 @@ impl ServerState {
         }
         st.persisted_friends = content_hash(&st.friends_store).0;
         st.rebuild_account_index();
+        crate::profile_board::restore_first_creation(&mut st);
 
         // Servidores antigos ganham categorias/posições; cada servidor garante
         // que seu convite padrão exista na tabela de convites.
@@ -483,6 +486,8 @@ impl ServerState {
         self.persisted_accounts.remove(account_id);
         self.rebuild_account_index();
         self.user_prefs.remove(account_id);
+        self.scheduled_messages.retain(|_, job| job.account_id != account_id);
+        self.rates.remove(account_id);
         self.upload_times.remove(account_id);
         self.read_states.retain(|(u, _), _| u != account_id);
 
@@ -561,6 +566,16 @@ impl ServerState {
     /// Adiciona uma nova mensagem ao cache e ao banco.
     pub fn insert_message(&mut self, msg: ChatMessage) {
         self.db.write(WriteOp::UpsertMessage(Box::new(msg.clone())));
+        self.cache_message(msg);
+    }
+
+    pub fn publish_scheduled_message(&mut self, id: String, msg: ChatMessage) {
+        self.db.write(WriteOp::PublishScheduled { id: id.clone(), message: Box::new(msg.clone()) });
+        self.scheduled_messages.remove(&id);
+        self.cache_message(msg);
+    }
+
+    fn cache_message(&mut self, msg: ChatMessage) {
         let list = self.chat_history.entry(msg.channel_id.clone()).or_default();
         let mut cached = msg;
         cached.nonce = None;
