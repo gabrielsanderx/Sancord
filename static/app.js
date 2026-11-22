@@ -270,7 +270,8 @@ const state = {
   activeSessions: [],
   unreadDividerByChannel: new Map(),
   servers: [],
-  activeServerId: "sancord",
+  // Sem hub público: começa sem servidor; o Welcome escolhe o primeiro ou abre o Início.
+  activeServerId: null,
   sessionStartedAt: Date.now(),
   pendingInviteCode: new URLSearchParams(window.location.search).get("invite") || "",
 };
@@ -1333,9 +1334,9 @@ async function handleServerMessage(msg) {
       state.servers = payload.servers || [];
       const activeSrv =
         state.servers.find((s) => s.id === state.activeServerId) || state.servers[0];
-      state.activeServerId = activeSrv?.id || "sancord";
-      state.textChannels = activeSrv?.text_channels || payload.text_channels || [];
-      state.voiceChannels = activeSrv?.voice_channels || payload.voice_channels || [];
+      state.activeServerId = activeSrv?.id || null;
+      state.textChannels = activeSrv?.text_channels || [];
+      state.voiceChannels = activeSrv?.voice_channels || [];
       state.voiceMembers = payload.voice_members;
       state.iceServers = payload.ice_servers || [];
       state.chatHistory = payload.chat_history;
@@ -1381,6 +1382,8 @@ async function handleServerMessage(msg) {
           }
         }, 250);
       }
+      // Conta sem servidor nenhum (não existe mais hub automático): abre o Início.
+      if (!activeSrv && state.activeView === "server") switchToHomeFriendsView();
       // Reconexão do WebSocket no meio de uma chamada: o servidor já nos tirou da voz.
       resumeVoiceAfterReconnect();
       break;
@@ -1547,7 +1550,14 @@ async function handleServerMessage(msg) {
         serverSettingsModal.classList.add("hidden");
       }
       if (state.activeServerId === server_id) {
-        switchToServerId(state.servers[0]?.id || "sancord");
+        if (state.servers.length) switchToServerId(state.servers[0].id);
+        else {
+          state.activeServerId = null;
+          state.textChannels = [];
+          state.voiceChannels = [];
+          renderGuildRail();
+          switchToHomeFriendsView();
+        }
       } else {
         renderGuildRail();
       }

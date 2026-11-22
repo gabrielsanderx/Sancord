@@ -1439,7 +1439,7 @@ Implementação local sobre as fontes da v0.2.3. O cliente Windows continua carr
    - **Correção:** novo `src/bin/desktop_permissions.rs`. Ao abrir, o app chama `ICoreWebView2Profile4::SetPermissionState`, com ALLOW de microfone e câmera para `APP_ORIGIN`, e trata `PermissionRequested` liberando só microfone e câmera e só em `desktop_assets::is_app_page`.
    - Foi adicionada a dependência direta `webview2-com = "0.33"` (mesma versão que o wry usa; o `Cargo.lock` ganhou só essa linha) e a feature `Win32_System_WinRT`.
    - Há teste unitário da regra.
-   - Instalado no atalho (`Sancord.exe` com hash `75449B5E1054…`). O usuário precisa fechar e reabrir o app. **Ainda não confirmado pelo usuário que voltou a funcionar.**
+   - Instalado no atalho (`Sancord.exe` com hash `75449B5E1054…`). O usuário precisa fechar e reabrir o app. **Confirmado pelo usuário em 22/11/2026: o microfone voltou a funcionar.**
 4. ✅ **Refazer completamente a interface de personalização de perfil.** O prompt longo do usuário pede 3 colunas no estilo da referência: editor compacto à esquerda, perfil completo real no centro e mural/widgets à direita, com subeditores, prévia ao vivo e salvar só no fim.
    - O usuário citou 2 imagens de referência que **não chegaram**. Foi implementado e validado seguindo a descrição completa em texto.
    - **Feito e validado (211 testes frontend + 177 Rust passando = 388 testes):**
@@ -1545,4 +1545,42 @@ Implementação local sobre as fontes da v0.2.3. O cliente Windows continua carr
   - Ações reais com ícones SVG do Sancord (`SancordIcons`): **Editar perfil** (abre `Configurações → Perfis`), **Status ›** (`Online`, `Ausente`, `Não perturbe`, `Invisível` em realtime + modal rápido **Definir status personalizado** + **Limpar status personalizado**), **Insígnias ›** (exibida apenas se a conta possuir badges reais), **Minha coleção ›** (atalhos diretos para decorações, molduras, efeitos, placas, estilos de nome e coleção/presets), **Mudar de conta ›** (seletor multi-conta com tokens isolados por origem, `Adicionar conta` e `Sair de todas as contas`) e **Copiar ID do usuário** (visível somente com Modo Desenvolvedor ativo, com feedback `ID copiado ✓`). Sem botões mortos (`Clipes`/`Orbs`).
   - Navegação completa por teclado (`↑`, `↓`, `→`, `←`, `Enter`, `Esc`), clique fora e clique repetido fecham o menu.
 - **Testes:** `219/219` frontend (incluindo novo `tests/frontend-self-profile-menu.test.cjs`) + `9/9` `SancordApp` aprovados; QA visual no WebView2 (`1366×768`) aprovado com `0` erros de console.
-- **Instalado no atalho `D:\Sancord\Sancord.exe`:** SHA-256 `76BC26229AF3AF4DBB8A5E602AA851715DACB16B2A73751A5546944CE3CD1733` (`9.920.000` bytes; inclui correção do traço do status `Não perturbe` e fixação/atraso de intenção nos submenus). Aguardando eventuais modificações extras do usuário antes de subir a próxima versão ao GitHub.
+- **Instalado no atalho `D:\Sancord\Sancord.exe`:** SHA-256 `76BC26229AF3AF4DBB8A5E602AA851715DACB16B2A73751A5546944CE3CD1733` (`9.920.000` bytes; inclui correção do traço do status `Não perturbe` e fixação/atraso de intenção nos submenus).
+### Atualização 19/11/2026 20:40: Sancord v0.2.5 publicado oficialmente no GitHub
+- ✅ **Commit na `main`:** `4c93c8645cfd55142b565b7e8c4482711799f5bd` (8 alterados, 2 novos; `Cargo.toml`, `Cargo.lock` e `CHANGELOG.md` em `0.2.5`; `sancord-release validate v0.2.5` OK; `396` testes aprovados).
+- ✅ **Tag e Release oficial (`Latest`):** `v0.2.5` — https://github.com/gabrielsanderx/Sancord/releases/tag/v0.2.5
+  - GitHub Actions `Stable Windows release` run `44637052157`: `tests`, `package`, `sign`, `verify-package` (HTTPS assinado) e `publish` todos aprovados (`0` falhas).
+  - Artefatos publicados: `Sancord.exe` (`9.797.632` B), `SancordServer.exe` (`14.701.568` B), `Sancord-0.2.5-windows-x64.zip` (`4.401.444` B), `sancord-update.json` (`1.432` B) e `sancord-update.sig` (`128` B).
+### Atualização 22/11/2026: servidor de produção atualizado para a v0.2.5 (autorizado pelo usuário)
+- **Executável:** `SancordServer.exe` oficial da release `v0.2.5`, baixado com `gh release download`. SHA-256 `a0d57ad7…e338`, igual ao digest publicado. A cópia de download ficou em `qa-deploy-0.2.5/`.
+- **Ensaio antes da troca:** `scripts/test-migration.ps1`, num snapshot somente-leitura, deu "v19 → v21; 32 tabelas antigas preservadas por hash; integridade OK".
+- **Troca:**
+  1. Parado só o PID 13960, com o caminho conferido (`D:\Sancord\SancordServer.exe`).
+  2. Backup completo em `D:\Sancord\data-backup-pre-0.2.5-20261122-1915/`: 12 arquivos, 6.391.234 bytes, todos iguais por hash (exceto `tunnel.log`, que o túnel mantém aberto), banco v19 com `integrity_check = ok`, mais `SancordServer-0.2.3.exe`.
+  3. Executável trocado e religado por `scripts/start-host.ps1`. O `cloudflared` (PID 14356) continuou rodando, então a URL pública não mudou.
+- **Depois da troca:**
+  - `/api/health` respondeu `version: "0.2.5"`, local e pelo túnel público;
+  - verificado numa cópia: banco v21, `integrity_check = ok`, 33 tabelas, `scheduled_messages` presente, 6 usuários, 2 servidores, 6 canais e 15 mensagens;
+  - o log não teve erro, e o cliente do usuário reconectou sozinho.
+- **Rollback:** parar o servidor pelo PID, restaurar `data/` a partir do backup e voltar `SancordServer-0.2.3.exe` para `SancordServer.exe`.
+## 22/11/2026 · Remoção do hub público "Sancord" (pedido do usuário: esconder e apagar os dados)
+
+- **Antes:** em todo servidor Sancord, `default_hub` (em `src/state.rs`) criava o servidor `sancord`, e cada conta entrava nele sozinha ao logar (em `src/ws.rs`, no JoinServer). O usuário não quer esse servidor para ninguém.
+- **Agora (nos fontes, NÃO publicado):**
+  - `Config.legacy_hub` vale `false` em produção (`from_env`). Só `Config::for_tests` liga o hub, porque os testes antigos usam o canal "geral" como atalho.
+  - Sem o hub não há criação nem entrada automática, e o Welcome vai com `servers: []` e `text_channels/voice_channels` vazios.
+  - `ServerState::purge_legacy_hub()` roda ao iniciar quando `legacy_hub` está desligado. Ele apaga de vez o hub antigo: tira o servidor (cascata no banco), canais, threads, histórico, read states, integrações, agendamentos, convites e eventos.
+  - Os ramos `== "sancord"` que sobraram no código ficaram inertes, porque não existe mais servidor com esse id.
+  - Cliente (`app.js`): `activeServerId` começa `null`. Sem servidor, o Welcome abre o Início, e `ServerRemoved` do último servidor também volta para o Início.
+- **Testes:**
+  - `src/hub_removal_tests.rs` (conta nova sem hub; hub antigo apagado ao iniciar e continua apagado após reiniciar; servidor próprio preservado);
+  - `tests/frontend-no-hub.test.cjs`;
+  - suítes: 221 frontend e 179 Rust aprovados.
+- **Ensaio numa cópia do banco real** (`qa-hub-removal/`, ignorada pelo Git, contém dados reais):
+  - antes: servidores `sancord` e `srv-4a0a2922` ("Só tristeza"); mensagens sancord=4, Só tristeza=1, DMs=10; 6 usuários;
+  - depois, com o servidor novo (porta 3100): só "Só tristeza"; mensagens Só tristeza=1, DMs=10; 6 usuários;
+  - log: `Hub público "sancord" removido com 2 canais/threads`.
+- **Falta, com autorização do usuário:**
+  - publicar a **0.2.6**: versão, CHANGELOG, commit pela API e tag `v0.2.6`;
+  - atualizar a produção como na 0.2.5: backup de `data/`, parar pelo PID e trocar o exe. Na primeira inicialização, a 0.2.6 apaga o hub do banco real.
+  - Clientes 0.2.5 conectados a um servidor sem hub abrem com a área de servidor vazia até atualizarem: não quebram, só ficam sem canal aberto.

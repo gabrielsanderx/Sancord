@@ -63,6 +63,8 @@ mod cosmetic_collection;
 mod voice_chat;
 #[path = "composer_tests.rs"]
 mod composer;
+#[path = "hub_removal_tests.rs"]
+mod hub_removal;
 
 struct TestServer {
     addr: std::net::SocketAddr,

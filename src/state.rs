@@ -272,17 +272,22 @@ impl ServerState {
             accounts.insert(lower, acc);
         }
 
-        let created_hub = servers.is_empty();
+        let legacy_hub = config.legacy_hub;
+        let created_hub = legacy_hub && servers.is_empty();
         if created_hub {
             let (t, v) = default_channels();
             servers.push(default_hub(t, v));
         }
 
-        let (text_channels, voice_channels) = servers
-            .iter()
-            .find(|s| s.id == "sancord")
-            .map(|s| (s.text_channels.clone(), s.voice_channels.clone()))
-            .unwrap_or_else(default_channels);
+        let (text_channels, voice_channels) = if legacy_hub {
+            servers
+                .iter()
+                .find(|s| s.id == "sancord")
+                .map(|s| (s.text_channels.clone(), s.voice_channels.clone()))
+                .unwrap_or_else(default_channels)
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
         let last_msg_ts = chat_history
             .values()
@@ -343,6 +348,9 @@ impl ServerState {
         st.persisted_friends = content_hash(&st.friends_store).0;
         st.rebuild_account_index();
         crate::profile_board::restore_first_creation(&mut st);
+        if !legacy_hub {
+            st.purge_legacy_hub();
+        }
 
         // Servidores antigos ganham categorias/posições; cada servidor garante
         // que seu convite padrão exista na tabela de convites.
@@ -433,6 +441,40 @@ impl ServerState {
                 self.persisted_friends = h;
             }
         }
+    }
+
+    /// Apaga de vez o antigo hub público "sancord", em que toda conta entrava sozinha:
+    /// canais, mensagens, threads, convites, eventos, integrações e agendamentos dele.
+    /// O servidor sai do banco no próximo `save_servers` (cascata das tabelas filhas).
+    fn purge_legacy_hub(&mut self) {
+        let Some(pos) = self.servers.iter().position(|s| s.id == "sancord") else { return };
+        let hub = self.servers.remove(pos);
+        let rooms: Vec<String> = hub
+            .text_channels
+            .iter()
+            .chain(hub.voice_channels.iter())
+            .map(|c| c.id.clone())
+            .chain(hub.threads.iter().map(|t| t.id.clone()))
+            .collect();
+        for room in &rooms {
+            crate::integrations::remove_channel(self, room);
+            self.delete_channel_history(room);
+        }
+        let scheduled: Vec<String> = self
+            .scheduled_messages
+            .values()
+            .filter(|job| rooms.contains(&job.channel_id))
+            .map(|job| job.id.clone())
+            .collect();
+        for id in scheduled {
+            self.scheduled_messages.remove(&id);
+            self.db.write(WriteOp::DeleteScheduled { id });
+        }
+        self.invites.retain(|_, inv| inv.server_id != "sancord");
+        self.events.remove("sancord");
+        self.text_channels.clear();
+        self.voice_channels.clear();
+        tracing::info!("Hub público \"sancord\" removido com {} canais/threads e o histórico deles.", rooms.len());
     }
 
     /// Grava apenas os servidores que mudaram (e remove os excluídos).

@@ -25,6 +25,10 @@ pub struct Config {
     /// `SANCORD_TURN_USERNAME` + `SANCORD_TURN_CREDENTIAL` acrescentam um TURN (relay),
     /// necessário quando os dois lados estão atrás de NAT restritivo.
     pub ice_servers: Vec<IceServer>,
+    /// Hub público "sancord" (servidor em que toda conta entrava sozinha). Removido do
+    /// produto: em uso real fica desligado e um hub antigo é apagado ao iniciar. Os testes
+    /// antigos ainda usam o canal "geral" dele como atalho, por isso continua ligado só lá.
+    pub legacy_hub: bool,
 }
 
 pub const DEFAULT_STUN_URLS: &[&str] = &[
@@ -90,6 +94,7 @@ impl Config {
             session_days_remember,
             session_hours_short,
             ice_servers,
+            legacy_hub: false,
         }
     }
 
@@ -102,7 +107,14 @@ impl Config {
             session_days_remember: 30,
             session_hours_short: 24,
             ice_servers: ice_servers_from(None, None, None, None),
+            legacy_hub: true,
         }
+    }
+
+    /// Configuração de teste como em produção (sem hub público).
+    #[cfg(test)]
+    pub fn for_tests_without_hub(data_dir: PathBuf) -> Self {
+        Self { legacy_hub: false, ..Self::for_tests(data_dir) }
     }
 
     pub fn db_path(&self) -> PathBuf {

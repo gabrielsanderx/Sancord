@@ -1,5 +1,11 @@
 # Histórico de versões
 
+## 0.2.6
+
+- Removido o servidor público "Sancord" (hub), no qual toda conta entrava automaticamente. Contas novas não entram em nenhum servidor por conta própria e o aplicativo abre no Início (amigos e conversas) até a pessoa criar um servidor ou aceitar um convite.
+- Ao iniciar a 0.2.6, o servidor apaga de vez o hub antigo do banco: canais, mensagens, threads, convites, eventos, integrações e agendamentos dele. Servidores criados pelas pessoas, conversas privadas e contas não são alterados.
+- Excluir ou sair do último servidor leva ao Início em vez de deixar a área de servidor vazia.
+
 ## 0.2.5
 
 - Novo **Self Profile Menu** (`static/js/self-profile-menu.js`) no painel do próprio usuário no canto inferior esquerdo: clicar no avatar, nome ou status abre um cartão rápido ancorado acima do dock em vez de ir direto para Configurações, preservando Engrenagem (`⚙`), Microfone (`🎙`) e Fone (`🎧`) independentes.
