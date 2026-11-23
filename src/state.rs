@@ -60,6 +60,7 @@ pub struct ServerState {
     /// Perfil P2: badges concedidas pelo operador (adges.json na pasta de dados), por username_lower.
     pub badge_grants: HashMap<String, Vec<String>>,
     pub users: HashMap<String, UserInfo>,   // connection_id -> UserInfo
+    pub presence_grace: HashMap<String, UserInfo>, // apenas apresentação, sem socket/voz
     pub peers: HashMap<String, Peer>,       // connection_id -> Peer
     /// Cache das mensagens recentes por canal (no máximo `MESSAGE_CACHE_PER_CHANNEL`).
     pub chat_history: HashMap<String, Vec<ChatMessage>>,
@@ -147,6 +148,7 @@ fn default_hub(text_channels: Vec<Channel>, voice_channels: Vec<Channel>) -> Gui
         member_timeouts: HashMap::new(),
         member_nicks: HashMap::new(),
         member_profiles: HashMap::new(),
+        member_roster: HashMap::new(),
         emojis: Vec::new(),
         invites_paused: false,
         rules_text: None,
@@ -268,7 +270,7 @@ impl ServerState {
         let mut accounts = HashMap::new();
         for mut acc in accounts_vec {
             let lower = acc.username.to_lowercase();
-            acc.profile.badges = crate::cosmetics::effective_badges(&acc, badge_grants.get(&lower).map(Vec::as_slice).unwrap_or(&[]));
+            crate::cosmetics::sync_account_badges(&mut acc, badge_grants.get(&lower).map(Vec::as_slice).unwrap_or(&[]));
             accounts.insert(lower, acc);
         }
 
@@ -310,6 +312,7 @@ impl ServerState {
             friends_store,
             sessions: sessions_vec.into_iter().map(|s| (s.token_hash.clone(), s)).collect(),
             conn_sessions: HashMap::new(),
+            presence_grace: HashMap::new(),
             login_limiter: LoginRateLimiter::default(),
             invites: invites_vec.into_iter().map(|i| (i.code.to_uppercase(), i)).collect(),
             user_prefs,
@@ -607,7 +610,13 @@ impl ServerState {
 
     /// Adiciona uma nova mensagem ao cache e ao banco.
     pub fn insert_message(&mut self, msg: ChatMessage) {
-        self.db.write(WriteOp::UpsertMessage(Box::new(msg.clone())));
+        let stored = Box::new(msg.clone());
+        let receipt = msg.nonce.as_deref().filter(|id| crate::ws::durable_chat_nonce(id).is_some())
+            .and_then(|nonce| self.account_id_for(&msg.author_name.to_lowercase()).map(|id| (id, nonce)));
+        self.db.write(match receipt {
+            Some((account_id, nonce)) => WriteOp::DeliverChat { message: stored, account_id, nonce: nonce.to_string() },
+            None => WriteOp::UpsertMessage(stored),
+        });
         self.cache_message(msg);
     }
 
@@ -1550,6 +1559,7 @@ impl ServerState {
             .users
             .values()
             .find(|u| u.username.to_lowercase() == target_lower)
+            .or_else(|| self.presence_grace.values().find(|u| u.username.to_lowercase() == target_lower))
         {
             let visible_online = u.status_kind != "invisible";
             let acc_created = self
@@ -1557,7 +1567,9 @@ impl ServerState {
                 .get(target_lower)
                 .and_then(|a| a.created_at.clone())
                 .or_else(|| u.created_at.clone());
+            let acc_id = self.accounts.get(target_lower).map(|a| a.id.clone());
             return Some(FriendInfo {
+                id: acc_id,
                 username: u.username.clone(),
                 avatar_color: u.avatar_color.clone(),
                 avatar_url: u.avatar_url.clone(),
@@ -1580,10 +1592,12 @@ impl ServerState {
                 created_at: acc_created,
                 online: visible_online,
                 voice_channel_id: u.voice_channel_id.clone(),
+                activity: if visible_online { u.activity.clone() } else { None },
             });
         }
         if let Some(acc) = self.accounts.get(target_lower) {
             return Some(FriendInfo {
+                id: Some(acc.id.clone()),
                 username: acc.username.clone(),
                 avatar_color: acc.avatar_color.clone(),
                 avatar_url: acc.avatar_url.clone(),
@@ -1606,9 +1620,30 @@ impl ServerState {
                 created_at: acc.created_at.clone(),
                 online: false,
                 voice_channel_id: None,
+                activity: None,
             });
         }
         None
+    }
+
+    pub fn set_dm_closed(&mut self, username_lower: &str, dm_id: &str, closed: bool) {
+        let Some(acc) = self.account_id_for(username_lower) else {
+            return;
+        };
+        let mut prefs = self.prefs_for(&acc, username_lower);
+        let before = prefs.closed_dms.len();
+        if closed {
+            if !prefs.closed_dms.iter().any(|id| id == dm_id) {
+                prefs.closed_dms.push(dm_id.to_string());
+                prefs.closed_dms = crate::models::UserPrefs::sanitize_dm_ids(prefs.closed_dms);
+                self.set_prefs(&acc, prefs);
+            }
+        } else {
+            prefs.closed_dms.retain(|id| id != dm_id);
+            if prefs.closed_dms.len() != before {
+                self.set_prefs(&acc, prefs);
+            }
+        }
     }
 
     pub fn build_friends_sync_for(&self, me_lower: &str) -> ServerMessage {
@@ -1657,14 +1692,21 @@ impl ServerState {
             }
         }
 
+        let closed_set: HashSet<String> = self
+            .account_id_for(me_lower)
+            .and_then(|acc| self.user_prefs.get(&acc))
+            .map(|p| p.closed_dms.iter().cloned().collect())
+            .unwrap_or_default();
+
         for dm_id in dm_ids_set {
             let Some((p1, p2)) = Self::parse_dm_participants(&dm_id) else {
                 continue;
             };
             let other_lower = if p1 == me_lower { p2 } else { p1 };
-            // Conversas com quem eu bloqueei ficam fora da lista (o histórico continua no banco).
+            // Conversas com quem eu bloqueei, ignorei ou fechei ficam fora da lista (o histórico continua no banco).
             if self.friends_store.has_blocked(me_lower, &other_lower)
                 || self.friends_store.is_ignored(me_lower, &dm_id)
+                || closed_set.contains(&dm_id)
             {
                 continue;
             }
@@ -1785,6 +1827,7 @@ impl ServerState {
 
     pub fn users_list(&self) -> Vec<UserInfo> {
         let mut list: Vec<UserInfo> = self.users.values().cloned().collect();
+        list.extend(self.presence_grace.values().cloned());
         list.sort_by(|a, b| a.username.to_lowercase().cmp(&b.username.to_lowercase()));
         list
     }

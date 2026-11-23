@@ -97,12 +97,13 @@ function renderVisitedBoard(board, emptyMessage, root = document.getElementById(
   root.replaceChildren();
   const widgets = (board?.widgets || []).filter(widget => widget.visible && Object.hasOwn(boardWidgetNames, widget.kind));
   if (!widgets.length) {
-    root.append(boardText("p", emptyMessage || (board ? "Este mural está vazio." : "Mural indisponível."), "pinned-empty"));
+    root.insertAdjacentHTML("beforeend", SancordUI.emptyHTML({ icon: "image", title: emptyMessage || (board ? "Este mural está vazio." : "Mural indisponível.") }));
     return;
   }
   for (const widget of widgets) {
     const card = document.createElement("article");
     card.className = "profile-board-card";
+    card.dataset.widgetKind = widget.kind;
     const heading = widget.kind === "custom"
       ? `${widget.emoji ? `${widget.emoji} ` : ""}${widget.title || boardWidgetNames.custom}`
       : boardWidgetNames[widget.kind];
@@ -153,6 +154,11 @@ function renderVisitedBoard(board, emptyMessage, root = document.getElementById(
     }
     root.append(card);
   }
+}
+
+function renderProfileWishlist(board, root) {
+  const wishlist = board && { widgets: (board.widgets || []).filter(widget => widget.kind === "want_to_play") };
+  renderVisitedBoard(wishlist, board ? "Nenhum jogo na lista de desejos." : "Lista de desejos indisponível.", root);
 }
 
 function parseBoardLink(raw) {

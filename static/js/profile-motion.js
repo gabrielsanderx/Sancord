@@ -9,7 +9,7 @@ const profileMedia = new Map();
 const profileFrames = new Map();
 const profileFrameJobs = new Map();
 const profileLiveContexts = ".profile-card:not(.pf-mini), .profile-context-preview";
-const profileHoverContexts = ".cosmetic-choice,.message-item,.member-item,.dm-item,.friend-row,.voice-user-row,.profile-card,.name-style-showcase-box,.effect-choice-btn,.gif-pick";
+const profileHoverContexts = ".cosmetic-choice,.pe-choice,.pe-tile,.pe-name-samples button,.message-item,.member-item,.dm-item,.friend-row,.voice-user-row,.profile-card,.name-style-showcase-box,.effect-choice-btn,.gif-pick";
 let profileWindowFocused = true;
 let profileMotionFrame = null;
 let profileMotionSurface = null;
@@ -23,6 +23,16 @@ function profileMotionAvailable() {
 
 function interactionSurface() {
   return profileHoverSurface || (profileFocusSurface?.matches(".cosmetic-choice.selected") ? null : profileFocusSurface);
+}
+
+function visibleProfileSurface(surface) {
+  if (!surface?.isConnected || surface.closest(".hidden,[hidden]")) return false;
+  const rect = surface.getBoundingClientRect();
+  if (!rect.width || !rect.height || rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) return false;
+  const scrollArea = surface.closest(".pe-chooser-content,.pe-sidebar,.profile-modal-left,.profile-modal-right-content,.members-list,#dm-list");
+  if (!scrollArea) return true;
+  const bounds = scrollArea.getBoundingClientRect();
+  return rect.bottom > bounds.top && rect.top < bounds.bottom;
 }
 
 function mediaShouldAnimate(img) {
@@ -153,13 +163,9 @@ function updateProfileMotion() {
   const foreground = profileWindowFocused && !document.hidden;
   const interaction = interactionSurface();
   const surface = (profileMotionAvailable() && (
-    interaction?.isConnected && !interaction.closest(".hidden,[hidden]") ? interaction :
+    visibleProfileSurface(interaction) ? interaction :
       [...document.querySelectorAll(".cosmetic-picker-detail .profile-card,.cosmetic-picker-detail .avatar-deco-wrap,#profile-popover-card,.compact-profile-dialog,#collection-preview-card,#profile-context-preview .compact-profile-preview,#settings-server-profile-preview,#live-profile-preview-card,#dm-peer-panel .profile-card")]
-        .find(card => {
-          if (card.closest(".hidden,[hidden]")) return false;
-          const rect = card.getBoundingClientRect();
-          return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight;
-        })
+        .find(visibleProfileSurface)
   )) || null;
   if (profileMotionSurface !== surface) {
     profileMotionSurface?.classList.remove("profile-motion-active");
@@ -223,6 +229,8 @@ document.addEventListener("pointerover", e => noteProfileInteraction(e.target, f
 document.addEventListener("pointerout", e => noteProfileInteraction(e.relatedTarget, false));
 document.addEventListener("focusin", e => noteProfileInteraction(e.target, true));
 document.addEventListener("focusout", e => noteProfileInteraction(e.relatedTarget, true));
+document.addEventListener("scroll", queueProfileMotion, { capture: true, passive: true });
+window.addEventListener("resize", queueProfileMotion);
 document.addEventListener("load", e => {
   if (e.target.matches?.("img[data-anim][src]")) e.target.classList.add("profile-media-ready");
 }, true);

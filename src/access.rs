@@ -188,6 +188,25 @@ impl ServerState {
         for (owner, profile) in &mut server.member_profiles {
             crate::profile_sharing::project_member_profile(self, recipient, owner, profile);
         }
+        server.member_roster.clear();
+        if server.id != "sancord" {
+            let mut seen = std::collections::HashSet::new();
+            let owner_lower = server.owner_username.to_lowercase();
+            let iter = server
+                .members
+                .iter()
+                .map(|m| m.to_lowercase())
+                .chain((!owner_lower.is_empty()).then_some(owner_lower));
+            for member_lower in iter.take(500) {
+                if !seen.insert(member_lower.clone()) {
+                    continue;
+                }
+                if let Some(mut info) = self.resolve_friend_info(&member_lower) {
+                    crate::profile_sharing::project_friend(self, recipient, &mut info);
+                    server.member_roster.insert(member_lower, info);
+                }
+            }
+        }
     }
 
     pub(crate) fn project_outbound(&self, recipient: &str, msg: &mut ServerMessage) -> bool {
@@ -329,6 +348,18 @@ impl ServerState {
                 }
             }
             UserJoined { user } | SelfUpdated { user } => self.project_user_voice(recipient, user),
+            UserActivityUpdated { username, activity, .. } => {
+                let owner = username.to_lowercase();
+                let scope = crate::profile_sharing::access(self, recipient, &owner);
+                let invisible = self
+                    .users
+                    .values()
+                    .find(|u| u.username.to_lowercase() == owner)
+                    .is_some_and(|u| u.status_kind == "invisible");
+                if recipient != owner && (!scope.activity || invisible) {
+                    *activity = None;
+                }
+            }
             FriendsSync {
                 friends,
                 incoming_requests,

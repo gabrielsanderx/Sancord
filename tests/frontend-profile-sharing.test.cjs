@@ -47,9 +47,15 @@ test('cartão rápido abre o perfil completo e mantém campos revogados fora do 
   h.run(`onUserProfile({user:{username:"Bia",bio:"bio global"}, server_id:"s1", bio_visible:false, banner_visible:false})`);
   assert.doesNotMatch(quick.textContent, /bio antiga|bio global/);
   assert.equal(quick.querySelector('.profile-card-banner img'), null);
+  h.run('state.prefs = {user_notes:{}}');
+  const note = quick.querySelector('.compact-profile-note textarea');
+  note.value = 'Jogar em grupo';
+  note.dispatchEvent(new h.w.Event('input', { bubbles: true }));
+  assert.equal(h.run('sent.at(-1).payload.user_notes.bia'), 'Jogar em grupo');
   d.getElementById('compact-full-profile').click();
   assert.equal(quick.classList.contains('hidden'), true);
   assert.equal(d.getElementById('profile-popover-modal').classList.contains('hidden'), false);
+  assert.equal(d.getElementById('profile-card-note-input').value, 'Jogar em grupo');
   h.run(`onUserProfile({user:{username:"Bia"}, server_id:"s1", activity_visible:false, bio_visible:false,
     banner_visible:false, links:[{label:"GitHub",url:"https://github.com/monalisa",verified_github:true}]})`);
   assert.match(d.getElementById('profile-card-links').textContent, /GitHub verificado/);

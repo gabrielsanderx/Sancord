@@ -509,11 +509,34 @@ function buildForwardNode(msg) {
   return box;
 }
 
+function monitorChatMedia(element, parent, event = "load") {
+  let hint;
+  element.addEventListener("error", () => {
+    if (hint) return;
+    hint = document.createElement("span");
+    hint.className = "chat-media-error";
+    hint.textContent = SancordConnection.isInterrupted() ? "Mídia indisponível sem conexão." : "Não foi possível carregar a mídia.";
+    element.hidden = true;
+    parent.appendChild(hint);
+  });
+  element.addEventListener(event, () => {
+    hint?.remove();
+    hint = null;
+    element.hidden = false;
+  });
+}
+
 function buildAttachmentsNode(msg) {
   const list = msg.attachments || [];
-  if (!list.length && !msg.image_url) return null;
+  if (!list.length && !msg.image_url && !msg.offline_missing_image) return null;
   const wrap = document.createElement("div");
   wrap.className = "message-attachments";
+  if (msg.offline_missing_image) {
+    const hint = document.createElement("span");
+    hint.className = "chat-media-error";
+    hint.textContent = "Imagem indisponível sem conexão.";
+    wrap.appendChild(hint);
+  }
   const showMedia = state.audioSettings?.autoEmbeds !== false;
   const showImages = showMedia && state.audioSettings?.chatInlineImages !== false;
   if (msg.image_url) {
@@ -549,6 +572,7 @@ function buildAttachmentsNode(msg) {
       img.loading = "lazy";
       img.decoding = "async";
       img.alt = att.filename || "Imagem";
+      monitorChatMedia(img, btn);
       img.src = SancordNet.imageUrl(att.url);
       if (att.width && att.height) {
         // Reserva o espaço antes de carregar (sem "pulos" na rolagem).
@@ -568,6 +592,11 @@ function buildAttachmentsNode(msg) {
       }
       btn.appendChild(img);
       btn.addEventListener("click", () => {
+        if (img.hidden) {
+          if (SancordConnection.isInterrupted()) SancordConnection.markBlocked();
+          else img.src = SancordNet.imageUrl(att.url);
+          return;
+        }
         lightboxImg.src = SancordNet.imageUrl(att.url);
         imageLightboxModal.classList.remove("hidden");
       });
@@ -577,6 +606,7 @@ function buildAttachmentsNode(msg) {
       const video = document.createElement("video");
       video.className = "attachment-video";
       video.controls = true;
+      monitorChatMedia(video, wrap, "loadedmetadata");
       video.preload = "metadata";
       if (state.audioSettings?.chatAutoplayVideo) {
         video.autoplay = true;
@@ -1003,6 +1033,7 @@ function isNearBottom(px = 120) {
 }
 
 function renderChatMessagesV2({ preserveScroll = false } = {}) {
+  const scrollRevision = state.chatScrollRevision = Symbol();
   const draft = captureMessageEdit();
   const chId = getActiveTextChannelId();
   const list = state.chatHistory[chId] || [];
@@ -1054,6 +1085,7 @@ function renderChatMessagesV2({ preserveScroll = false } = {}) {
   };
   scrollToEnd();
   requestAnimationFrame(() => {
+    if (state.chatScrollRevision !== scrollRevision) return;
     scrollToEnd();
     state.scrollToDividerOnce = null;
     maybeAckActiveChannel();
@@ -1080,6 +1112,37 @@ function appendChatMessageUIV2(msg) {
   }
 }
 
+/** Atualiza só a borda da janela quando chega uma mensagem com o cache cheio. */
+function appendChatMessageAtCapacity(msg) {
+  const list = state.chatHistory[msg.channel_id];
+  const first = list[0];
+  const previous = list.at(-2);
+  if (state.searchQuery?.trim() || chatMessagesEl.lastElementChild?.dataset.msgId !== previous?.id) {
+    renderChatMessagesV2();
+    return;
+  }
+  const firstEl = chatMessagesEl.querySelector(`[data-msg-id="${CSS.escape(first.id)}"]`);
+  if (!firstEl) {
+    renderChatMessagesV2();
+    return;
+  }
+  const stayAtBottom = isNearBottom(160);
+  while (chatMessagesEl.firstElementChild !== firstEl) chatMessagesEl.firstElementChild.remove();
+  if (firstEl.classList.contains("grouped")) {
+    const draft = captureMessageEdit();
+    const full = buildMessageElementV2(first, { grouped: false });
+    firstEl.replaceWith(full);
+    restoreMessageEdit(draft);
+  }
+  const head = document.createDocumentFragment();
+  if (first.created_at) head.appendChild(buildDaySeparator(first.created_at));
+  if (state.unreadDividerByChannel.get(msg.channel_id) === first.id) head.appendChild(buildUnreadDivider());
+  chatMessagesEl.prepend(head);
+  appendChatMessageUIV2(msg);
+  if (stayAtBottom) chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  updateJumpPresentBar();
+}
+
 /** Aplica o mesmo limite das páginas ao fluxo realtime, sem saltar a leitura atual. */
 function cacheIncomingChatMessage(message) {
   const chId = message.channel_id;
@@ -1102,6 +1165,76 @@ function cacheIncomingChatMessage(message) {
 // ---------------------------------------------------------------------------
 // Histórico: páginas antigas/novas, janela "destacada" e salto para mensagem
 // ---------------------------------------------------------------------------
+function requestHistoryPage(channelId, cursor = {}) {
+  if (!sendWs("LoadMessages", { channel_id: channelId, limit: 50, ...cursor })) return false;
+  const hs = getHistoryState(channelId);
+  clearTimeout(hs.request?.timer);
+  const request = { ...cursor };
+  hs.request = request;
+  hs.loading = true;
+  syncHistoryLoading();
+  request.timer = setTimeout(() => {
+    if (state.historyState?.get(channelId) !== hs || hs.request !== request) return;
+    finishHistoryPage(hs);
+    if (state.pendingJump?.channelId === channelId && state.pendingJump.messageId === request.around_id) {
+      state.pendingJump = null;
+      showUiToast("Não foi possível localizar a mensagem. Tente novamente.");
+    }
+  }, 10000);
+  return true;
+}
+
+function syncHistoryLoading() {
+  const chId = getActiveTextChannelId();
+  const visible = chId && (state.activeView !== "home" || state.activeDmId);
+  chatMessagesEl.classList.toggle("is-loading-history", Boolean(visible && getHistoryState(chId).loading));
+}
+
+function finishHistoryPage(hs) {
+  clearTimeout(hs.request?.timer);
+  hs.request = null;
+  hs.loading = false;
+  syncHistoryLoading();
+}
+
+function resetHistoryRequests() {
+  state.pendingJump = null;
+  state.pendingHistoryRestore = null;
+  for (const hs of state.historyState?.values() || []) {
+    clearTimeout(hs.request?.timer);
+    hs.request = null;
+    hs.loading = false;
+  }
+  syncHistoryLoading();
+}
+
+function captureHistoryViewport() {
+  const channelId = getActiveTextChannelId();
+  if (!channelId || chatMainView.classList.contains("hidden") || isNearBottom() || state.searchQuery?.trim()) return null;
+  const top = chatMessagesEl.getBoundingClientRect().top;
+  for (const row of chatMessagesEl.querySelectorAll("[data-msg-id]")) {
+    const rect = row.getBoundingClientRect();
+    if (rect.bottom > top) return { channelId, messageId: row.dataset.msgId, offset: rect.top - top };
+  }
+  return null;
+}
+
+function restoreHistoryViewport({ messageId, offset }) {
+  const row = chatMessagesEl.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
+  if (!row) return false;
+  state.chatScrollRevision = null;
+  chatMessagesEl.scrollTop += row.getBoundingClientRect().top - chatMessagesEl.getBoundingClientRect().top - offset;
+  return true;
+}
+
+function refreshChatAfterReconnect() {
+  const anchor = state.reconnectViewport;
+  state.reconnectViewport = null;
+  if (!anchor || anchor.channelId !== getActiveTextChannelId() || chatMainView.classList.contains("hidden")) return;
+  if (restoreHistoryViewport(anchor)) return;
+  if (requestHistoryPage(anchor.channelId, { around_id: anchor.messageId })) state.pendingHistoryRestore = anchor;
+}
+
 function requestNewerMessages() {
   const chId = getActiveTextChannelId();
   const hs = getHistoryState(chId);
@@ -1109,10 +1242,7 @@ function requestNewerMessages() {
   const list = state.chatHistory[chId] || [];
   const last = list[list.length - 1];
   if (!last) return;
-  if (sendWs("LoadMessages", { channel_id: chId, after_id: last.id, limit: 50 })) {
-    hs.loading = true;
-    chatMessagesEl.classList.add("is-loading-history");
-  }
+  requestHistoryPage(chId, { after_id: last.id });
 }
 
 function jumpToPresent() {
@@ -1123,15 +1253,14 @@ function jumpToPresent() {
     hideJumpBar();
     return;
   }
-  if (sendWs("LoadMessages", { channel_id: chId, limit: 50 })) {
-    hs.loading = true;
-    state.pendingPresent = chId;
-  }
+  if (!hs.loading && !requestHistoryPage(chId)) showUiToast("Sem conexão para carregar o histórico.");
 }
 
 function flashMessage(el) {
   // O salto precisa terminar antes dos eventos de scroll: a animação partindo
   // do fundo disparava LoadMessages(after_id), recriando o DOM e perdendo o alvo.
+  state.chatScrollRevision = null;
+  state.scrollToDividerOnce = null;
   el.scrollIntoView({ block: "center", behavior: "instant" });
   el.classList.remove("flash-highlight");
   void el.offsetWidth;
@@ -1158,14 +1287,31 @@ function jumpToMessage(channelId, messageId) {
       switchToServerId(srv.id, channelId);
     }
   }
+  if (getActiveTextChannelId() !== channelId) return;
+  cancelMessageJump();
+  if (state.searchQuery) {
+    state.searchQuery = "";
+    if (chatSearchInput) chatSearchInput.value = "";
+    renderChatMessagesV2({ preserveScroll: true });
+  }
   const el = chatMessagesEl.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
   if (el) {
     flashMessage(el);
     return;
   }
-  state.pendingJump = { channelId, messageId };
-  getHistoryState(channelId).loading = true;
-  sendWs("LoadMessages", { channel_id: channelId, around_id: messageId, limit: 50 });
+  if (requestHistoryPage(channelId, { around_id: messageId })) {
+    state.pendingJump = { channelId, messageId };
+  } else {
+    showUiToast("Sem conexão para localizar a mensagem.");
+  }
+}
+
+function cancelMessageJump() {
+  if (!state.pendingJump) return;
+  const { channelId, messageId } = state.pendingJump;
+  state.pendingJump = null;
+  const hs = state.historyState?.get(channelId);
+  if (hs?.request?.around_id === messageId) finishHistoryPage(hs);
 }
 
 function mergeLatestPage(messages, current) {
@@ -1178,15 +1324,23 @@ function mergeLatestPage(messages, current) {
 function handleMessagesPageV2(payload) {
   const { channel_id, messages = [], has_more, has_more_after, around_id, after_id, before_id } = payload;
   const hs = getHistoryState(channel_id);
-  hs.loading = false;
-  chatMessagesEl.classList.remove("is-loading-history");
-  const isActive = channel_id === getActiveTextChannelId();
+  const request = hs.request;
+  if (!request || (request.around_id ?? null) !== (around_id ?? null) ||
+      (request.after_id ?? null) !== (after_id ?? null) || (request.before_id ?? null) !== (before_id ?? null)) return;
+  finishHistoryPage(hs);
+  const isActive = channel_id === getActiveTextChannelId() && (state.activeView !== "home" || state.activeDmId === channel_id);
+  const restore = state.pendingHistoryRestore?.channelId === channel_id && state.pendingHistoryRestore.messageId === around_id
+    ? state.pendingHistoryRestore : null;
+  if (around_id) {
+    if (restore) state.pendingHistoryRestore = null;
+    if (!isActive || (!restore && (state.pendingJump?.channelId !== channel_id || state.pendingJump.messageId !== around_id))) return;
+    state.pendingJump = null;
+  }
 
   if (around_id || (!before_id && !after_id)) {
     // Janela nova: ao redor de uma mensagem, ou "voltar ao presente".
     if (around_id && messages.length === 0) {
-      state.pendingJump = null;
-      showUiToast("Essa mensagem não existe mais.");
+      if (!restore) showUiToast("Essa mensagem não existe mais.");
       return;
     }
     state.chatHistory[channel_id] = around_id ? messages : mergeLatestPage(messages, state.chatHistory[channel_id] || []);
@@ -1196,10 +1350,8 @@ function handleMessagesPageV2(payload) {
     renderChatMessagesV2({ preserveScroll: Boolean(around_id) });
     if (around_id) {
       const el = chatMessagesEl.querySelector(`[data-msg-id="${CSS.escape(around_id)}"]`);
-      if (el) flashMessage(el);
-      state.pendingJump = null;
-    } else {
-      state.pendingPresent = null;
+      if (restore) restoreHistoryViewport(restore);
+      else if (el) flashMessage(el);
     }
     return;
   }
@@ -1381,6 +1533,9 @@ function placeUnreadDivider(channelId) {
 /** Chamado sempre que o usuário abre um canal/DM. */
 function onChannelOpened(channelId) {
   if (state.composerChannelId !== channelId) {
+    state.chatScrollRevision = null;
+    if (state.pendingJump) cancelMessageJump();
+    state.pendingHistoryRestore = null;
     if (state.sendWhenUploaded) {
       state.sendWhenUploaded = false;
       showUiToast("Envio automático cancelado ao mudar de conversa. Confira os anexos antes de enviar.");
@@ -1389,6 +1544,8 @@ function onChannelOpened(channelId) {
   }
   if (typeof switchComposerDraft === "function") switchComposerDraft(state.composerChannelId, channelId);
   state.composerChannelId = channelId;
+  if (typeof SancordOutbox !== "undefined") SancordOutbox.render();
+  if (typeof syncHistoryLoading === "function") syncHistoryLoading();
   if (state.suppressAckFor && state.suppressAckFor !== channelId) state.suppressAckFor = null;
   hideJumpBar();
   if (channelId) placeUnreadDivider(channelId);
@@ -1783,6 +1940,7 @@ chatInput?.addEventListener("keydown", (e) => {
 // Anexos no composer: upload com progresso, arrastar e soltar, colar
 // ---------------------------------------------------------------------------
 const composerTray = document.getElementById("composer-attachments");
+const activeAttachmentUploads = new Set();
 state.composerFiles = [];
 
 function addComposerFiles(fileList, presentation = null) {
@@ -1827,15 +1985,19 @@ function addComposerFiles(fileList, presentation = null) {
 }
 
 function uploadComposerFile(item) {
+  if (SancordConnection.isInterrupted()) { SancordConnection.markBlocked(); return; }
   item.status = "uploading";
   item.progress = 0;
   item.error = "";
   const xhr = new XMLHttpRequest();
+  const token = getStoredToken();
   item.xhr = xhr;
+  activeAttachmentUploads.add(item);
+  xhr.timeout = 120000;
   const query = new URLSearchParams({ filename: item.name });
   if (item.presentation) query.set("presentation", item.presentation);
   xhr.open("POST", SancordNet.url(`/api/attachments?${query}`));
-  xhr.setRequestHeader("Authorization", `Bearer ${getStoredToken() || ""}`);
+  xhr.setRequestHeader("Authorization", `Bearer ${token || ""}`);
   xhr.setRequestHeader("Content-Type", "application/octet-stream");
   xhr.upload.onprogress = (e) => {
     if (e.lengthComputable) {
@@ -1845,6 +2007,7 @@ function uploadComposerFile(item) {
   };
   xhr.onload = () => {
     if (item.removed || item.xhr !== xhr) return;
+    activeAttachmentUploads.delete(item);
     item.xhr = null;
     let data = null;
     try {
@@ -1856,6 +2019,7 @@ function uploadComposerFile(item) {
     } else {
       item.status = "error";
       item.error = data?.message || (xhr.status === 413 ? "Arquivo grande demais" : `Falha no envio (${xhr.status})`);
+      if (xhr.status === 401 && token === getStoredToken()) SancordConnection.reject();
     }
     if (!state.composerFiles.includes(item)) return;
     renderComposerTray();
@@ -1864,17 +2028,31 @@ function uploadComposerFile(item) {
       if (!state.composerFiles.some((f) => f.status === "error")) chatForm.requestSubmit();
     }
   };
-  xhr.onerror = () => {
+  xhr.onerror = xhr.ontimeout = xhr.onabort = () => {
     if (item.removed || item.xhr !== xhr) return;
+    activeAttachmentUploads.delete(item);
     item.xhr = null;
     item.status = "error";
-    item.error = "Sem conexão";
+    item.error = "Upload interrompido";
     if (state.composerFiles.includes(item)) {
       state.sendWhenUploaded = false;
       renderComposerTray();
     }
   };
   xhr.send(item.file);
+}
+
+function interruptAttachmentUploads() {
+  for (const item of activeAttachmentUploads) {
+    const xhr = item.xhr;
+    item.xhr = null;
+    item.status = "error";
+    item.error = "Upload interrompido";
+    xhr?.abort();
+  }
+  activeAttachmentUploads.clear();
+  state.sendWhenUploaded = false;
+  renderComposerTray();
 }
 
 function removeComposerFile(item) {
@@ -1894,6 +2072,7 @@ function clearComposerFiles() {
 function discardComposerFileList(files) {
   for (const file of files) {
     file.removed = true;
+    activeAttachmentUploads.delete(file);
     file.xhr?.abort();
     if (file.preview) URL.revokeObjectURL(file.preview);
   }
@@ -1988,7 +2167,8 @@ function convertBasicEmoticons(text) {
 function submitComposer() {
   if (chatInput.disabled) { showErrorToast("Você não pode enviar mensagens neste canal."); return; }
   const slowWait = currentSlowmodeWait(getActiveTextChannelId());
-  if (slowWait > 0) { showErrorToast(`Modo lento: aguarde ${formatSlowmodeWait(slowWait)} para enviar de novo.`); return; }
+  const offline = SancordConnection.isInterrupted();
+  if (!offline && slowWait > 0) { showErrorToast(`Modo lento: aguarde ${formatSlowmodeWait(slowWait)} para enviar de novo.`); return; }
   const content = convertBasicEmoticons(chatInput.value.trim());
   const files = state.composerFiles;
   if (files.length && !messagePermissions({ channel_id: getActiveTextChannelId() }).attach_files) return showErrorToast("Você não pode anexar arquivos neste canal.");
@@ -1997,6 +2177,7 @@ function submitComposer() {
     return;
   }
   if (files.some((f) => f.status === "pending" || f.status === "uploading")) {
+    if (offline) { showErrorToast("Reconecte para enviar seus anexos. O rascunho foi mantido."); return; }
     state.sendWhenUploaded = true;
     for (const file of files.filter(f => f.status === "pending")) uploadComposerFile(file);
     renderComposerTray();

@@ -82,6 +82,9 @@ macro_rules! redact_profile {
             $u.custom_status_emoji = None;
             $u.custom_status_expires_at = None;
         }
+        if !$scope.activity {
+            $u.activity = None;
+        }
         if !$scope.details {
             $u.created_at = None;
             $u.avatar_decoration = None;
@@ -107,13 +110,21 @@ macro_rules! redact_profile {
 }
 
 pub fn project_user(st: &ServerState, viewer: &str, user: &mut UserInfo) {
-    let scope = access(st, viewer, &user.username.to_lowercase());
+    let owner = user.username.to_lowercase();
+    let scope = access(st, viewer, &owner);
     redact_profile!(user, scope);
+    if viewer != owner && user.status_kind == "invisible" {
+        user.activity = None;
+    }
 }
 
 pub fn project_friend(st: &ServerState, viewer: &str, user: &mut FriendInfo) {
-    let scope = access(st, viewer, &user.username.to_lowercase());
+    let owner = user.username.to_lowercase();
+    let scope = access(st, viewer, &owner);
     redact_profile!(user, scope);
+    if viewer != owner && (!user.online || user.status_kind == "invisible") {
+        user.activity = None;
+    }
     if !scope.activity
         || user
             .voice_channel_id

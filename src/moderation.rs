@@ -322,6 +322,36 @@ pub fn search_terms(query: &str) -> Vec<String> {
         .collect()
 }
 
+fn fold_ascii_pt(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' | 'à' | 'ã' | 'â' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'õ' | 'ô' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            other => other,
+        })
+        .collect()
+}
+
+fn normalize_has_kind(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "link" | "links" => Some("link"),
+        "file" | "arquivo" | "arquivos" => Some("file"),
+        "image" | "imagem" | "imagens" => Some("image"),
+        "video" | "vídeo" | "videos" | "vídeos" => Some("video"),
+        "audio" | "áudio" | "audios" | "áudios" | "voz" => Some("audio"),
+        "embed" | "embeds" => Some("embed"),
+        "reaction" | "reacao" | "reação" | "reacoes" | "reações" => Some("reaction"),
+        "poll" | "enquete" | "enquetes" => Some("poll"),
+        _ => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn search(
     state: &SharedState,
@@ -333,18 +363,63 @@ pub async fn search(
     private_only: bool,
     author: Option<String>,
     has: Option<String>,
+    has_list: Vec<String>,
     before: Option<i64>,
     after: Option<i64>,
     pinned: bool,
     mentions_me: bool,
+    mentions_user: Option<String>,
+    sort: Option<String>,
+    offset: usize,
 ) {
     let request_id = request_id.map(|r| r.chars().take(40).collect::<String>());
+    let sort_norm = match sort.as_deref().map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("oldest") => "oldest".to_string(),
+        Some("relevance") => "relevance".to_string(),
+        _ => "recent".to_string(),
+    };
+    let safe_offset = offset.min(2000);
+
+    // Rate limit dedicado por conexão contra abuso em buscas globais.
+    {
+        let now = crate::auth::now_ms();
+        let mut st = state.write().await;
+        if !st.rates.entry(user_id.to_string()).or_default().allow_search(now) {
+            st.send_to(
+                user_id,
+                ServerMessage::SearchResults {
+                    request_id,
+                    hits: Vec::new(),
+                    has_more: false,
+                    total_count: 0,
+                    offset: safe_offset,
+                    sort: sort_norm,
+                    error: Some("Muitas buscas em seguida. Aguarde alguns segundos.".into()),
+                },
+            );
+            return;
+        }
+    }
+
     let (db, filter) = {
         let st = state.read().await;
         let Some(lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else { return };
         let readable = st.readable_channels(&lower);
         let channels: Vec<String> = if let Some(ch) = &channel_id {
-            readable.into_iter().filter(|c| c == ch).collect()
+            // Se for canal pai (ex.: fórum/texto com threads), inclui o canal e suas threads legíveis.
+            let mut set: Vec<String> = readable
+                .iter()
+                .filter(|c| *c == ch)
+                .cloned()
+                .collect();
+            if let Some(srv) = st.find_server_by_text_channel(ch) {
+                for th in &srv.threads {
+                    if th.parent_id == *ch && readable.contains(&th.id) && !set.contains(&th.id) {
+                        set.push(th.id.clone());
+                    }
+                }
+            }
+            set
         } else if let Some(sid) = &server_id {
             match st.find_server(sid) {
                 Some(srv) => readable
@@ -358,16 +433,68 @@ pub async fn search(
         } else {
             readable
         };
+
+        let mut normalized_has: Vec<String> = Vec::new();
+        if let Some(h) = has.as_deref().and_then(normalize_has_kind) {
+            normalized_has.push(h.to_string());
+        }
+        for raw_h in &has_list {
+            if let Some(h) = normalize_has_kind(raw_h) {
+                let s = h.to_string();
+                if !normalized_has.contains(&s) {
+                    normalized_has.push(s);
+                }
+            }
+        }
+
+        let terms = search_terms(&query);
+        let folded_terms: Vec<String> = terms.iter().map(|t| fold_ascii_pt(t)).collect();
+        let mut matching_thread_channels = Vec::new();
+        if !folded_terms.is_empty() {
+            for ch in &channels {
+                if let Some(srv) = st.find_server_by_text_channel(ch) {
+                    if let Some(th) = srv.thread(ch) {
+                        let parent_tags: Vec<String> = srv
+                            .find_channel(&th.parent_id)
+                            .map(|parent| {
+                                th.tags
+                                    .iter()
+                                    .filter_map(|tid| parent.forum_tags.iter().find(|ft| ft.id == *tid).map(|ft| ft.name.clone()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let hay = fold_ascii_pt(&format!("{} {}", th.name, parent_tags.join(" ")));
+                        if folded_terms.iter().all(|t| hay.contains(t.as_str())) {
+                            matching_thread_channels.push(ch.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        let explicit_mention = mentions_user
+            .map(|u| u.trim().trim_start_matches('@').to_lowercase())
+            .filter(|u| !u.is_empty());
+        let (target_mention, include_roles) = if let Some(u) = explicit_mention {
+            (Some(u), false)
+        } else if mentions_me {
+            (Some(lower.clone()), true)
+        } else {
+            (None, false)
+        };
+
         let filter = SearchFilter {
             channels,
-            terms: search_terms(&query),
+            terms,
             author_lower: author.map(|a| a.trim().trim_start_matches('@').to_lowercase()).filter(|a| !a.is_empty()),
-            has: has.filter(|h| matches!(h.as_str(), "link" | "file" | "image")),
+            has: None,
+            has_list: normalized_has,
             before,
             after,
             pinned,
-            mentions_user: mentions_me.then(|| lower.clone()),
-            mention_roles: if mentions_me {
+            mentions_user: target_mention,
+            mentions_include_roles: include_roles,
+            mention_roles: if include_roles {
                 st.servers
                     .iter()
                     .filter_map(|s| s.member_roles.get(&lower))
@@ -379,15 +506,31 @@ pub async fn search(
             } else {
                 Vec::new()
             },
+            matching_thread_channels,
+            sort: sort_norm.clone(),
+            offset: safe_offset,
             limit: SEARCH_PAGE,
         };
         let no_filters = filter.terms.is_empty()
             && filter.author_lower.is_none()
-            && filter.has.is_none()
+            && filter.has_list.is_empty()
+            && filter.before.is_none()
+            && filter.after.is_none()
             && !filter.pinned
             && filter.mentions_user.is_none();
         if no_filters {
-            st.send_to(user_id, ServerMessage::SearchResults { request_id, hits: Vec::new(), has_more: false });
+            st.send_to(
+                user_id,
+                ServerMessage::SearchResults {
+                    request_id,
+                    hits: Vec::new(),
+                    has_more: false,
+                    total_count: 0,
+                    offset: safe_offset,
+                    sort: sort_norm,
+                    error: None,
+                },
+            );
             return;
         }
         (st.db.clone(), filter)
@@ -400,18 +543,40 @@ pub async fn search(
     let st = state.read().await;
     let Some(lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else { return };
     match result {
-        Ok(Ok((messages, has_more))) => {
+        Ok(Ok((messages, has_more, total_count))) => {
             let hits = messages
                 .into_iter()
                 // Revalida: permissões podem ter mudado durante a consulta.
                 .filter(|m| st.can_read_text_channel(&lower, &m.channel_id))
                 .map(|m| describe_hit(&st, &lower, m))
                 .collect();
-            st.send_to(user_id, ServerMessage::SearchResults { request_id, hits, has_more });
+            st.send_to(
+                user_id,
+                ServerMessage::SearchResults {
+                    request_id,
+                    hits,
+                    has_more,
+                    total_count,
+                    offset: safe_offset,
+                    sort: sort_norm,
+                    error: None,
+                },
+            );
         }
         other => {
             warn!("Falha na busca: {other:?}");
-            st.feedback(user_id, false, "search", "Não foi possível concluir a busca.");
+            st.send_to(
+                user_id,
+                ServerMessage::SearchResults {
+                    request_id,
+                    hits: Vec::new(),
+                    has_more: false,
+                    total_count: 0,
+                    offset: safe_offset,
+                    sort: sort_norm,
+                    error: Some("Não foi possível pesquisar agora.".into()),
+                },
+            );
         }
     }
 }
@@ -421,19 +586,116 @@ fn describe_hit(st: &ServerState, me: &str, message: crate::models::ChatMessage)
     if let Some((a, b)) = ServerState::parse_dm_participants(&ch) {
         let peer = if a == me { b } else { a };
         let name = st.resolve_friend_info(&peer).map(|f| f.username).unwrap_or(peer);
-        return SearchHit { message, channel_name: format!("@{name}"), server_id: None, server_name: None };
+        return SearchHit {
+            message,
+            channel_name: format!("@{name}"),
+            server_id: None,
+            server_name: None,
+            parent_channel_name: None,
+            is_thread: false,
+            is_forum: false,
+        };
     }
     if let Some(g) = st.group_for_channel(&ch) {
         let name = g.name.clone().unwrap_or_else(|| "Grupo".into());
-        return SearchHit { message, channel_name: name, server_id: None, server_name: None };
+        return SearchHit {
+            message,
+            channel_name: name,
+            server_id: None,
+            server_name: None,
+            parent_channel_name: None,
+            is_thread: false,
+            is_forum: false,
+        };
     }
     let srv = st.find_server_by_text_channel(&ch);
+    if let Some(s) = srv {
+        if let Some(th) = s.thread(&ch) {
+            let parent = s.find_channel(&th.parent_id);
+            let is_forum = parent.is_some_and(|p| p.kind == crate::models::ChannelKind::Forum);
+            return SearchHit {
+                channel_name: format!("🧵 {}", th.name),
+                parent_channel_name: parent.map(|p| p.name.clone()),
+                is_thread: true,
+                is_forum,
+                server_id: Some(s.id.clone()),
+                server_name: Some(s.name.clone()),
+                message,
+            };
+        }
+        if let Some(c) = s.find_channel(&ch) {
+            return SearchHit {
+                channel_name: c.name.clone(),
+                parent_channel_name: None,
+                is_thread: false,
+                is_forum: c.kind == crate::models::ChannelKind::Forum,
+                server_id: Some(s.id.clone()),
+                server_name: Some(s.name.clone()),
+                message,
+            };
+        }
+    }
     SearchHit {
-        channel_name: srv
-            .and_then(|s| s.find_channel(&ch).map(|c| c.name.clone()).or_else(|| s.thread(&ch).map(|t| format!("🧵 {}", t.name))))
-            .unwrap_or_default(),
+        channel_name: String::new(),
+        parent_channel_name: None,
+        is_thread: false,
+        is_forum: false,
         server_id: srv.map(|s| s.id.clone()),
         server_name: srv.map(|s| s.name.clone()),
         message,
     }
+}
+
+/// Carrega mensagens vizinhas (antes e depois) para o preview "Ver contexto" da busca,
+/// revalidando permissões de leitura do canal.
+pub async fn message_context(
+    state: &SharedState,
+    user_id: &str,
+    request_id: Option<String>,
+    channel_id: String,
+    message_id: String,
+) {
+    let request_id = request_id.map(|r| r.chars().take(40).collect::<String>());
+    let db = {
+        let st = state.read().await;
+        let Some(lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else { return };
+        if !st.can_read_text_channel(&lower, &channel_id) {
+            st.send_to(
+                user_id,
+                ServerMessage::MessageContext {
+                    request_id,
+                    channel_id,
+                    message_id,
+                    messages: Vec::new(),
+                },
+            );
+            return;
+        }
+        st.db.clone()
+    };
+    let ch = channel_id.clone();
+    let mid = message_id.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        db.flush();
+        db.messages_around(&ch, &mid, 5)
+    })
+    .await;
+    let st = state.read().await;
+    let Some(lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else { return };
+    if !st.can_read_text_channel(&lower, &channel_id) {
+        return;
+    }
+    let messages = match res {
+        Ok(Ok((list, _, _))) => list,
+        _ => Vec::new(),
+    };
+    st.send_to(
+        user_id,
+        ServerMessage::MessageContext {
+            request_id,
+            channel_id,
+            message_id,
+            messages,
+        },
+    );
 }

@@ -36,7 +36,8 @@ test('cartão e editor preservam as camadas, a mídia e o efeito durante mudanç
   const pronouns = d.getElementById('settings-pronouns');
   pronouns.value = 'ela/dela';
   pronouns.dispatchEvent(new h.w.Event('input', { bubbles: true }));
-  assert.match(slot('preview-card-handle').textContent, /ela\/dela/);
+  assert.equal(slot('preview-card-handle').textContent, '@mika');
+  assert.equal(slot('preview-card-pronouns').textContent, 'ela/dela');
   assert.equal(slot('pe-add-pronouns').classList.contains('hidden'), true);
   assert.equal(d.getElementById('unsaved-profile-bar').classList.contains('hidden'), false);
   d.getElementById('pe-context-toggle').click();

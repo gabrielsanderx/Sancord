@@ -184,7 +184,7 @@ function showCollectionPreview(look) {
   }, user, "collection");
   collectionPreviewTitle.textContent = look.item ? look.item.name : "Prévia da combinação";
   document.getElementById("collection-preview-items").textContent = Object.entries(collectionKinds)
-    .map(([kind, { field }]) => cosmeticInfo(kind, look.appearance[field])?.name)
+    .flatMap(([kind, { field }]) => (look.appearance[field] || "").split("+").map(id => cosmeticInfo(kind, id)?.name))
     .filter(Boolean).join(" · ");
   collectionUse.textContent = "Usar no editor";
   collectionUse.disabled = !ownsCollectionAppearance(look.appearance);

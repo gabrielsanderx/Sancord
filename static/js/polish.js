@@ -715,7 +715,6 @@ if (languageSelect && typeof currentLanguage === "function") {
 }
 document.addEventListener("sancord:language", () => {
   // Textos montados por código que usam t().
-  if (typeof setAuthMode === "function" && typeof authMode !== "undefined") setAuthMode(authMode);
   renderExtraShortcuts();
   const modal = document.getElementById("quick-switcher");
   if (modal && !modal.classList.contains("hidden")) {

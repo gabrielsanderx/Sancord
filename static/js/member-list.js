@@ -257,11 +257,20 @@
     if (isMemberOffline(user)) return "";
     const voiceText = resolveMemberVoiceActivity(server, user, options);
     if (voiceText) return voiceText;
-    const rich = typeof user?.activity_text === "string"
-      ? user.activity_text.trim()
-      : typeof user?.activity === "string"
-        ? user.activity.trim()
-        : "";
+    let rich = "";
+    if (typeof user?.activity_text === "string" && user.activity_text.trim()) {
+      rich = user.activity_text.trim();
+    } else if (typeof user?.activity === "string" && user.activity.trim()) {
+      rich = user.activity.trim();
+    } else if (user?.activity && typeof user.activity === "object" && user.activity.name) {
+      if (typeof SancordActivity !== "undefined" && typeof SancordActivity.formatCompactLine === "function") {
+        rich = SancordActivity.formatCompactLine(user.activity);
+      } else {
+        const k = String(user.activity.kind || "playing").toLowerCase();
+        const icon = k === "listening" ? "🎧" : k === "watching" ? "📺" : k === "competing" ? "🏆" : "🎮";
+        rich = `${icon} ${String(user.activity.name).trim()}`;
+      }
+    }
     if (rich) return rich;
     const custom = typeof options.customStatus === "string" ? options.customStatus.trim() : "";
     if (custom) return custom;
@@ -420,7 +429,7 @@
           timeoutUntil || "",
           voiceText,
           customStatus,
-          u.activity_text || u.activity || "",
+          u.activity_text || (typeof u.activity === "string" ? u.activity : u.activity ? `${u.activity.kind || ""}:${u.activity.name || ""}` : ""),
         ].join("\u001f"));
       }
     }

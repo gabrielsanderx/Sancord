@@ -73,6 +73,35 @@ test('painel inclui membros reais offline, elimina sessões repetidas e filtra o
   assert.equal(rows.filter(u => u.status_kind === 'offline').length, 2);
   assert.equal(rows.find(u => u.username === 'bia').id, null);
   assert.equal(c.sidebarMemberRows({id:'sancord',members:['desconhecido']}, []).length, 0);
+
+  // Membro offline com member_roster preserva personalizações de perfil (avatar, estilo, decoração, placa)
+  const srvRoster = {
+    id: 's2',
+    owner_username: 'swag',
+    members: ['swag'],
+    member_roster: {
+      swag: {
+        username: 'Swag',
+        display_name: 'Swag Oficial',
+        avatar_url: '/api/attachments/a1/swag.png',
+        avatar_color: '#7862d4',
+        avatar_decoration: 'core-orbit',
+        nameplate_style: 'core-stripe',
+        name_style: 'neon',
+        name_color: '#00e5ff',
+        online: false,
+      },
+    },
+  };
+  const offlineRows = c.sidebarMemberRows(srvRoster, []);
+  assert.equal(offlineRows.length, 1);
+  assert.equal(offlineRows[0].status_kind, 'offline');
+  assert.equal(offlineRows[0].username, 'Swag');
+  assert.equal(offlineRows[0].display_name, 'Swag Oficial');
+  assert.equal(offlineRows[0].avatar_url, '/api/attachments/a1/swag.png');
+  assert.equal(offlineRows[0].avatar_decoration, 'core-orbit');
+  assert.equal(offlineRows[0].nameplate_style, 'core-stripe');
+  assert.equal(offlineRows[0].name_style, 'neon');
 });
 
 function welcomeHarness(history) {

@@ -132,43 +132,175 @@ test('Editar perfil abre Perfis; Status abre submenu e atualiza realtime; Engren
   assert.equal(d.getElementById('settings-tab-profile').classList.contains('hidden'), false);
 });
 
-test('Developer Mode controla Copiar ID; Insígnias respeita badges reais; sem botões mortos e seletor multi-conta isolado', async t => {
+test('Developer Mode controla Copiar ID; sem Insígnias/Coleção/Clipes nas ações; badges visíveis no cabeçalho; multi-conta isolado', async t => {
   const h = await setup(t);
   const d = h.document;
   const trigger = d.getElementById('self-profile-trigger');
 
-  // Developer Mode OFF -> Copiar ID oculto; Insígnias visível (conta possui 2); sem Clipes/Orbs.
+  // Developer Mode OFF -> Copiar ID oculto; 2 cards compactos; sem Insígnias/Coleção/Clipes como botão; badges visíveis no topo.
   trigger.click();
+  const menu = d.getElementById('self-profile-menu');
   assert.equal(d.getElementById('spm-copy-id'), null);
-  assert.ok(d.getElementById('spm-badges-trigger'));
-  const menuText = d.getElementById('self-profile-menu').textContent;
-  assert.ok(!/Clipes|Orbs|Nitro/i.test(menuText), 'Não deve exibir botões mortos ou comerciais');
+  assert.equal(d.getElementById('spm-badges-trigger'), null, 'Insígnias NÃO deve mais ser botão do Self Profile Menu');
+  assert.equal(d.getElementById('spm-collection-trigger'), null, 'Minha coleção NÃO deve mais ser botão do Self Profile Menu');
+  assert.equal(menu.querySelectorAll('.spm-card').length, 2, 'Deve organizar ações em 2 cards compactos');
+  const menuText = menu.textContent;
+  assert.ok(!/Clipes|Orbs|Nitro|Minha coleção|Em breve/i.test(menuText), 'Não deve exibir botões removidos, mortos ou comerciais');
 
-  // Submenu Insígnias lista apenas badges reais da conta.
-  d.getElementById('spm-badges-trigger').click();
-  const badgeLabels = [...d.querySelectorAll('#self-profile-submenu .spm-badge-item .spm-row-label')].map(el => el.textContent);
-  assert.deepEqual(badgeLabels, ['Fundador', 'Desenvolvedor']);
+  // Badges continuam visíveis visualmente no cabeçalho do perfil com tooltip.
+  const headerBadges = [...menu.querySelectorAll('.spm-badges .profile-badge')].map(el => el.dataset.badge);
+  assert.deepEqual(headerBadges, ['founder', 'developer']);
+  assert.equal(menu.querySelector('.spm-badges').classList.contains('hidden'), false);
+  assert.equal(menu.classList.contains('has-frame'), true, 'Profile Frame real equipada deve ser aplicada');
 
-  // Sem badges na conta -> linha Insígnias desaparece.
-  h.run('state.selfUser.badges = []; state.audioSettings.developerMode = true; SancordSelfProfileMenu.refreshIfOpen()');
-  assert.equal(d.getElementById('spm-badges-trigger'), null);
+  // Sem badges e sem frame -> container de badges some e classe has-frame é removida.
+  h.run('state.selfUser.badges = []; state.selfUser.profile_frame = null; state.audioSettings.developerMode = true; SancordSelfProfileMenu.refreshIfOpen()');
+  assert.equal(menu.querySelector('.spm-badges').classList.contains('hidden'), true);
+  assert.equal(menu.classList.contains('has-frame'), false, 'Sem moldura equipada não deve renderizar moldura artificial');
 
-  // Developer Mode ON -> Copiar ID aparece e copia o ID real.
+  // Developer Mode ON -> Copiar ID aparece no card 2 e copia o ID real.
   const copyBtn = d.getElementById('spm-copy-id');
   assert.ok(copyBtn, 'Copiar ID deve aparecer quando Modo Desenvolvedor = ON');
   h.run('globalThis.__copied = null; copyTextSafe = async (txt) => { __copied = txt; }');
   copyBtn.click();
   assert.equal(h.run('__copied'), 'user-swag-001');
 
-  // Seletor multi-conta: registra 2 contas isoladas e lista no submenu Mudar de conta.
+  // Com apenas 1 conta salva, Mudar de conta não exibe contador; com 2 contas, exibe contador e lista ambas.
   h.run(`
+    SancordSelfProfileMenu.clearAllSavedAccounts();
     SancordSelfProfileMenu.registerSavedAccount({ id: 'user-swag-001', username: 'Swag', display_name: 'Swag', token: 'tok-swag', remember: true });
-    SancordSelfProfileMenu.registerSavedAccount({ id: 'user-gab-002', username: 'Gabriel', display_name: 'Gabriel', token: 'tok-gab', remember: true });
     SancordSelfProfileMenu.open();
   `);
+  assert.equal(d.querySelector('#spm-accounts-trigger .spm-row-meta'), null);
+
+  h.run(`
+    SancordSelfProfileMenu.registerSavedAccount({ id: 'user-gab-002', username: 'Gabriel', display_name: 'Gabriel', token: 'tok-gab', remember: true });
+    SancordSelfProfileMenu.refreshIfOpen();
+  `);
+  assert.equal(d.querySelector('#spm-accounts-trigger .spm-row-meta')?.textContent, '2');
   d.getElementById('spm-accounts-trigger').click();
   const accLabels = [...d.querySelectorAll('#self-profile-submenu .spm-account-row .spm-row-label')].map(el => el.textContent);
   assert.deepEqual(accLabels, ['Swag', 'Gabriel']);
   assert.ok(d.getElementById('spm-add-account'));
   assert.ok(d.getElementById('spm-logout-all'));
+});
+
+test('Editar perfil -> Insígnias: mostra apenas badges possuídas, permite ocultar, reordenar, cancelar, salvar, respeita limite e can_hide', async t => {
+  const h = await setup(t);
+  const d = h.document;
+
+  // Carrega CosmeticsState realista com 4 badges possuídas (1 obrigatória verified_bot) de um catálogo maior.
+  h.run(`
+    onCosmeticsState({
+      catalog: [],
+      owned: [],
+      badges: [
+        { id: 'founder', name: 'Fundação', description: 'Fundou o Sancord.', category: 'trust', can_hide: true },
+        { id: 'developer', name: 'Desenvolvimento', description: 'Equipe dev.', category: 'trust', can_hide: true },
+        { id: 'verified_bot', name: 'Bot verificado', description: 'Integração verificada.', category: 'trust', can_hide: false },
+        { id: 'early_user', name: 'Pioneira', description: 'Fase inicial.', category: 'cosmetic', can_hide: true },
+        { id: 'event_winner', name: 'Vencedora', description: 'NÃO possuída.', category: 'trust', can_hide: true },
+      ],
+      owned_badges: ['founder', 'developer', 'verified_bot', 'early_user'],
+      badge_order: [],
+      hidden_badges: [],
+      max_visible_badges: 6,
+      collection: { favorites: [], presets: [], seen: [] },
+    });
+    openSettingsModal('profile');
+  `);
+
+  // Na tela inicial do editor, Insígnias fica recolhida em um card resumo (não lista tudo na coluna principal).
+  const openBadgesBtn = d.getElementById('open-badges-editor-btn');
+  assert.ok(openBadgesBtn);
+  assert.equal(d.querySelector('[data-pe-view="badges"]').classList.contains('hidden'), true);
+
+  // Abre o subeditor de Insígnias.
+  openBadgesBtn.click();
+  assert.equal(d.querySelector('[data-pe-view="badges"]').classList.contains('hidden'), false);
+  const listedIds = [...d.querySelectorAll('#pe-badges-editor .pe-badge-row')].map(el => el.dataset.badgeId);
+  assert.deepEqual(listedIds, ['founder', 'developer', 'verified_bot', 'early_user'], 'Nunca deve listar badge não possuída (event_winner)');
+
+  // Badge obrigatória (can_hide: false) tem checkbox desabilitado.
+  const botCheckbox = d.querySelector('#pe-badges-editor [data-badge-id="verified_bot"] .pe-badge-checkbox');
+  assert.equal(botCheckbox.checked, true);
+  assert.equal(botCheckbox.disabled, true);
+
+  // Ocultar 'developer' e mover 'early_user' para cima atualiza prévia ao vivo imediatamente.
+  const devCheckbox = d.querySelector('#pe-badges-editor [data-badge-id="developer"] .pe-badge-checkbox');
+  devCheckbox.checked = false;
+  devCheckbox.dispatchEvent(new h.w.Event('change', { bubbles: true }));
+  d.querySelector('#pe-badges-editor [data-badge-id="early_user"] [data-badge-move="up"]').click();
+
+  const livePreviewIds = [...d.querySelectorAll('#preview-card-badges .profile-badge')].map(el => el.dataset.badge);
+  assert.deepEqual(livePreviewIds, ['founder', 'early_user', 'verified_bot']);
+
+  // Cancelar no subeditor descarta as alterações locais e restaura prévia.
+  const cancelSubBtn = [...d.querySelectorAll('[data-pe-view="badges"] .pe-chooser-actions button')].find(b => b.textContent === 'Cancelar');
+  cancelSubBtn.click();
+  const restoredPreviewIds = [...d.querySelectorAll('#preview-card-badges .profile-badge')].map(el => el.dataset.badge);
+  assert.deepEqual(restoredPreviewIds, ['founder', 'developer', 'verified_bot', 'early_user']);
+
+  // Reabre, faz alterações, clica Aplicar e depois Salvar alterações -> envia UpdateProfile com badge_order e hidden_badges.
+  openBadgesBtn.click();
+  d.querySelector('#pe-badges-editor [data-badge-id="developer"] .pe-badge-checkbox').click();
+  d.querySelector('#pe-badges-editor [data-badge-id="early_user"] [data-badge-move="up"]').click();
+  const applySubBtn = [...d.querySelectorAll('[data-pe-view="badges"] .pe-chooser-actions button')].find(b => b.textContent === 'Aplicar');
+  applySubBtn.click();
+  assert.equal(d.getElementById('unsaved-profile-bar').classList.contains('hidden'), false);
+
+  d.getElementById('save-profile-btn').click();
+  await new Promise(r => setTimeout(r, 10));
+  const sent = JSON.parse(h.run('JSON.stringify(__sent[__sent.length - 1])'));
+  assert.equal(sent[0], 'UpdateProfile');
+  assert.deepEqual(sent[1].hidden_badges, ['developer']);
+  assert.deepEqual(sent[1].badge_order, ['founder', 'developer', 'early_user', 'verified_bot']);
+  assert.deepEqual(Array.from(h.run('state.selfUser.badges')), ['founder', 'early_user', 'verified_bot']);
+
+  // Self Profile Menu reflete imediatamente as badges atualizadas.
+  h.run('closeSettingsModal(); SancordSelfProfileMenu.open()');
+  const spmBadges = [...d.querySelectorAll('#self-profile-menu .spm-badges .profile-badge')].map(el => el.dataset.badge);
+  assert.deepEqual(spmBadges, ['founder', 'early_user', 'verified_bot']);
+
+  // Limite máximo (8 possuídas com max_visible_badges = 6) + estado vazio (0 possuídas).
+  h.run(`
+    onCosmeticsState({
+      catalog: [],
+      owned: [],
+      badges: [
+        { id: 'founder', name: 'Fundação', description: 'd', category: 'trust', can_hide: true },
+        { id: 'developer', name: 'Dev', description: 'd', category: 'trust', can_hide: true },
+        { id: 'moderator', name: 'Mod', description: 'd', category: 'trust', can_hide: true },
+        { id: 'contributor', name: 'Contrib', description: 'd', category: 'trust', can_hide: true },
+        { id: 'bug_hunter', name: 'Bugs', description: 'd', category: 'trust', can_hide: true },
+        { id: 'event_winner', name: 'Evento', description: 'd', category: 'trust', can_hide: true },
+        { id: 'early_user', name: 'Pioneira', description: 'd', category: 'cosmetic', can_hide: true },
+        { id: 'alpha', name: 'Alpha', description: 'd', category: 'cosmetic', can_hide: true },
+      ],
+      owned_badges: ['founder', 'developer', 'moderator', 'contributor', 'bug_hunter', 'event_winner', 'early_user', 'alpha'],
+      badge_order: [],
+      hidden_badges: [],
+      max_visible_badges: 6,
+      collection: { favorites: [], presets: [], seen: [] },
+    });
+    openSettingsModal('profile');
+    openPeView('badges');
+  `);
+  assert.equal(d.querySelectorAll('#preview-card-badges .profile-badge').length, 6, 'Limite máximo de 6 badges visíveis');
+  assert.equal(d.querySelectorAll('#pe-badges-editor .pe-badge-row.is-capped').length, 2, 'Excedentes marcados como fora do limite');
+
+  // Estado vazio (0 badges possuídas).
+  h.run(`
+    onCosmeticsState({
+      catalog: [],
+      owned: [],
+      badges: [],
+      owned_badges: [],
+      badge_order: [],
+      hidden_badges: [],
+      max_visible_badges: 6,
+      collection: { favorites: [], presets: [], seen: [] },
+    });
+  `);
+  assert.ok(d.querySelector('#pe-badges-editor .pe-badges-empty'), 'Deve mostrar estado vazio limpo quando a conta não possui insígnias');
 });

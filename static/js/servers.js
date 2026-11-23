@@ -181,6 +181,7 @@ function findChannel(srv, id) {
 
 /** Envia a nova ordem e aplica localmente (o servidor confirma com ServerUpdated). */
 function commitLayout(srv, groups, { categoriesOnly = false } = {}) {
+  if (SancordConnection.isInterrupted()) { SancordConnection.markBlocked(); return; }
   const categories = groups.filter((g) => g.category).map((g) => g.category.id);
   const placements = [];
   for (const g of groups) {

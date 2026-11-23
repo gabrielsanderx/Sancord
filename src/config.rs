@@ -29,6 +29,8 @@ pub struct Config {
     /// produto: em uso real fica desligado e um hub antigo é apagado ao iniciar. Os testes
     /// antigos ainda usam o canal "geral" dele como atalho, por isso continua ligado só lá.
     pub legacy_hub: bool,
+    /// Indica indisponibilidade programada para clientes em reconexão.
+    pub maintenance_mode: bool,
 }
 
 pub const DEFAULT_STUN_URLS: &[&str] = &[
@@ -95,6 +97,7 @@ impl Config {
             session_hours_short,
             ice_servers,
             legacy_hub: false,
+            maintenance_mode: var("SANCORD_MAINTENANCE_MODE").as_deref() == Some("1"),
         }
     }
 
@@ -108,6 +111,7 @@ impl Config {
             session_hours_short: 24,
             ice_servers: ice_servers_from(None, None, None, None),
             legacy_hub: true,
+            maintenance_mode: false,
         }
     }
 

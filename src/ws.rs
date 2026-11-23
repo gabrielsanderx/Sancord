@@ -13,6 +13,7 @@ use crate::validate::{
     MAX_PROFILE_IMAGE_BYTES,
 };
 use axum::{
+    http::StatusCode,
     extract::{
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
         State,
@@ -25,7 +26,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, Mutex, Notify};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -36,6 +37,9 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(15);
 /// Intervalo de ping do servidor e tempo máximo sem nenhum tráfego do cliente.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const IDLE_TIMEOUT_MS: i64 = 90_000;
+const PRESENCE_GRACE: Duration = Duration::from_secs(5);
+// Serializa reenvios do mesmo ID sem segurar o lock do estado durante I/O.
+static CHAT_DELIVERIES: [Mutex<()>; 64] = [const { Mutex::const_new(()) }; 64];
 /// Código de fechamento usado quando a autenticação falha (o cliente não deve reconectar).
 pub const CLOSE_AUTH_FAILED: u16 = 4001;
 
@@ -394,9 +398,13 @@ pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<SharedState>,
 ) -> impl IntoResponse {
+    if state.read().await.config.maintenance_mode {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     ws.max_message_size(MAX_WS_MESSAGE_BYTES)
         .max_frame_size(MAX_WS_MESSAGE_BYTES)
         .on_upgrade(move |socket| handle_socket(socket, state))
+        .into_response()
 }
 
 /// Espera o primeiro pacote `JoinServer` com um token válido.
@@ -436,6 +444,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
         Ok(v) => v,
         Err(reason) => {
             debug!("WebSocket recusado ({conn_id}): {reason}");
+            if reason.starts_with("Tempo") || reason.starts_with("Conexão") { return; }
             let msg = ServerMessage::AuthFailed { message: reason.to_string() };
             if let Ok(json) = serde_json::to_string(&msg) {
                 let _ = ws_sender.send(Message::Text(json)).await;
@@ -545,8 +554,9 @@ async fn join_authenticated(user_id: &str, mut acc: Account, state: &SharedState
     {
         let lower = acc.username.to_lowercase();
         let granted = st.badge_grants.get(&lower).cloned().unwrap_or_default();
-        acc.profile.badges = crate::cosmetics::effective_badges(&acc, &granted);
+        crate::cosmetics::sync_account_badges(&mut acc, &granted);
         if let Some(stored) = st.accounts.get_mut(&lower) {
+            stored.owned_badges = acc.owned_badges.clone();
             stored.profile.badges = acc.profile.badges.clone();
         }
     }
@@ -585,6 +595,7 @@ async fn join_authenticated(user_id: &str, mut acc: Account, state: &SharedState
                     stream_quality: None,
                     camera_stream_id: None,
                     screen_stream_id: None,
+                    activity: None,
                 }
             };
 
@@ -601,12 +612,16 @@ async fn join_authenticated(user_id: &str, mut acc: Account, state: &SharedState
             }
 
             st.users.insert(user_id.to_string(), user_info.clone());
+            let retired: Vec<_> = st.presence_grace.iter()
+                .filter(|(_, u)| u.username.eq_ignore_ascii_case(&final_name))
+                .map(|(id, _)| id.clone()).collect();
+            for id in &retired { st.presence_grace.remove(id); }
             info!("Usuário entrou no servidor: {} ({})", final_name, user_id);
             let prefs = st.prefs_for(&account_id, &final_lower);
             let read_states = st.read_states_for(&account_id, &final_lower);
 
             let welcome = ServerMessage::Welcome {
-                composer_capabilities: vec!["media_v1".into(), "scheduling_v1".into()],
+                composer_capabilities: vec!["media_v1".into(), "scheduling_v1".into(), "connection_v1".into(), "activity_v1".into(), "search_v2".into()],
                 user: user_info.clone(),
                 text_channels: st.text_channels.clone(),
                 voice_channels: st.voice_channels.clone(),
@@ -644,10 +659,43 @@ async fn join_authenticated(user_id: &str, mut acc: Account, state: &SharedState
                     user: user_info,
                 },
             );
+            for id in retired { st.broadcast(ServerMessage::UserLeft { user_id: id }); }
 
             st.broadcast_friends_sync_all();
         }
     }
+}
+
+pub(crate) fn durable_chat_nonce(nonce: &str) -> Option<Uuid> {
+    let raw = nonce.strip_prefix("delivery:")?;
+    let id = Uuid::parse_str(raw).ok()?;
+    (id.hyphenated().to_string() == raw).then_some(id)
+}
+
+async fn chat_receipt(db: Arc<crate::db::Db>, account_id: String, nonce: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || {
+        db.flush();
+        db.has_chat_receipt(&account_id, &nonce)
+    }).await.ok().and_then(Result::ok)
+        .ok_or_else(|| "Não foi possível confirmar o envio. Tente novamente.".to_string())
+}
+
+async fn deliver_chat(user_id: &str, message: ClientMessage, nonce: &str, id: Uuid, state: &SharedState) -> Result<(), String> {
+    let _guard = CHAT_DELIVERIES[id.as_bytes()[0] as usize % CHAT_DELIVERIES.len()].lock().await;
+    let (account_id, db) = {
+        let st = state.read().await;
+        let Some(user) = st.users.get(user_id) else { return Ok(()) };
+        let Some(account_id) = st.account_id_for(&user.username.to_lowercase()) else { return Ok(()) };
+        (account_id, st.db.clone())
+    };
+    if !chat_receipt(db.clone(), account_id.clone(), nonce.into()).await? {
+        send_chat_message(user_id, message, state, None).await?;
+        if !chat_receipt(db, account_id, nonce.into()).await? {
+            return Err("Não foi possível confirmar o envio. Tente novamente.".into());
+        }
+    }
+    state.read().await.send_to(user_id, ServerMessage::ChatAccepted { nonce: nonce.into() });
+    Ok(())
 }
 
 /// Etapa C2 — de onde veio uma mensagem encaminhada ("#canal · Servidor", DM, grupo).
@@ -992,6 +1040,10 @@ async fn send_chat_message(
             Fs::push_unique(&mut fs.open_dms, peer, &channel_id);
         }
         st.save_friends();
+        st.set_dm_closed(&me_lower, &channel_id, false);
+        if !*is_request {
+            st.set_dm_closed(peer, &channel_id, false);
+        }
     }
 
     // Persiste (fila do banco) e mantém só as recentes no cache.
@@ -1131,8 +1183,13 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         }
 
         ClientMessage::AckChannel { channel_id, message_id } => {
-            let Some(msg) = fetch_message_for_mutation(state, &channel_id, &message_id).await else {
-                return;
+            let ack_ts = if message_id.trim().is_empty() {
+                crate::auth::now_ms()
+            } else {
+                let Some(msg) = fetch_message_for_mutation(state, &channel_id, &message_id).await else {
+                    return;
+                };
+                msg.created_at
             };
             let mut st = state.write().await;
             let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
@@ -1145,7 +1202,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 return;
             };
             let before = st.read_state(&acc, &channel_id);
-            let info = st.mark_read(&acc, &channel_id, msg.created_at);
+            let info = st.mark_read(&acc, &channel_id, ack_ts);
             if info.last_read_at != before.last_read_at || info.mention_count != before.mention_count {
                 st.send_read_state(&me_lower, info);
             }
@@ -1331,6 +1388,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             theme_mode,
             theme_direction,
             profile_frame,
+            badge_order,
+            hidden_badges,
         } => {
             let mut st = state.write().await;
             // None = manter; Some("") = limpar.
@@ -1412,7 +1471,29 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             let upd_pe = equip(profile_effect, crate::cosmetics::Kind::ProfileEffect);
             let upd_fr = equip(profile_frame, crate::cosmetics::Kind::ProfileFrame);
 
-            if let Some(key) = me_key {
+            let mut badges_changed = false;
+            if let Some(key) = me_key.clone() {
+                let updated_badges = if badge_order.is_some() || hidden_badges.is_some() {
+                    let granted = st.badge_grants.get(&key).cloned().unwrap_or_default();
+                    st.accounts.get_mut(&key).map(|acc| {
+                        let owned = crate::cosmetics::owned_badges(acc, &granted);
+                        let (next_order, next_hidden) = crate::cosmetics::sanitize_badge_preferences(
+                            &owned,
+                            badge_order,
+                            hidden_badges,
+                            &acc.badge_order,
+                            &acc.hidden_badges,
+                        );
+                        acc.badge_order = next_order;
+                        acc.hidden_badges = next_hidden;
+                        crate::cosmetics::sync_account_badges(acc, &granted);
+                        badges_changed = true;
+                        acc.profile.badges.clone()
+                    })
+                } else {
+                    None
+                };
+
                 for user in st.users.values_mut().filter(|user| user.username.to_lowercase() == key) {
                     if let Some(ref sk) = clean_status {
                         user.status_kind = sk.clone();
@@ -1442,6 +1523,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     if let Some(ref v) = upd_th { user.profile.theme_highlight = v.clone(); }
                     if let Some(ref v) = upd_tm { user.profile.theme_mode = v.clone(); }
                     if let Some(ref v) = upd_td { user.profile.theme_direction = v.clone(); }
+                    if let Some(ref b) = updated_badges { user.profile.badges = b.clone(); }
                 }
                 if let Some(acc) = st.accounts.get_mut(&key) {
                     if let Some(sk) = clean_status {
@@ -1474,6 +1556,10 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     if let Some(v) = upd_td { acc.profile.theme_direction = v; }
                 }
                 st.save_accounts();
+                if badges_changed {
+                    crate::profile::send_cosmetics(&st, &key);
+                    crate::profile_sharing::refresh_viewers(&st, &key);
+                }
             }
             if let Some(first) = equip_errors.first() {
                 st.feedback(user_id, false, "update_profile", *first);
@@ -1491,7 +1577,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             let ClientMessage::SendChat { channel_id, nonce, .. } = &chat else { return };
             let channel_id = channel_id.clone();
             let nonce = nonce.as_ref().map(|value| value.chars().take(64).collect());
-            if let Err(message) = send_chat_message(user_id, chat, state, None).await {
+            let result = match nonce.as_deref().and_then(durable_chat_nonce) {
+                Some(id) => deliver_chat(user_id, chat, nonce.as_deref().unwrap_or_default(), id, state).await,
+                None => send_chat_message(user_id, chat, state, None).await,
+            };
+            if let Err(message) = result {
                 state.read().await.send_to(user_id, ServerMessage::SendFailed { channel_id, nonce, message });
             }
         }
@@ -2359,6 +2449,8 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             starred_messages,
             mutes,
             favorite_gifs,
+            pinned_dms,
+            favorite_dms,
         } => {
             let mut st = state.write().await;
             let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
@@ -2406,6 +2498,12 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 prefs.favorite_gifs = crate::models::UserPrefs::sanitize_favorite_gifs(gifs, |id| {
                     attachments.get(id).is_some_and(|a| a.content_type == "image/gif")
                 });
+            }
+            if let Some(pinned) = pinned_dms {
+                prefs.pinned_dms = crate::models::UserPrefs::sanitize_dm_ids(pinned);
+            }
+            if let Some(favs) = favorite_dms {
+                prefs.favorite_dms = crate::models::UserPrefs::sanitize_dm_ids(favs);
             }
             st.set_prefs(&account_id, prefs);
             // Revalida (remove servidores que não são do usuário) e sincroniza todas as abas.
@@ -2679,6 +2777,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 open_list.push(dm_id.clone());
             }
             st.save_friends();
+            st.set_dm_closed(&me_lower, &dm_id, false);
 
             let Some(peer) = st.resolve_friend_info(&target_lower) else {
                 return;
@@ -2696,6 +2795,20 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             st.send_friends_sync_to_username(&me_lower);
         }
 
+        ClientMessage::CloseDm { dm_id } => {
+            let mut st = state.write().await;
+            let Some(me_lower) = st.users.get(user_id).map(|u| u.username.to_lowercase()) else {
+                return;
+            };
+            if !ServerState::is_dm_participant(&dm_id, &me_lower) {
+                return;
+            }
+            crate::models::FriendsStore::remove_from(&mut st.friends_store.open_dms, &me_lower, &dm_id);
+            st.save_friends();
+            st.set_dm_closed(&me_lower, &dm_id, true);
+            st.send_friends_sync_to_username(&me_lower);
+        }
+
         m @ (ClientMessage::BlockUser { .. }
         | ClientMessage::UnblockUser { .. }
         | ClientMessage::AcceptMessageRequest { .. }
@@ -2708,7 +2821,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         | ClientMessage::GetUserProfile { .. }
         | ClientMessage::ReportUser { .. }) => crate::social::handle(user_id, m, state).await,
 
-        ClientMessage::JoinVoice { channel_id } => {
+        ClientMessage::JoinVoice { channel_id, resume } => {
             let mut st = state.write().await;
             let Some(me) = st.users.get(user_id).cloned() else {
                 return;
@@ -2720,6 +2833,10 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 && st.can_join_voice(&me_lower, &channel_id);
             if !is_public_voice && !is_dm_voice {
                 st.feedback(user_id, false, "join_voice", "Não é possível entrar nesta chamada.");
+                return;
+            }
+            if resume && is_dm_voice && !st.users.values().any(|u| u.voice_channel_id.as_deref() == Some(&channel_id)) {
+                st.feedback(user_id, false, "join_voice", "A chamada privada já terminou.");
                 return;
             }
             if is_public_voice {
@@ -2754,7 +2871,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             };
             info!("Usuário {} entrou no canal de voz {}", peer_info.username, channel_id);
 
-            if is_dm_voice {
+            if is_dm_voice && !resume {
                 // Toca para os outros participantes (DM 1:1 ou grupo) que ainda não estão na chamada.
                 let conversation_id = crate::voice::conversation_of(&channel_id).unwrap_or_default();
                 let others: Vec<String> = st
@@ -2849,18 +2966,25 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             crate::moderation::update_automod(state, user_id, server_id, config).await;
         }
         ClientMessage::SearchMessages {
-            request_id, query, server_id, channel_id, private_only, author, has, before, after, pinned, mentions_me,
+            request_id, query, server_id, channel_id, private_only, author, has, has_list, before, after, pinned, mentions_me, mentions_user, sort, offset,
         } => {
             crate::moderation::search(
-                state, user_id, request_id, query, server_id, channel_id, private_only, author, has, before, after, pinned, mentions_me,
+                state, user_id, request_id, query, server_id, channel_id, private_only, author, has, has_list, before, after, pinned, mentions_me, mentions_user, sort, offset,
             )
             .await;
+        }
+        ClientMessage::GetMessageContext { request_id, channel_id, message_id } => {
+            crate::moderation::message_context(state, user_id, request_id, channel_id, message_id).await;
         }
 
         ClientMessage::DeclineCall { channel_id } => {
             let st = state.read().await;
             crate::voice::decline_call(&st, user_id, &channel_id);
         }
+        ClientMessage::UpdateActivity { activity } => {
+            crate::activity::update_activity(state, user_id, activity).await;
+        }
+
         ClientMessage::UpdateVoiceState {
             muted,
             deafened,
@@ -3024,6 +3148,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 member_timeouts: HashMap::new(),
                 member_nicks: HashMap::new(),
                 member_profiles: HashMap::new(),
+                member_roster: HashMap::new(),
                 emojis: Vec::new(),
                 invites_paused: false,
                 rules_text: None,
@@ -3508,6 +3633,18 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 return;
             };
             if !srv.is_member(&me_lower) {
+                return;
+            }
+            if srv.invites_paused {
+                st.feedback(user_id, false, "invite_dm", "Os convites deste servidor estão pausados.");
+                return;
+            }
+            if srv.is_banned(&target_lower) {
+                st.feedback(user_id, false, "invite_dm", "Este usuário está banido deste servidor.");
+                return;
+            }
+            if srv.is_member(&target_lower) {
+                st.feedback(user_id, false, "invite_dm", "Este usuário já participa deste servidor.");
                 return;
             }
             let target_channel = channel_id
@@ -4710,7 +4847,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
             }
         }
 
-        ClientMessage::Ping => {}
+        ClientMessage::Ping => state.read().await.send_to(user_id, ServerMessage::Pong),
     }
 }
 
@@ -4796,7 +4933,7 @@ async fn cleanup_disconnected_user(user_id: &str, state: &SharedState) {
     let mut st = state.write().await;
     st.voice_grants.remove(user_id);
     st.peers.remove(user_id);
-    st.conn_sessions.remove(user_id);
+    let session_exists = st.conn_sessions.remove(user_id).is_some_and(|hash| st.sessions.contains_key(&hash));
     st.rates.remove(user_id);
     // Sai da voz pelo caminho comum (avisa os pares e encerra chamada privada vazia).
     crate::voice::remove_from_voice(&mut st, user_id);
@@ -4807,9 +4944,9 @@ async fn cleanup_disconnected_user(user_id: &str, state: &SharedState) {
             removed_user.username, user_id
         );
 
-        if let Some(channel_id) = removed_user.voice_channel_id {
+        if let Some(channel_id) = &removed_user.voice_channel_id {
             st.broadcast_to_voice_channel_except(
-                &channel_id,
+                channel_id,
                 user_id,
                 ServerMessage::PeerLeftVoice {
                     channel_id: channel_id.clone(),
@@ -4818,24 +4955,30 @@ async fn cleanup_disconnected_user(user_id: &str, state: &SharedState) {
             );
         }
 
-        st.broadcast(ServerMessage::UserLeft {
-            user_id: user_id.to_string(),
-        });
-
-        let sync_msg = ServerMessage::VoiceStateSync {
+        let removed_lower = removed_user.username.to_lowercase();
+        let grace = session_exists && !st.users.values().any(|u| u.username.eq_ignore_ascii_case(&removed_user.username));
+        if grace {
+            st.presence_grace.insert(user_id.into(), removed_user);
+        } else {
+            st.broadcast(ServerMessage::UserLeft { user_id: user_id.into() });
+        }
+        st.broadcast(ServerMessage::VoiceStateSync {
             voice_members: st.voice_members_map(),
             users: st.users_list(),
-        };
-        st.broadcast(sync_msg);
-        st.broadcast_friends_sync_all();
+        });
 
-        // Associação temporária: remove o usuário de servidores onde entrou por convite temporário
-        // caso não tenha recebido nenhum cargo e não tenha outra sessão ativa.
-        let removed_lower = removed_user.username.to_lowercase();
-        let updated_servers = st.cleanup_temporary_members_for(&removed_lower);
-        for srv in updated_servers {
+        for srv in st.cleanup_temporary_members_for(&removed_lower) {
             let sid = srv.id.clone();
             st.broadcast_to_server(&sid, ServerMessage::ServerUpdated { server: srv });
         }
+
+        if grace {
+            drop(st);
+            tokio::time::sleep(PRESENCE_GRACE).await;
+            st = state.write().await;
+            if st.presence_grace.remove(user_id).is_none() { return; }
+            st.broadcast(ServerMessage::UserLeft { user_id: user_id.into() });
+        }
+        st.broadcast_friends_sync_all();
     }
 }

@@ -124,7 +124,6 @@ function reconcileServerAccess(previous, server) {
       state.readStates?.delete(ch.id);
       state.unreadDividerByChannel?.delete(ch.id);
       if (state.pendingJump?.channelId === ch.id) state.pendingJump = null;
-      if (state.pendingPresent === ch.id) state.pendingPresent = null;
       if (ch.id === getActiveTextChannelId()) chatMessagesEl?.replaceChildren();
       if (state.replyingTo?.channel_id === ch.id) clearReplyingTo();
       pinnedPopover?.classList.add("hidden");

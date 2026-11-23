@@ -59,6 +59,8 @@ mod profile_board;
 mod profile_sharing;
 #[path = "cosmetic_collection_tests.rs"]
 mod cosmetic_collection;
+#[path = "activity_search_tests.rs"]
+mod activity_search;
 #[path = "voice_chat_tests.rs"]
 mod voice_chat;
 #[path = "composer_tests.rs"]
@@ -173,8 +175,11 @@ async fn auth_http_rules() {
     let (s, _) = post(&srv, "/api/register", json!({"username": "ana", "password": "senha-segura-1"})).await;
     assert_eq!(s, 409, "nome duplicado (sem diferenciar maiúsculas)");
 
-    let (s, _) = post(&srv, "/api/login", json!({"username": "ana", "password": "errada-123"})).await;
+    let (s_missing, missing) = post(&srv, "/api/login", json!({"username": "Inexistente", "password": "errada-123"})).await;
+    let (s, wrong_password) = post(&srv, "/api/login", json!({"username": "ana", "password": "errada-123"})).await;
+    assert_eq!(s_missing, 401);
     assert_eq!(s, 401);
+    assert_eq!(missing, wrong_password);
     let (s, b) = post(&srv, "/api/login", json!({"username": "ANA", "password": "senha-segura-1"})).await;
     assert_eq!(s, 200);
     let token2 = b["token"].as_str().unwrap().to_string();
@@ -360,6 +365,35 @@ async fn reconnect_gets_fresh_state() {
     let w = wait_for(&mut b2, "Welcome").await;
     let geral = w["chat_history"]["geral"].as_array().unwrap();
     assert_eq!(geral.last().unwrap()["content"], "você perdeu isso");
+}
+
+#[tokio::test]
+async fn delivery_receipt_survives_disconnect_deletion_and_reopening_sqlite() {
+    let srv = start_server().await;
+    let token = register(&srv, "EntregaIdempotente").await;
+    let nonce = format!("delivery:{}", uuid::Uuid::new_v4());
+    let packet = json!({"type":"SendChat", "payload":{
+        "channel_id":"geral", "content":"Não duplicar", "nonce":nonce
+    }});
+    let mut first = connect(&srv, &token).await;
+    wait_for(&mut first, "Welcome").await;
+    send(&mut first, packet.clone()).await;
+    let id = wait_for(&mut first, "NewChatMessage").await["message"]["id"].as_str().unwrap().to_string();
+    assert_eq!(wait_for(&mut first, "ChatAccepted").await["nonce"], nonce);
+    drop(first);
+
+    let reopened = start_server_in(srv.dir.clone()).await;
+    let mut resumed = connect(&reopened, &token).await;
+    wait_for(&mut resumed, "Welcome").await;
+    send(&mut resumed, packet.clone()).await;
+    assert_eq!(wait_for(&mut resumed, "ChatAccepted").await["nonce"], nonce);
+    send(&mut resumed, json!({"type":"DeleteChat", "payload":{"channel_id":"geral", "message_id":id}})).await;
+    wait_for(&mut resumed, "MessageDeleted").await;
+    send(&mut resumed, packet).await;
+    wait_for(&mut resumed, "ChatAccepted").await;
+    send(&mut resumed, json!({"type":"LoadMessages", "payload":{"channel_id":"geral"}})).await;
+    let page = wait_for(&mut resumed, "MessagesPage").await;
+    assert!(page["messages"].as_array().unwrap().iter().all(|m| m["content"] != "Não duplicar"));
 }
 
 /// Cria servidor e devolve (ws do dono, server json, server_id).

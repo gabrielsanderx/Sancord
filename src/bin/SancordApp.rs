@@ -1,7 +1,9 @@
 #![windows_subsystem = "windows"]
 
 mod capture_bridge;
+mod desktop_activity;
 mod desktop_assets;
+mod desktop_auth_storage;
 mod desktop_links;
 mod desktop_permissions;
 mod desktop_updater;
@@ -44,6 +46,8 @@ enum UserEvent {
     PageLoaded(String),
     Update(serde_json::Value),
     DesktopState(serde_json::Value),
+    AuthStorage(serde_json::Value),
+    ActivityState(serde_json::Value),
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -724,12 +728,39 @@ fn main() {
     let new_window_proxy = proxy.clone();
     let load_proxy = proxy.clone();
     let ipc_updater = updater.clone();
+    let (auth_requests, auth_receiver) = std::sync::mpsc::sync_channel::<String>(32);
+    let auth_proxy = proxy.clone();
+    std::thread::spawn(move || {
+        for message in auth_receiver {
+            if let Some(reply) = desktop_auth_storage::handle_request(&message) {
+                let _ = auth_proxy.send_event(UserEvent::AuthStorage(reply));
+            }
+        }
+    });
+
+    let activity_proxy_bg = proxy.clone();
+    let activity_monitor = Arc::new(desktop_activity::ActivityMonitor::spawn(
+        ipc_data_dir.clone(),
+        move |snapshot| {
+            let _ = activity_proxy_bg.send_event(UserEvent::ActivityState(snapshot));
+        },
+    ));
+    let (activity_requests, activity_receiver) = std::sync::mpsc::sync_channel::<String>(32);
+    let activity_proxy_ipc = proxy.clone();
+    let activity_monitor_ipc = activity_monitor.clone();
+    std::thread::spawn(move || {
+        for message in activity_receiver {
+            let reply = activity_monitor_ipc.handle_ipc(&message);
+            let _ = activity_proxy_ipc.send_event(UserEvent::ActivityState(reply));
+        }
+    });
 
     // A porta/segredo da ponte NÃO vão no script de inicialização (que roda em
     // qualquer página); são injetados depois do carregamento, só em origem confiável.
     let builder = WebViewBuilder::with_web_context(&mut web_context)
         .with_custom_protocol("sancord".into(), |_id, request| desktop_assets::response(request))
         .with_initialization_script(TITLEBAR_INIT_SCRIPT)
+        .with_initialization_script("window.__SANCORD_AUTH_DPAPI = true; window.__SANCORD_ACTIVITY_NATIVE = true;")
         .with_navigation_handler(move |url: String| {
             if desktop_assets::is_app_page(&url) {
                 return true;
@@ -756,6 +787,18 @@ fn main() {
                 return;
             }
             let cmd = req.body();
+            if let Some(message) = cmd.strip_prefix("auth-storage:") {
+                if !from_loader && message.len() <= desktop_auth_storage::MAX_IPC_BYTES {
+                    let _ = auth_requests.try_send(message.to_string());
+                }
+                return;
+            }
+            if let Some(message) = cmd.strip_prefix("activity:") {
+                if !from_loader && message.len() <= desktop_activity::MAX_IPC_BYTES {
+                    let _ = activity_requests.try_send(message.to_string());
+                }
+                return;
+            }
             if let Some(action) = cmd.strip_prefix("updates:") {
                 ipc_updater.command(action);
                 return;
@@ -945,6 +988,16 @@ fn main() {
             Event::UserEvent(UserEvent::DesktopState(value)) => {
                 if let Ok(json) = serde_json::to_string(&value) {
                     let _ = webview.evaluate_script(&format!("window.dispatchEvent(new CustomEvent('sancord-desktop-state', {{detail:{json}}}));"));
+                }
+            }
+            Event::UserEvent(UserEvent::AuthStorage(value)) => {
+                if webview.url().is_ok_and(|url| desktop_assets::is_app_page(&url) && !is_internal_page(&url)) {
+                    let _ = webview.evaluate_script(&format!("window.dispatchEvent(new CustomEvent('sancord-auth-storage', {{detail:{value}}}));"));
+                }
+            }
+            Event::UserEvent(UserEvent::ActivityState(value)) => {
+                if webview.url().is_ok_and(|url| desktop_assets::is_app_page(&url) && !is_internal_page(&url)) {
+                    let _ = webview.evaluate_script(&format!("window.dispatchEvent(new CustomEvent('sancord-activity-state', {{detail:{value}}}));"));
                 }
             }
             Event::WindowEvent {

@@ -205,6 +205,7 @@ profilePrivacyForm.addEventListener("submit", e => {
 
 function renderVisitedProfileLinks(links, wrap = document.getElementById("profile-card-links-wrap"),
   list = document.getElementById("profile-card-links")) {
+  if (!wrap || !list) return;
   list.replaceChildren();
   for (const link of links || []) {
     const url = parseBoardLink(link.url);
@@ -347,12 +348,17 @@ function openCompactProfile(userId, fallback, anchor = document.activeElement) {
   currentCompactProfile = { userId, username, fallback, serverId: compactServerId(fallback), trigger: document.activeElement, anchor, effectPlayed: false };
   profilePopoverModal?.classList.add("hidden");
   compactProfileModal.classList.remove("hidden");
-  drawCompactVisit({ ...cached, bio: null, banner_url: null, avatar_url: cached?.avatar_url || fallback?.author_avatar,
+  drawCompactVisit({ ...cached, bio: null, banner_url: null, custom_status: null, custom_status_emoji: null, pronouns: null, badges: [],
+    avatar_url: cached?.avatar_url || fallback?.author_avatar,
     avatar_color: cached?.avatar_color || fallback?.author_color }, { bio_visible: false, banner_visible: false });
   const self = username.toLowerCase() === state.selfUser?.username?.toLowerCase();
   compactMessage.classList.toggle("hidden", self);
   document.getElementById("compact-edit-profile").classList.toggle("hidden", !self);
-  compactFullProfile.focus();
+  const note = compactProfileContent.querySelector(".compact-profile-note");
+  note.classList.toggle("hidden", self);
+  note.querySelector("textarea").value = self ? "" : getUserProfileNote(username);
+  positionCompactProfile();
+  compactFullProfile.focus({ preventScroll: true });
   sendWs("GetUserProfile", { username, server_id: currentCompactProfile.serverId });
 }
 
@@ -390,6 +396,11 @@ compactMessage.addEventListener("click", () => {
   const target = closeCompactProfile();
   if (target) sendWs("OpenDm", { target_username: target.username });
 });
+compactProfileContent.addEventListener("input", e => {
+  if (currentCompactProfile && e.target.matches(".compact-profile-note textarea")) {
+    setUserProfileNote(currentCompactProfile.username, e.target.value);
+  }
+});
 document.getElementById("compact-close-profile").addEventListener("click", () => closeCompactProfile());
 document.getElementById("compact-edit-profile").addEventListener("click", () => {
   closeCompactProfile(false);
@@ -403,7 +414,8 @@ compactProfileModal.addEventListener("keydown", e => {
     e.stopPropagation();
     closeCompactProfile();
   } else if (e.key === "Tab") {
-    const items = [...compactProfileModal.querySelectorAll("button:not(.hidden), a[href]")];
+    const items = [...compactProfileModal.querySelectorAll("button, a[href], textarea")]
+      .filter(item => !item.disabled && !item.closest(".hidden,[hidden]"));
     const at = items.indexOf(document.activeElement);
     if (e.shiftKey ? at <= 0 : at === items.length - 1) {
       e.preventDefault();

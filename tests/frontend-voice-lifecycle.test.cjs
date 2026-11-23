@@ -22,6 +22,7 @@ function joinHarness(captures, connected = true) {
   const state = { currentVoiceChannel:null, voiceChannels:[], muted:false, deafened:false };
   const c = load(['joinVoiceChannel','leaveVoiceChannel'], {
     state, isPrivateVoiceId:()=>true, ensureLocalAudioStream:()=>captures[capture++].promise,
+    SancordConnection: { isInterrupted: () => false }, cancelVoiceRecovery() {},
     sendWs:(type,payload)=>{sent.push({type,payload});return connected;},
     showErrorToast:m=>errors.push(m), releaseLocalAudioStream(){}, cleanupAllPeers(){}, playUiSound(){}, clearUnansweredCallTimer(){},
     stopVoicePingMonitor(){},stopVoiceCallTimer(){},stopScreenSharing(){},stopCamera(){},

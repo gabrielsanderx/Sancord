@@ -5,64 +5,83 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sancord</title>
   <link rel="icon" type="image/svg+xml" href="/sancord-icon.svg" />
-  <link rel="stylesheet" href="/styles.css?v=21" />
+  <link rel="stylesheet" href="/styles.css?v=22" />
   <!-- Design system e refatoração visual: camada final, depois de styles.css. -->
-  <link rel="stylesheet" href="/ui.css?v=16" />
+  <link rel="stylesheet" href="/ui.css?v=18" />
 </head>
-<body>
-  <!-- Modal de Autenticação (Criar Conta / Entrar) -->
-  <div id="login-modal" class="modal-backdrop hidden">
-    <div class="modal-card">
-      <div class="brand-badge">
-        <img src="/logo.png" alt="Sancord" class="brand-logo-img" />
-      </div>
-      <h1 data-i18n="auth.title">Bem-vindo de volta!</h1>
-      <p data-i18n="auth.subtitle">Estamos felizes em ver você novamente no Sancord.</p>
-
-      <div class="auth-tabs">
-        <button type="button" id="tab-register" class="auth-tab active" data-i18n="auth.tab.register">Criar Conta</button>
-        <button type="button" id="tab-login" class="auth-tab" data-i18n="auth.tab.login">Já tenho conta</button>
-      </div>
-
-      <div id="auth-error" class="auth-error hidden"></div>
-
-      <form id="login-form">
-        <label for="username-input" data-i18n="auth.username">NOME DE USUÁRIO</label>
-        <input
-          id="username-input"
-          type="text"
-          placeholder="Ex: Gabriel..."
-          maxlength="24"
-          required
-          autofocus
-        />
-
-        <label for="password-input" data-i18n="auth.password">SENHA</label>
-        <input
-          id="password-input"
-          type="password"
-          placeholder="Mínimo de 8 caracteres para contas novas" data-i18n-placeholder="auth.password.placeholder"
-          maxlength="128"
-          autocomplete="current-password"
-          required
-        />
-
-        <label class="auth-remember" for="remember-me-input">
-          <input id="remember-me-input" type="checkbox" checked />
-          <span data-i18n="auth.remember">Manter conectado neste dispositivo</span>
-        </label>
-
-        <button type="submit" id="auth-submit-btn" class="btn-primary">
-          Criar Conta e Entrar
-        </button>
-        <div style="margin-top: 10px; text-align: center;">
-          <button type="button" id="open-recover-password-btn" class="btn-secondary small-btn" style="width: 100%;">
-            🔑 Esqueci minha senha (usar código de recuperação)
-          </button>
-        </div>
-      </form>
-    </div>
+<body data-auth-pending>
+  <div id="connection-banner" class="connection-banner hidden" role="status" aria-live="polite">
+    <span class="connection-banner-dot" aria-hidden="true"></span>
+    <div><strong class="connection-banner-text"></strong><small class="connection-banner-detail"></small></div>
+    <button type="button" class="connection-banner-btn" data-connection-retry>Tentar novamente</button>
+    <button type="button" class="connection-banner-btn hidden" data-connection-diagnostics>Diagnóstico</button>
   </div>
+  <main id="offline-screen" class="auth-screen offline-screen hidden" aria-labelledby="offline-title">
+    <section class="auth-card offline-card">
+      <div class="offline-brand"><img src="/sancord-icon.svg" alt="" /><span data-ui-icon="signal" aria-hidden="true"></span></div>
+      <h1 id="offline-title">Conectando ao Sancord</h1>
+      <p>Vamos continuar tentando. O aplicativo abre assim que conectar.</p>
+      <div class="offline-progress" role="status"><span aria-hidden="true"></span><strong data-offline-status>Reconectando…</strong></div>
+      <button type="button" class="btn-secondary" data-connection-retry>Tentar novamente</button>
+      <button type="button" class="auth-link" id="offline-sign-in">Entrar com outra conta</button>
+    </section>
+  </main>
+  <main id="login-modal" class="auth-screen hidden" aria-labelledby="auth-title" data-auth-mode="login">
+    <section class="auth-card">
+      <header class="auth-heading">
+        <div class="auth-brand"><img src="/sancord-icon.svg" alt="" /><span>Sancord</span></div>
+        <h1 id="auth-title" data-i18n="auth.title">Bem-vindo de volta!</h1>
+        <p id="auth-description" class="hidden"></p>
+      </header>
+
+      <form id="login-form" novalidate>
+        <div class="auth-fields">
+          <div class="auth-field">
+            <label for="username-input" data-i18n="auth.username">Nome de usuário</label>
+            <input id="username-input" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="96" aria-describedby="auth-username-error" required />
+            <p id="auth-username-error" class="auth-field-error hidden" aria-live="polite"></p>
+          </div>
+          <div class="auth-field hidden" data-auth-only="recovery">
+            <label for="auth-code-input" data-i18n="auth.code">Código de recuperação</label>
+            <input id="auth-code-input" name="recovery_code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" placeholder="SANC-XXXX-XXXX-XXXX" aria-describedby="auth-code-error" />
+            <p id="auth-code-error" class="auth-field-error hidden" aria-live="polite"></p>
+          </div>
+          <div class="auth-field">
+            <label id="auth-password-label" for="password-input" data-i18n="auth.password">Senha</label>
+            <div class="auth-password-wrap">
+              <input id="password-input" name="password" type="password" autocomplete="current-password" maxlength="256" aria-describedby="auth-password-error" required />
+              <button type="button" id="auth-toggle-password" class="auth-password-toggle" aria-controls="password-input" aria-pressed="false" aria-label="Mostrar senha"></button>
+            </div>
+            <p id="auth-password-hint" class="auth-field-hint hidden" data-auth-only="register recovery" data-i18n="auth.password.hint">Use de 8 a 128 caracteres.</p>
+            <p id="auth-password-error" class="auth-field-error hidden" aria-live="polite"></p>
+          </div>
+          <div class="auth-field hidden" data-auth-only="recovery">
+            <label for="auth-confirm-input" data-i18n="auth.confirm">Confirme a nova senha</label>
+            <input id="auth-confirm-input" name="confirm_password" type="password" autocomplete="new-password" maxlength="256" aria-describedby="auth-confirm-error" />
+            <p id="auth-confirm-error" class="auth-field-error hidden" aria-live="polite"></p>
+          </div>
+        </div>
+
+        <button type="button" id="open-recover-password-btn" class="auth-link auth-recover" data-auth-only="login" data-i18n="auth.forgot">Esqueceu sua senha?</button>
+        <label class="auth-remember"><input id="remember-me-input" type="checkbox" checked /><span data-i18n="auth.remember">Manter conectado neste dispositivo</span></label>
+        <div id="auth-error" class="auth-error hidden" role="alert"></div>
+        <button type="button" id="auth-retry-btn" class="auth-link hidden" data-i18n="auth.retry">Tentar novamente</button>
+        <button type="submit" id="auth-submit-btn" class="btn-primary auth-primary">
+          <span class="auth-spinner" aria-hidden="true"></span><span id="auth-submit-label" data-i18n="auth.submit.login">Entrar</span>
+        </button>
+        <span id="auth-progress" class="sr-only" role="status"></span>
+      </form>
+
+      <div class="auth-footer">
+        <p data-auth-only="login"><span data-i18n="auth.needAccount">Precisa de uma conta?</span> <button type="button" id="tab-register" class="auth-link" data-i18n="auth.tab.register">Criar conta</button></p>
+        <p class="hidden" data-auth-only="register recovery"><span class="hidden" data-auth-only="register" data-i18n="auth.haveAccount">Já tem uma conta?</span> <button type="button" id="tab-login" class="auth-link" data-i18n="auth.tab.login">Voltar ao login</button></p>
+        <details id="auth-saved-accounts" class="auth-saved-accounts hidden" data-auth-only="login">
+          <summary data-i18n="auth.saved">Usar uma conta salva</summary>
+          <ul id="auth-account-list"></ul>
+        </details>
+      </div>
+    </section>
+  </main>
 
   <!-- Efeito Visual Ambiente Exclusivo do Sancord -->
   <div id="ui-ambient-fx" class="ui-ambient-fx"></div>
@@ -211,6 +230,7 @@
                   <span id="voice-call-timer" class="voice-call-timer">00:00</span>
                 </div>
                 <button type="button" id="active-voice-channel-name" class="voice-channel-sub" title="Abrir chamada" aria-controls="voice-stage"></button>
+                <small id="voice-reconnect-status" class="hidden" role="status"></small>
                 <div id="voice-connection-scope" class="voice-connection-scope"></div>
               </div>
             </div>
@@ -336,6 +356,19 @@
               </div>
             </div>
 
+            <section id="home-first-steps" class="home-first-steps hidden" aria-labelledby="home-first-steps-title">
+              <span class="home-first-steps-icon" data-ui-icon="chat" aria-hidden="true"></span>
+              <div>
+                <h2 id="home-first-steps-title" data-i18n="home.firstSteps">Comece pelo Sancord</h2>
+                <p data-i18n="home.firstStepsDescription">Crie um espaço para suas conversas, entre com um convite ou encontre um amigo pelo nome de usuário.</p>
+                <div class="home-first-steps-actions">
+                  <button type="button" id="first-create-server" class="btn-primary"><span data-ui-icon="plus" aria-hidden="true"></span><span data-i18n="home.firstCreate">Criar servidor</span></button>
+                  <button type="button" id="first-join-server" class="btn-secondary"><span data-ui-icon="link" aria-hidden="true"></span><span data-i18n="home.firstJoin">Entrar com convite</span></button>
+                  <button type="button" id="first-add-friend" class="btn-secondary"><span data-ui-icon="user-plus" aria-hidden="true"></span><span data-i18n="friends.add">Adicionar amigo</span></button>
+                </div>
+              </div>
+            </section>
+
             <!-- Sub-painel Lista de Amigos (Disponível / Todos / Pendente) -->
             <div id="friends-list-pane" class="friends-list-pane">
               <div class="friends-search-box">
@@ -405,16 +438,43 @@
 
           <div class="chat-search-wrap">
             <span class="ui-search-icon" data-ui-icon="search" aria-hidden="true"></span>
-            <input type="text" id="chat-search-input" placeholder="Buscar" data-i18n-placeholder="chat.search" autocomplete="off" title="Enter busca em todo o histórico. Filtros: de:nome tem:link|arquivo|imagem fixadas antes:2026-11-01 depois:2026-10-01 menciona:eu" />
-            <div id="search-results-panel" class="pinned-popover search-results-panel hidden" role="dialog" aria-label="Resultados da busca">
-              <div class="pinned-popover-header">
-                <span id="search-results-title">🔎 Resultados</span>
-                <select id="search-scope" class="search-scope-select" title="Onde buscar">
-                  <option value="here">Neste servidor/conversa</option>
-                  <option value="all">Em tudo</option>
-                </select>
+            <input type="text" id="chat-search-input" placeholder="Buscar" data-i18n-placeholder="chat.search" autocomplete="off" title="Pesquise mensagens com filtros: de:nome em:#canal tem:imagem|vídeo|arquivo|link|embed|reação|enquete menciona:@nome antes:2026-11-01 depois:2026-10-01 fixadas:sim" />
+            <button type="button" id="chat-search-clear-btn" class="chat-search-clear hidden" aria-label="Limpar busca" title="Limpar busca">✕</button>
+            <div id="search-results-panel" class="pinned-popover search-results-panel hidden" role="dialog" aria-label="Pesquisa avançada de mensagens">
+              <div class="search-panel-top">
+                <div id="search-filter-chips" class="search-filter-chips hidden" aria-label="Filtros ativos"></div>
+                <div class="search-quick-filters" aria-label="Adicionar filtro">
+                  <button type="button" class="search-quick-btn" data-search-insert="de:">de:</button>
+                  <button type="button" class="search-quick-btn" data-search-insert="em:">em:</button>
+                  <button type="button" class="search-quick-btn" data-search-insert="tem:">tem:</button>
+                  <button type="button" class="search-quick-btn" data-search-insert="menciona:">menciona:</button>
+                  <button type="button" class="search-quick-btn" data-search-insert="antes:">antes:</button>
+                  <button type="button" class="search-quick-btn" data-search-insert="depois:">depois:</button>
+                  <button type="button" class="search-quick-btn" data-search-toggle-pinned="1">fixadas</button>
+                </div>
+              </div>
+              <div id="search-suggestions-box" class="search-suggestions-box hidden"></div>
+              <div id="search-results-header" class="pinned-popover-header search-results-header hidden">
+                <span id="search-results-title">Resultados</span>
+                <div class="search-results-controls">
+                  <select id="search-scope" class="search-scope-select" title="Onde buscar" aria-label="Escopo da busca">
+                    <option value="here">Neste servidor</option>
+                    <option value="channel">Neste canal</option>
+                    <option value="all">Em tudo</option>
+                  </select>
+                  <select id="search-sort" class="search-scope-select" title="Ordenar resultados" aria-label="Ordenação">
+                    <option value="recent">Mais recente</option>
+                    <option value="oldest">Mais antigo</option>
+                    <option value="relevance">Relevância</option>
+                  </select>
+                </div>
               </div>
               <div id="search-results-list" class="pinned-popover-list"></div>
+              <div id="search-pagination" class="search-pagination hidden">
+                <button type="button" id="search-prev-page" class="btn-secondary small-btn">Anterior</button>
+                <span id="search-page-info" class="search-page-info"></span>
+                <button type="button" id="search-next-page" class="btn-secondary small-btn">Próxima</button>
+              </div>
             </div>
           </div>
 
@@ -497,6 +557,8 @@
         <div id="slowmode-indicator" class="slowmode-indicator hidden" aria-live="polite"></div>
 
         <p id="composer-readonly" class="composer-readonly hidden" role="status"></p>
+        <p id="composer-offline" class="composer-offline hidden">Sem conexão · Você pode escrever e deixar mensagens na fila.</p>
+        <div id="pending-chat-messages" class="pending-chat-messages hidden" role="log" aria-label="Mensagens pendentes"></div>
         <button type="button" id="composer-schedule-summary" class="composer-schedule-summary hidden" aria-expanded="false" aria-controls="composer-schedule-panel"></button>
         <section id="composer-schedule-panel" class="composer-schedule-panel hidden" role="dialog" aria-labelledby="schedule-panel-title">
           <div><strong id="schedule-panel-title">Mensagens agendadas</strong><button type="button" class="icon-btn" data-close-schedule aria-label="Fechar agendamentos"><svg data-ui-icon="close" aria-hidden="true"></svg></button></div>
@@ -595,7 +657,7 @@
           <svg data-ui-icon="search" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
           <input type="text" id="settings-search-input" placeholder="Buscar configurações" autocomplete="off" aria-label="Buscar configurações" />
         </div>
-        <div id="settings-search-results" class="settings-search-results hidden" role="listbox" aria-label="Resultados da busca"></div>
+        <div id="settings-search-results" class="settings-search-results hidden" role="group" aria-label="Resultados da busca"></div>
 
         <div class="settings-nav-category">CONTA</div>
         <button type="button" class="settings-nav-item active" data-settings-tab="account" data-nav-label="Minha Conta Informações Nome E-mail ID Status">
@@ -981,13 +1043,15 @@
                   <section class="pe-section">
                     <h3 class="pe-section-title">Avatar e decorações</h3>
                     <div class="pe-tiles">
+                      <div class="pe-avatar-tile">
                       <button type="button" id="settings-change-avatar-btn" class="pe-tile" title="Alterar avatar (imagem ou GIF)">
                         <span class="pe-tile-visual">
                           <span id="settings-avatar-preview" class="avatar large-avatar editable-avatar">?</span>
                         </span>
                         <span class="pe-tile-caption">Avatar</span>
-                        <span id="settings-remove-avatar-btn" class="cust-avatar-remove hidden" role="button" tabindex="0" title="Remover avatar (volta às iniciais)">✕</span>
                       </button>
+                      <button type="button" id="settings-remove-avatar-btn" class="cust-avatar-remove hidden" aria-label="Remover avatar" title="Voltar às iniciais">✕</button>
+                      </div>
                       <button type="button" id="open-decoration-picker-btn" class="pe-tile" title="Escolher decoração do avatar">
                         <span class="pe-tile-visual">
                           <span id="settings-deco-preview-wrap" class="avatar-deco-wrap large-deco">
@@ -1035,6 +1099,17 @@
                     </div>
                   </section>
 
+                  <section class="pe-section">
+                    <h3 class="pe-section-title">Insígnias</h3>
+                    <button type="button" id="open-badges-editor-btn" class="pe-row-card pe-badges-card" data-pe-open="badges" title="Personalizar visibilidade e ordem das suas insígnias">
+                      <span class="pe-badges-card-summary">
+                        <span id="pe-badges-home-preview" class="profile-badges pe-badges-home-preview hidden" aria-hidden="true"></span>
+                        <span id="pe-badges-home-label" class="pe-badges-home-label">Gerenciar insígnias</span>
+                      </span>
+                      <span class="pe-chevron" aria-hidden="true">›</span>
+                    </button>
+                  </section>
+
                   <section class="pe-section pe-links">
                     <h3 class="pe-section-title">Sobre você</h3>
                     <button type="button" class="pe-row-link" data-pe-open="about"><span>Nome, pronomes e bio</span><span class="pe-chevron" aria-hidden="true">›</span></button>
@@ -1056,9 +1131,9 @@
                   </div>
                   <div class="pe-name-panel hidden" data-pe-name-panel="colors">
                   <div class="name-style-controls-row">
-                    <select id="settings-name-style-select" class="settings-select" aria-label="Estilo do nome" style="flex: 1;">
+                    <select id="settings-name-style-select" aria-hidden="true" hidden>
                       <option value="default">Fonte Padrão Limpa</option>
-                      <option value="gta">GTA Vice Cursiva</option>
+                      <option value="gta">Cursiva</option>
                       <option value="neon">Neon Cyberpunk Nítido</option>
                       <option value="chrome">Cromado Metálico</option>
                       <option value="gradient">Arco-Íris Fluido</option>
@@ -1144,6 +1219,9 @@
                 </div>
                 <div class="pe-view hidden" data-pe-view="nameplate" data-pe-title="Placas de identificação">
                   <div class="pe-gallery pe-list" data-pe-list="nameplate"></div>
+                </div>
+                <div class="pe-view hidden" data-pe-view="badges" data-pe-title="Insígnias">
+                  <div id="pe-badges-editor" class="pe-badges-editor"></div>
                 </div>
 
                 <div class="pe-view hidden" data-pe-view="about" data-pe-title="Nome, pronomes e bio">
@@ -1310,27 +1388,25 @@
                         <span id="preview-card-status-dot" class="status-badge online"></span>
                       </div>
                       <div class="profile-nameplate-wrap"><h3 id="preview-card-name" class="styled-name">Usuário</h3></div>
-                      <div id="preview-card-badges" class="profile-badges hidden" aria-label="Selos"></div>
                       <div class="profile-card-handle-row">
                         <span id="preview-card-handle" class="profile-card-handle"></span>
+                        <div id="preview-card-badges" class="profile-badges hidden" aria-label="Selos"></div>
+                        <span id="preview-card-pronouns" class="profile-card-pronouns" hidden></span>
                         <button type="button" id="pe-add-pronouns" class="pe-placeholder-link hidden" data-pe-open="about">Adicionar pronomes</button>
                       </div>
-                      <div id="preview-card-custom-status" class="profile-card-custom-status">Online</div>
+                      <div id="preview-card-custom-status" class="profile-card-custom-status" data-custom-status-only hidden></div>
                       <div class="profile-card-actions pe-preview-actions" aria-label="Ações do perfil (prévia)">
                         <button type="button" class="btn-primary small-btn profile-card-msg-btn" disabled>💬 Mensagem</button>
                         <button type="button" class="profile-card-icon-btn" disabled aria-label="Amizade">👥</button>
                         <button type="button" class="profile-card-icon-btn" disabled aria-label="Mais opções">⋯</button>
                       </div>
-                      <div class="profile-card-info-stack">
+                      <div class="profile-card-info-stack profile-card-details">
                         <div class="profile-info-block">
-                          <label>MEMBRO DESDE</label>
-                          <p id="pe-member-since">Membro do Sancord</p>
-                        </div>
-                        <div class="profile-info-block">
-                          <label>SOBRE MIM</label>
+                          <label>Bio</label>
                           <p id="preview-card-bio">Nenhuma biografia definida.</p>
                           <button type="button" id="pe-add-bio" class="pe-placeholder-link hidden" data-pe-open="about">Adicionar uma bio</button>
                         </div>
+                        <dl class="profile-info-block profile-card-date" data-profile-since hidden><dt>Membro desde</dt><dd id="pe-member-since"></dd></dl>
                         <div id="pe-links-wrap" class="profile-info-block hidden">
                           <label>CONEXÕES</label>
                           <ul id="pe-links" class="profile-public-links"></ul>
@@ -1345,8 +1421,9 @@
                   <div class="profile-modal-right pe-mural">
                     <div class="profile-modal-right-top">
                       <div class="profile-modal-tabs" role="tablist" aria-label="Mural e atividade">
-                        <button type="button" class="profile-tab-btn active" data-pe-tab="board" role="tab" aria-selected="true">Mural</button>
-                        <button type="button" class="profile-tab-btn" data-pe-tab="activity" role="tab" aria-selected="false">Atividade</button>
+                        <button type="button" class="profile-tab-btn active" id="pe-tab-board" data-pe-tab="board" role="tab" aria-selected="true" aria-controls="pe-panel-board">Mural</button>
+                        <button type="button" class="profile-tab-btn" id="pe-tab-activity" data-pe-tab="activity" role="tab" aria-selected="false" aria-controls="pe-panel-activity" tabindex="-1">Atividade</button>
+                        <button type="button" class="profile-tab-btn" id="pe-tab-wishlist" data-pe-tab="wishlist" role="tab" aria-selected="false" aria-controls="pe-panel-wishlist" tabindex="-1">Lista de desejos</button>
                       </div>
                       <div class="pe-mural-head-actions">
                         <button type="button" class="pe-tool-btn" data-pe-open="board">Gerenciar</button>
@@ -1354,14 +1431,18 @@
                       </div>
                     </div>
                     <div class="profile-modal-right-content">
-                      <div data-pe-panel="board">
+                      <div id="pe-panel-board" data-pe-panel="board" role="tabpanel" aria-labelledby="pe-tab-board">
                         <p id="pe-board-status" class="settings-hint-text" role="status"></p>
                         <div id="pe-board-widgets" class="profile-board-widgets" aria-live="polite"></div>
                         <div class="pe-widget-grid" id="pe-widget-shortcuts"></div>
                         <button type="button" id="pe-all-widgets" class="pe-placeholder-link">Ver todos os widgets</button>
                       </div>
-                      <div data-pe-panel="activity" class="hidden">
+                      <div id="pe-panel-activity" data-pe-panel="activity" class="hidden" role="tabpanel" aria-labelledby="pe-tab-activity">
                         <div id="pe-activity-list"></div>
+                      </div>
+                      <div id="pe-panel-wishlist" data-pe-panel="wishlist" class="hidden" role="tabpanel" aria-labelledby="pe-tab-wishlist">
+                        <div id="pe-wishlist-widgets" class="profile-board-widgets"></div>
+                        <button type="button" id="pe-add-wishlist" class="btn-secondary small-btn">Adicionar jogo</button>
                       </div>
                     </div>
                   </div>
@@ -1899,10 +1980,50 @@
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
+                  <div class="settings-row-title">Mostrar atividade atual como status</div>
+                  <div class="settings-row-desc">Compartilha automaticamente o jogo detectado ou Rich Presence na lista de membros e no seu perfil.</div>
+                </div>
+                <input type="checkbox" id="activity-share-toggle" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Detectar jogos automaticamente</div>
+                  <div class="settings-row-desc">Identifica jogos abertos no Windows pelo catálogo local, Steam e Epic sem expor navegadores ou processos do sistema.</div>
+                </div>
+                <input type="checkbox" id="activity-detect-toggle" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
                   <div class="settings-row-title">Tempo ativo nesta sessão</div>
                   <div class="settings-row-desc" id="session-uptime-display">0 min ativo</div>
                 </div>
               </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Jogos registrados detecção automática rich presence atividade jogo adicionar processo">
+              <div class="settings-section-head">
+                <h3>Jogos detectados e registrados</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <p id="activity-desktop-only-note" class="settings-hint-text hidden">A detecção automática de jogos está disponível no aplicativo Sancord Desktop para Windows.</p>
+              <div id="activity-detected-banner" class="activity-status-banner"></div>
+              <div class="activity-toolbar-row">
+                <span id="activity-catalog-hint" class="settings-hint-text"></span>
+                <button type="button" id="activity-scan-now-btn" class="btn-secondary small-btn">Atualizar detecção</button>
+              </div>
+              <div class="activity-add-box">
+                <div class="settings-row-title">Adicionar jogo detectado</div>
+                <div class="settings-row-desc">Não encontrou seu jogo? Selecione um aplicativo aberto agora ou informe o executável (.exe) e o nome de exibição.</div>
+                <div class="activity-add-grid">
+                  <select id="activity-candidate-select" class="settings-select" aria-label="Aplicativos em execução">
+                    <option value="">Selecionar aplicativo aberto agora…</option>
+                  </select>
+                  <input type="text" id="activity-manual-exe" class="settings-input" placeholder="Ex.: MeuJogo.exe" autocomplete="off" />
+                  <input type="text" id="activity-manual-name" class="settings-input" placeholder="Nome de exibição (ex.: Meu Jogo)" autocomplete="off" maxlength="80" />
+                  <button type="button" id="activity-add-game-btn" class="btn-primary small-btn">Adicionar jogo</button>
+                </div>
+              </div>
+              <div id="activity-registered-list" class="activity-registered-list"></div>
             </section>
           </div>
 
@@ -2729,11 +2850,12 @@
             <span id="profile-card-status-dot" class="status-badge online"></span>
           </div>
           <div class="profile-nameplate-wrap"><h3 id="profile-card-name" class="styled-name">Usuário</h3></div>
-          <div id="profile-card-badges" class="profile-badges hidden" aria-label="Badges"></div>
           <div class="profile-card-handle-row">
             <span id="profile-card-handle" class="profile-card-handle">@usuario</span>
-            <span id="profile-card-custom-status" class="profile-card-custom-status"></span>
+            <div id="profile-card-badges" class="profile-badges hidden" aria-label="Selos"></div>
+            <span id="profile-card-pronouns" class="profile-card-pronouns" hidden></span>
           </div>
+          <div id="profile-card-custom-status" class="profile-card-custom-status" data-custom-status-only hidden></div>
 
           <div id="profile-card-actions" class="profile-card-actions hidden">
             <button type="button" id="profile-card-dm-btn" class="btn-primary small-btn profile-card-msg-btn">💬 Mensagem</button>
@@ -2773,7 +2895,11 @@
             </button>
           </div>
 
-          <div class="profile-card-info-stack">
+          <div class="profile-card-info-stack profile-card-details">
+            <div id="profile-card-bio-wrap" class="profile-info-block hidden">
+              <label>Bio</label>
+              <p id="profile-card-bio"></p>
+            </div>
             <div class="profile-info-block">
               <label>MEMBRO DESDE</label>
               <p id="profile-card-member-since">Membro do Sancord</p>
@@ -2782,15 +2908,11 @@
               <label>AMIZADE</label>
               <p id="profile-card-friends-since">Amigos no Sancord</p>
             </div>
-            <div class="profile-info-block">
-              <label>SOBRE MIM</label>
-              <p id="profile-card-bio">Sem descrição ainda.</p>
-            </div>
             <div id="profile-card-links-wrap" class="profile-info-block hidden">
               <label>CONEXÕES</label>
               <ul id="profile-card-links" class="profile-public-links"></ul>
             </div>
-            <div id="profile-card-roles-wrap" class="profile-info-block hidden">
+            <div id="profile-card-roles-wrap" class="profile-info-block hidden" data-profile-roles>
               <label>CARGOS NO SERVIDOR</label>
               <div id="profile-card-roles-list" class="profile-roles-chips"></div>
             </div>
@@ -2812,6 +2934,7 @@
           <div class="profile-modal-tabs">
             <button type="button" class="profile-tab-btn active" data-profile-tab="activity">Atividade</button>
             <button type="button" class="profile-tab-btn" data-profile-tab="board">Mural</button>
+            <button type="button" class="profile-tab-btn" data-profile-tab="wishlist">Lista de desejos</button>
             <button type="button" class="profile-tab-btn" data-profile-tab="mutual-friends">
               <span id="profile-mutual-friends-label">Amigos em comum</span>
             </button>
@@ -2829,6 +2952,9 @@
           </div>
           <div id="profile-tab-board" class="hidden">
             <div id="profile-board-widgets" class="profile-board-widgets" aria-live="polite"></div>
+          </div>
+          <div id="profile-tab-wishlist" class="hidden">
+            <div id="profile-wishlist-widgets" class="profile-board-widgets"></div>
           </div>
           <div id="profile-tab-mutual-friends" class="hidden">
             <div class="profile-right-section-title">Amigos e membros em comum</div>
@@ -3860,40 +3986,48 @@
   <!-- Componentes reutilizáveis (menus, diálogos, tooltips) e módulo de servidores/canais.
        Carregados antes do app.js; só definem funções usadas em tempo de execução. -->
   <!-- Traduções (Fase 9): carregado primeiro, define t() e applyI18n(). -->
-  <script src="/js/i18n.js?v=1"></script>
-  <script src="/js/icons.js?v=2"></script>
+  <script src="/js/i18n.js?v=2"></script>
+  <script src="/js/icons.js?v=3"></script>
   <script src="/js/ui-kit.js?v=22"></script>
-  <script src="/js/transport.js?v=19"></script>
+  <script src="/js/transport.js?v=20"></script>
+  <script src="/js/auth-storage.js?v=1"></script>
   <script src="/js/servers.js?v=24"></script>
   <script src="/js/invites.js?v=1"></script>
   <script src="/js/member-list.js?v=1"></script>
   <script src="/js/permissions.js?v=19"></script>
-  <script src="/app.js?v=36"></script>
+  <script src="/app.js?v=38"></script>
+  <script src="/js/connection.js?v=1"></script>
+  <script src="/js/outbox.js?v=1"></script>
+  <script src="/js/offline-cache.js?v=1"></script>
   <!-- Chat (mensagens, composer, anexos, não lidas): depende dos elementos do app.js. -->
   <script src="/js/chat.js?v=27"></script>
   <!-- Social (Fase 5): bloqueio, solicitações, grupos, privacidade e perfil completo. -->
-  <script src="/js/social.js?v=8"></script>
+  <script src="/js/social.js?v=9"></script>
   <!-- Voz (Fase 6): volume/silêncio por pessoa, moderação, toque e retomada de chamada. -->
   <script src="/js/voice.js?v=2"></script>
   <!-- Avançados (Fase 8): busca no histórico, AutoMod e auditoria. -->
-  <script src="/js/advanced.js?v=3"></script>
+  <script src="/js/advanced.js?v=4"></script>
+  <script src="/js/search.js?v=1"></script>
   <script src="/js/integrations.js?v=1"></script>
   <!-- Enquetes e eventos (Fase 8). -->
   <script src="/js/community.js?v=2"></script>
   <!-- Threads e fóruns (Fase 8). -->
   <script src="/js/threads.js?v=3"></script>
   <!-- Polimento (Fase 9): notificações por canal, navegação rápida, atalhos e acessibilidade. -->
-  <script src="/js/polish.js?v=3"></script>
-  <script src="/js/profile-motion.js?v=3"></script>
-  <script src="/js/profile-card.js?v=1"></script>
-  <script src="/js/profile.js?v=10"></script>
-  <script src="/js/profile-board.js?v=2"></script>
-  <script src="/js/profile-collection.js?v=2"></script>
-  <script src="/js/profile-sharing.js?v=3"></script>
+  <script src="/js/polish.js?v=4"></script>
+  <script src="/js/profile-motion.js?v=4"></script>
+  <script src="/js/profile-card.js?v=2"></script>
+  <script src="/js/profile.js?v=11"></script>
+  <script src="/js/profile-board.js?v=3"></script>
+  <script src="/js/profile-collection.js?v=3"></script>
+  <script src="/js/profile-sharing.js?v=4"></script>
   <script src="/js/settings-center.js?v=2"></script>
   <!-- Editor visual de perfil: lateral com subeditores e perfil completo ao vivo. -->
-  <script src="/js/profile-editor.js?v=1"></script>
-  <script src="/js/self-profile-menu.js?v=1"></script>
+  <script src="/js/profile-editor.js?v=2"></script>
+  <script src="/js/self-profile-menu.js?v=3"></script>
+  <script src="/js/dm-context-menu.js?v=1"></script>
+  <script src="/js/activity.js?v=1"></script>
+  <script src="/js/auth-screen.js?v=1"></script>
   <script src="/js/updater.js?v=1"></script>
   <script src="/js/composer.js?v=1"></script>
   <script src="/js/stickers.js?v=1"></script>

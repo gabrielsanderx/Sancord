@@ -1584,3 +1584,117 @@ Implementação local sobre as fontes da v0.2.3. O cliente Windows continua carr
   - publicar a **0.2.6**: versão, CHANGELOG, commit pela API e tag `v0.2.6`;
   - atualizar a produção como na 0.2.5: backup de `data/`, parar pelo PID e trocar o exe. Na primeira inicialização, a 0.2.6 apaga o hub do banco real.
   - Clientes 0.2.5 conectados a um servidor sem hub abrem com a área de servidor vazia até atualizarem: não quebram, só ficam sem canal aberto.
+### Atualização 22/11/2026: v0.2.6 publicada e servidor de produção atualizado (autorizado pelo usuário)
+- **Commit na `main`:** `eabd597cfb6689246062e9567f9d7290e7c34f3d`, com pai `4c93c86` e sem force, feito pela API do GitHub.
+  - Entraram 10 arquivos, com o hash de cada blob conferido contra o arquivo local.
+  - `sancord-release validate v0.2.6` OK.
+  - Auditoria de segredos, e-mail, URL de túnel e senha de QA: limpa.
+  - Testes: 221 frontend e 179 Rust.
+- **Tag `v0.2.6`:**
+  - run `45078195554` ("Stable Windows release"): todos os jobs aprovados;
+  - run `45078195251` ("Windows CI"): aprovado;
+  - release publicada em 22/11 às 22:44Z, com `SancordServer.exe` (sha256 `cc4cafcd…7957`) e `Sancord.exe` (sha256 `686d6e90…07ee`).
+- **Produção:**
+  1. Parado o PID 20100 (caminho conferido).
+  2. Backup em `D:\Sancord\data-backup-pre-0.2.6-20261122-1945/`, igual por hash (exceto `tunnel.log`), com `SancordServer-0.2.5.exe`.
+  3. Executável oficial trocado e religado por `start-host.ps1`, com o cloudflared mantido.
+  4. O log mostra `Hub público "sancord" removido com 2 canais/threads`.
+- **Conferência pós-troca** (cópia do banco):
+  - banco v21, `integrity_check = ok`;
+  - só resta o servidor `srv-4a0a2922` ("Só tristeza");
+  - 0 canais do hub, 0 mensagens em `geral`, 0 convites `SANCORD`;
+  - 6 usuários, DMs (10 mensagens) e a mensagem de "Só tristeza" preservadas;
+  - `/api/health` responde `0.2.6`, local e pelo túnel.
+- **Rollback:** restaurar `data/` desse backup e voltar `SancordServer-0.2.5.exe`. O hub voltaria junto, porque está no backup.
+- O cliente do atalho (`Sancord.exe`) continua na 0.2.5 até o atualizador automático oferecer a 0.2.6.
+
+## 22/11/2026 · Revisão de perfil e personalização após a v0.2.6
+
+- Antes desta rodada, os hashes dos dois executáveis em uso já coincidiam com a release oficial 0.2.6. A revisão atual está nos fontes e no build de QA em `target-dev/debug`.
+- O cartão rápido ganhou uma ordem de leitura compacta, data, conexões com os mesmos links validados do perfil completo e acesso à nota privada sincronizada. Popout, perfil completo e prévia usam `renderProfileCardIdentity` em `static/js/profile-card.js`. As decorações em planos frontal e traseiro também aparecem em membros e DMs.
+- A coluna de personalização mantém prévia ao vivo e separa as escolhas cosméticas em subeditores com Aplicar e Cancelar. Cancelar restaura somente os campos daquele subeditor. Salvar alterações segue no perfil. O menu do próprio usuário abre o perfil pelo avatar e preserva os atalhos existentes.
+- A composição `fonte+efeito` é validada em `src/cosmetics.rs`, com verificação de posse das duas peças. O servidor continua aceitando IDs antigos e usa o campo SQLite existente. Perfil por servidor e presets preservam a composição. O formato `default+default` permite escolher o estilo simples por servidor quando o perfil global usa cosméticos. Para distribuir essas combinações, publique cliente e servidor compatíveis juntos.
+- O mural mostra a lista de desejos a partir dos widgets `want_to_play` que a pessoa pode ver. Decorações, molduras, efeitos de entrada e placas das coleções revisadas usam arte própria. O orçamento de movimento aplica animação a uma superfície por vez, conserva o retrato estático em listas e respeita movimento reduzido.
+- Validação local em Windows GNU/LLVM com `node --test tests/frontend-*.test.cjs` e `cargo test --locked --target-dir target-dev --all-targets`. O executável local também passou por `node scripts/profile-motion-qa.mjs --art` e `node scripts/profile-motion-qa.mjs --live-profile` com `SANCORD_QA_EXE` apontando para `target-dev/debug/SancordApp.exe` e `SANCORD_QA_SCREENSHOTS=qa-profile-parity`. O modo ao vivo usa o `sancord.exe` ao lado do cliente, com porta de loopback, dados e contas descartáveis.
+- Escopo da inspeção, diferenças visuais e limites de cobertura estão em `DISCORD_GAP_AUDIT.md`. A comparação com a interface de referência incluiu menu próprio, perfil completo, editor e seletor de nome. O teste manual adicional foi interrompido ao encerrar o controle do computador.
+
+## 22/11/2026 · Autenticação desktop em uma coluna
+
+- `static/index.html`, `static/ui.css`, `static/js/auth-screen.js` e `static/js/i18n.js` implementam o card com os modos Entrar, Criar conta e Recuperar senha. Os campos correspondem ao backend atual. As ações têm foco inicial, atalhos nativos de formulário, erros inline, spinner e controle de reenvio. O cartão de autenticação só sai quando o WebSocket confirma a sessão. O contexto de convites passa pelo `Welcome` já existente.
+- As rotas são `POST /api/login`, `/api/register`, `/api/session`, `/api/logout` e `/api/recover-password`. O backend conserva SQLite, hash Argon2id e os tokens atuais. Em `src/http.rs`, as respostas de credenciais inválidas também cobrem usuários desconhecidos e os erros de recuperação têm mensagem neutra. As tentativas de login e recuperação mantêm o limite por conta.
+- `static/js/auth-storage.js` integra o armazenamento do WebView2 ao DPAPI do usuário Windows via `src/bin/desktop_auth_storage.rs` e IPC, com criptografia fora da thread da janela. Token, usuário e lista de contas usam a chave protegida por origem e pelo tipo de sessão. Os valores legados são migrados depois de serem gravados no formato protegido. `static/js/transport.js` exige HTTPS para autenticação fora do loopback. [DPAPI no Windows](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata)
+- `node scripts/auth-qa.mjs` executa o cliente e o backend de `target-dev/debug`, com perfil e banco descartáveis. Exercita cadastro pelo teclado, falha de rede, retomada de convite, login inválido, sessão persistente e temporária, migração, conta salva, logout e recuperação. As capturas ficam em `qa-auth/`. Os testes DOM ficam em `tests/frontend-auth.test.cjs` e a validação de DPAPI está no módulo Rust.
+- Esta rodada usa os mecanismos existentes de recuperação e sessões. E-mail e data de nascimento seguem fora do cadastro. A recuperação por e-mail, MFA, passkeys e um limite separado de cadastros ainda exigem trabalho de servidor. QR é assunto futuro, condicionado ao app mobile. O build de homologação local está em `target-dev/debug`.
+
+## 22/11/2026 · Primeiro acesso, consistência visual e chat
+
+- O Início de contas sem servidores oferece criar servidor, entrar com convite e adicionar amigo. Os três atalhos reutilizam as telas e a validação existentes. O cartão acompanha a lista de servidores e a aba ativa. O assistente de servidor leva o foco ao campo inicial e devolve o foco ao controle de origem ao cancelar.
+- DMs, estado de espera de voz, mural e busca nas configurações reutilizam o componente de estado vazio. A busca de configurações aceita setas e Escape, a barra de Amigos quebra em duas linhas na janela estreita e o painel inferior preserva a área dos controles ao encurtar nomes.
+- Solicitações do histórico mantêm a janela atual enquanto aguardam a página. O salto da busca limpa o filtro local e ignora respostas de alvos cancelados. Em tempo real, quando o cache chega a 300 mensagens, o chat conserva os elementos retidos e atualiza as bordas da janela. Ao tentar enviar sem conexão, o composer mantém texto e anexos prontos. Se a conexão cair depois de enviar e antes da confirmação, o app orienta a conferir o histórico para evitar duplicação.
+- Homologação Windows com `node scripts/auth-qa.mjs --first-access-chat` e `SANCORD_AUTH_QA_SCREENSHOTS=qa-onboarding-chat`. O script usa o `.exe` da build local e um backend Rust em loopback com SQLite descartável. O histórico de QA inclui 400 mensagens semeadas e um arquivo enviado pela API real. O script exercita busca, salto, retorno ao presente, atualizações WebSocket, reconexão e envio de anexo. O ensaio visual usa tema escuro em 1366×768 e tema claro em 940×600 lógicos a 150%.
+- Medianas do ensaio no WebView2 para chegada de uma mensagem com 300 itens na janela: 74,5 ms para reconstruir a lista e 22,5 ms para atualizar as bordas. Foram dez medições por caminho após o aquecimento. As regressões de autenticação e de perfil com backend real também passaram na build local.
+
+## 22/11/2026 · Reconexão, modo offline, cache DPAPI e outbox durável (Rodada 4)
+
+- `static/js/connection.js`, `static/js/offline-cache.js` e `static/js/outbox.js` estruturam o ciclo de reconexão e uso offline no cliente desktop: backoff escalonado (`1s` a `30s`), detecção de queda silenciosa por heartbeat, diagnóstico de motivo (rede offline, servidor indisponível, queda do tempo real ou manutenção), faixa de status não intrusiva, retomada automática da voz com interrupção limpa de câmera/tela durante a queda e ressincronização automática de mensagens editadas, apagadas e reações.
+- O cache offline (`SancordOfflineCache`) grava snapshot cifrado por DPAPI do Windows (`sancord_offline_snapshot`, teto de 60 KB, TTL de 7 dias, vinculado à conta e à origem) apenas quando a sessão persistente está ativa. Ao reabrir sem servidor disponível, o app exibe imediatamente servidores, canais, membros e histórico recente em modo consulta, mantendo tentativa automática em segundo plano.
+- A fila de envio (`SancordOutbox`) enfileira texto e respostas durante a queda (até 30 itens por conta, com cadência e reenvio idempotente por `nonce`) e se apoia na capacidade `connection_v1` no backend (`src/ws.rs`, `src/models.rs`, `src/state.rs`, `src/db.rs`). O SQLite subiu para `SCHEMA_VERSION = 22` com recibos duráveis de entrega (`delivery_receipts`) que sobrevivem a reconexões, exclusão da mensagem e reabertura do banco, evitando duplicação em caso de confirmação perdida.
+- Validação local concluída sobre o build reconstruído em `target-dev/debug`:
+  - `node --test tests/frontend-*.test.cjs`: **227/227** aprovados;
+  - `cargo test --locked --all-targets --target-dir target-dev`: **181/181** aprovados (170 núcleo + 10 `SancordApp` + 1 `sancord-release`; 2 ensaios manuais/CI ignorados);
+  - `node scripts/auth-qa.mjs --reconnect` com `SANCORD_AUTH_QA_SCREENSHOTS=qa-reconnect`: **3/3 cenários nativos no WebView2** aprovados (queda só de WebSocket com outbox + confirmação perdida + resync + retorno de voz; backend interrompido + reabertura offline via cache DPAPI + manutenção + retorno automático; heartbeat sem resposta + sessão revogada) e 5 capturas conferidas em `qa-reconnect/`;
+  - `scripts/test-migration.ps1` (snapshot somente leitura do banco real): migração **v21 → v22** validada com 33 tabelas antigas preservadas por hash e `integrity_check = OK`.
+- Todas as 4 rodadas pós-`v0.2.6` permanecem apenas nos fontes locais e em `target-dev/debug` (`Cargo.toml` segue em `0.2.6`). A produção local (`D:\Sancord\SancordServer.exe`, banco `v21`) e o repositório GitHub (`v0.2.6`, `eabd597c`) continuam intactos aguardando autorização para empacotar/publicar a `v0.2.7`.
+
+## 22/11/2026 · Detecção de jogos, Rich Presence e Pesquisa Avançada de Mensagens (Rodada 5)
+
+- **O que já existia e foi reaproveitado:**
+  - *Atividade/Presença:* `status_kind` e `custom_status` em `UserInfo`/`FriendInfo` (`src/models.rs`), privacidade `ProfilePrivacy.activity` e projeção por destinatário (`src/profile_sharing.rs`, `src/access.rs`), prioridade na lista de membros (`static/js/member-list.js`), cartões de atividade do perfil (`static/app.js`, `static/js/profile-editor.js`), aba **Atividade e Presença** (`static/index.html`) e IPC nativo do desktop (`src/bin/SancordApp.rs`).
+  - *Pesquisa:* índice SQLite **FTS5** `messages_fts` (`unicode61 remove_diacritics 2`) com triggers automáticos de insert/update/delete (`src/db.rs`), `moderation::search` com checagem dupla de permissões (`src/moderation.rs`), `db.messages_around` (`src/db.rs`), parser textual básico (`static/js/advanced.js`) e `jumpToMessage` com `around_id` e `flash-highlight` (`static/js/chat.js`).
+- **O que foi criado:**
+  - `src/activity.rs`: validação/sanitização estrita de `UserActivity` / Rich Presence (limites de tamanho, URLs `https`/`http` seguras, até 2 botões, party, timestamps, metadata) e handler `update_activity` com rate limit e deduplicação.
+  - `src/bin/desktop_activity.rs`: detector nativo Windows via `EnumWindows` + `GetForegroundWindow` + `QueryFullProcessImageNameW` (handles RAII sem vazamento, polling 4 s dormindo em Condvar quando desligado), blocklist rigorosa de sistema/navegadores/Sancord/Discord, catálogo local de jogos, leitura de manifestos Steam (`libraryfolders.vdf` + `appmanifest_*.acf`) e Epic (`*.item`), resolução determinística de múltiplos jogos com preservação de `started_at` e persistência local de jogos registrados (`activity-config.json` / `activity-games.json`).
+  - `static/js/activity.js`: módulo `SancordActivity` multi-fonte (`rpc` > `game_detector` > `manual`), controle local de privacidade/detecção, gestão de jogos registrados (adicionar aplicativo aberto ou manual, renomear, remover), timer ao vivo (`há Xh Ymin`) e renderizador compartilhado de cartão Rich Presence (`createRichActivityCard`).
+  - `static/js/search.js`: módulo `SancordSearch` (popover de sugestões/autocomplete para `de:`, `em:`, `tem:`, `menciona:`, datas e histórico local limpável; chips removíveis + botões rápidos; debounce + cancelamento de requisições antigas; paginação 25/página; ordenação; highlight seguro; preview inline `Ver contexto`; skeleton, vazio e erro com retry).
+  - `src/activity_search_tests.rs` e `tests/frontend-activity-search.test.cjs`: testes de integração ponta a ponta e testes unitários de frontend.
+- **Arquivos modificados:** `src/lib.rs`, `src/models.rs`, `src/chat.rs`, `src/profile_sharing.rs`, `src/access.rs`, `src/state.rs`, `src/db.rs`, `src/moderation.rs`, `src/ws.rs`, `src/tests.rs`, `src/bin/SancordApp.rs`, `src/bin/desktop_assets.rs`, `static/index.html`, `static/app.js`, `static/styles.css`, `static/js/advanced.js`, `static/js/member-list.js`, `static/js/profile-card.js`, `static/js/profile-editor.js`, `tests/frontend-advanced.test.cjs`, `DISCORD_GAP_AUDIT.md`.
+- **Modelos, eventos WebSocket, IPC e banco:**
+  - *Modelos:* `UserActivity` e `ActivityButton` em `UserInfo`/`FriendInfo` (efêmeros em memória, sem migração de banco — SQLite permanece na `v22`); `SearchHit` enriquecido com `parent_channel_name`, `is_thread` e `is_forum`; `SearchFilter` ampliado com `has_list`, `mentions_include_roles`, `matching_thread_channels`, `sort` e `offset`.
+  - *WebSocket:* `ClientMessage::UpdateActivity`, `ServerMessage::UserActivityUpdated`, `ClientMessage::SearchMessages` (estendido com `has_list`, `mentions_user`, `sort`, `offset`), `ServerMessage::SearchResults` (estendido com `total_count`, `offset`, `sort`, `error`), `ClientMessage::GetMessageContext` e `ServerMessage::MessageContext`. Capacidades anunciadas no `Welcome`: `activity_v1` e `search_v2`.
+  - *IPC Desktop (`SancordApp`):* canal `activity:<get-state|scan-now|set-config|register-game|update-game|remove-game>` respondendo via evento `sancord-activity-state` (habilitado quando `window.__SANCORD_ACTIVITY_NATIVE === true`).
+- **Testes validados:**
+  - `node --test tests/frontend-*.test.cjs`: **232/232** aprovados;
+  - `cargo test --locked --all-targets --target-dir target-dev`: **190/190** aprovados (174 núcleo + 15 `SancordApp` + 1 `sancord-release`; 2 manuais/CI ignorados);
+  - Binários de QA recompilados em `target-dev/debug` (`sancord.exe` e `SancordApp.exe`).
+- **Limitações conhecidas e próximos passos:**
+  - Integração direta de jogos externos com Rich Presence via pipe/IPC local (SDK de desenvolvedores) ainda é evolução futura, mas já encontra o modelo `UserActivity` e a prioridade de fontes (`rpc` > `game_detector`) prontos.
+  - A busca em anexos indexa o nome do arquivo (`relatorio.pdf`), sem OCR ou extração de conteúdo interno.
+  - Quando autorizado pelo usuário, empacotar e publicar **`v0.2.7`** no GitHub e atualizar o servidor/cliente locais (incluindo migração `v21 → v22`).
+
+## 22/11/2026 · Menu Contextual de DM/Amigo (sem Apps), Nome Longo no Dock e Membros Offline (Rodada 6)
+
+- **Funções e estruturas reaproveitadas:** `SancordUI.contextMenu`/`formDialog`/`confirm` (`static/js/ui-kit.js`), `SancordIcons` (`static/js/icons.js`), `UserPrefs.user_notes`/`ignored_users`/`mutes`/`notify_levels` (`src/models.rs`), `getUserProfileNote`/`setUserProfileNote`/`saveModerationLists` (`static/app.js`), `MUTE_CHOICES`/`muteUntil`/`setMute`/`channelNotifyLevel` (`static/js/polish.js`), `InviteFriendToServer`, `AckChannel`, `SendFriendRequest`/`RemoveFriend`/`CancelFriendRequest`/`RespondFriendRequest`, `BlockUser`/`UnblockUser`, `openMemberProfilePopover`, `joinVoiceChannel`/`leaveVoiceChannel` e `state.uiSettings.developerMode`.
+- **Componentes e módulos novos/atualizados:**
+  - `static/js/ui-kit.js`: exporta builders reutilizáveis (`ContextMenu`, `ContextMenuItem`, `ContextMenuDangerItem`, `ContextMenuSubmenu`, `ContextMenuSeparator`, `ContextMenuLabel`), suporte a `sublabel`, `checked`, submenus com hover tolerante + navegação `↑`/`↓`/`→`/`←`/`Enter`/`Esc`, inversão lateral automática e scroll em janelas baixas.
+  - `static/js/dm-context-menu.js`: `DmContextMenu` (embutido em `src/bin/desktop_assets.rs` e carregado em `static/index.html`) acionado pelo botão direito em DMs (`renderDmList`) e em amigos (`buildFriendRow` clique direito e botão `⋯`), **sem a opção "Apps"**.
+  - **Backend (`src/models.rs`, `src/state.rs`, `src/ws.rs`, `src/access.rs`):** `UserPrefs.pinned_dms` e `UserPrefs.favorite_dms` (com `sanitize_dm_ids`), `ClientMessage::CloseDm { dm_id }` (oculta apenas de `open_dms` sem apagar histórico nem amizade), `FriendInfo.id` com `account.id` real para Developer Mode, `AckChannel` aceitando `message_id: ""` para marcar DM como lida mesmo sem histórico carregado, validação de `invites_paused`/membro/banido em `InviteFriendToServer`, e `GuildServer.member_roster` (efêmero, projetado em `access.rs` com `ProfilePrivacy`) para manter personalizações de membros offline na lista lateral.
+  - **UI (`static/app.js`, `static/styles.css`, `static/ui.css`):** seção **FIXADAS** em `renderDmList`, conversas favoritadas integradas na aba **Favoritos** (`renderHomeStarredView` + badge `home-starred-badge`), correção de overflow de nomes longos em `#self-profile-trigger`/`#self-username` e `.member-display-name`, e preservação de cores/estilos de nome de membros offline.
+- **Testes validados:**
+  - `node --test tests/frontend-*.test.cjs`: **236/236** aprovados (incluindo `tests/frontend-dm-context-menu.test.cjs` e `tests/frontend-visual.test.cjs`);
+  - `cargo test --locked --all-targets --target-dir target-dev`: **192/192** aprovados (incluindo `offline_server_member_keeps_profile_customizations_in_member_roster` e `dm_context_menu_backend_close_pin_favorite_note_privacy_and_invite`);
+  - Binários QA em `target-dev/debug` recompilados; nenhuma alteração feita no servidor/banco em produção (`v0.2.6`, banco `v21`) nem no GitHub.
+- **Pendências:** aguardar autorização do usuário para empacotar e publicar a **`v0.2.7`** no GitHub e atualizar o servidor/cliente locais.
+
+## 22/11/2026 · Refatoração Visual do Self Profile Menu e Editor de Insígnias (Rodada 7)
+
+- **Self Profile Menu (`static/js/self-profile-menu.js`, `static/ui.css`):**
+  - Removidos completamente das ações do menu: botões/submenus de **Insígnias**, **Minha coleção**, além de garantir ausência de **Clipes**, **Orbs**, **Inventário** ou placeholders.
+  - Layout refatorado para popover vertical compacto (`clamp(296px, 21vw, 316px)`), altura guiada pelo conteúdo, borda discreta sem brilho roxo artificial (mantendo o sistema real de *Profile Frames* quando equipado), banner proporcional (`68 px`), avatar sobreposto (`68 px`) com recorte compatível com tema personalizado (`--profile-surface`), decoração preservada, status, nome exibido estilizado, `@username`, **ícones reais de insígnias visíveis com tooltip** no cabeçalho e status personalizado condicional.
+  - Ações organizadas em **2 cards compactos**: Card 1 (`Editar perfil` + `Status atual >` com Online/Ausente/Não perturbe/Invisível/Status personalizado); Card 2 (`Mudar de conta >` com contador real só quando >1 conta + `Copiar ID do usuário` apenas com Modo Desenvolvedor ON).
+- **Personalização de Insígnias no Editor de Perfil (`Configurações → Perfis → Perfil principal → Insígnias`):**
+  - **Backend (`src/cosmetics.rs`, `src/models.rs`, `src/profile.rs`, `src/state.rs`, `src/ws.rs`, `src/http.rs`):** separação estrita entre badges realmente possuídas (`Account.owned_badges`, nunca manipuláveis pelo cliente) e badges exibidas (`Account.profile.badges`, derivadas por `resolve_visible_badges` aplicando `Account.badge_order` e `Account.hidden_badges`, limite `MAX_VISIBLE_BADGES = 6` e suporte a `BadgeDef.can_hide` — ex.: `verified_bot` não ocultável). `ClientMessage::UpdateProfile` aceita `badge_order`/`hidden_badges`, sanitiza por interseção estrita com `owned_badges` (impedindo injeção de badges não possuídas), preserva posse de molduras de conquista e permissão de operador mesmo com badge oculta, e propaga em tempo real via `CosmeticsState`, `VoiceStateSync`, `FriendsSync` e `profile_sharing::refresh_viewers`. Sem alteração de esquema SQLite (permanece na `v22`).
+  - **Frontend (`static/index.html`, `static/js/profile.js`, `static/js/profile-editor.js`, `static/app.js`, `static/ui.css`):** entrada **Insígnias** recolhida na coluna lateral do editor (`data-pe-open="badges"`), abrindo subeditor dedicado (`renderPeBadgesEditor`) com estado vazio limpo (0 badges), prévia ao vivo sincronizada com o cartão central (`draftPreviewUser`), alternância de visibilidade respeitando `can_hide`, reordenação por botões acessíveis (`↑`/`↓`) e drag-and-drop, botão *Restaurar padrão*, fluxo *Cancelar/Aplicar* no subeditor e persistência via *Salvar alterações*.
+- **Testes validados:**
+  - `node --test tests/frontend-*.test.cjs`: **237/237** aprovados (incluindo `tests/frontend-self-profile-menu.test.cjs` atualizado com cobertura completa do Self Profile Menu e do subeditor de Insígnias);
+  - `cargo test --locked --all-targets --target-dir target-dev`: **194/194** aprovados (`178` núcleo + `15` `SancordApp` + `1` `sancord-release`; 2 manuais/CI ignorados), incluindo `cosmetics::tests::badge_visibility_order_cap_and_security` e `tests::activity_search::profile_badges_visibility_order_security_and_realtime_sync`;
+  - Binários QA recompilados em `target-dev/debug` (`sancord.exe` e `SancordApp.exe`). Produção (`v0.2.6`, banco `v21`) e GitHub seguem intactos aguardando autorização para publicar a **`v0.2.7`**.

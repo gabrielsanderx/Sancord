@@ -7,6 +7,8 @@ const SancordNet = (() => {
     throw new Error("Endereço de servidor inválido.");
   }
   const origin = server.origin;
+  const secureForAuth = server.protocol === "https:" ||
+    server.hostname === "localhost" || server.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(server.hostname);
   const backendUrl = path => {
     const url = new URL(path, `${origin}/`);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("URL de recurso inválida.");
@@ -38,15 +40,36 @@ const SancordNet = (() => {
     }
     return txt.replace(/^\/+|\/+$/g, "");
   }
+  const uploads = new Set();
+  async function backendFetch(path, options) {
+    const url = backendUrl(path);
+    const upload = new URL(url).pathname === "/api/attachments" && options?.method === "POST";
+    if (upload && typeof SancordConnection !== "undefined" && SancordConnection.isInterrupted()) {
+      throw new Error("Upload interrompido");
+    }
+    const controller = upload ? new AbortController() : null;
+    const authorization = options?.headers?.Authorization;
+    if (controller) uploads.add(controller);
+    try {
+      const response = await fetch(url, controller ? { ...options, signal: controller.signal } : options);
+      if (response.status === 401 && authorization && typeof getStoredToken === "function"
+        && authorization === `Bearer ${getStoredToken()}`) SancordConnection.reject();
+      return response;
+    } finally {
+      if (controller) uploads.delete(controller);
+    }
+  }
   return Object.freeze({
     origin,
+    secureForAuth,
     INVITE_BASE_URL,
     url: backendUrl,
     imageUrl(path) {
       if (/^data:image\/(?:png|jpe?g|gif|webp|bmp|avif);base64,[a-zA-Z0-9+/=]+$/.test(path)) return path;
       return backendUrl(path);
     },
-    fetch(path, options) { return fetch(backendUrl(path), options); },
+    fetch: backendFetch,
+    interruptUploads() { for (const controller of uploads) controller.abort(); },
     websocketUrl() { return `${origin.replace(/^http/, "ws")}/ws`; },
     sessionKey(name) { return `${name}:${origin}`; },
     inviteUrl,

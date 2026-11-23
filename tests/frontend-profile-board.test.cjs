@@ -99,17 +99,24 @@ test('aba mostra dados públicos na ordem do servidor com texto e links seguros'
     {kind:"achievements",visible:true},
     {kind:"link",visible:true,label:"Comunidade",url:"https://example.org/jogo"},
     {kind:"link",visible:true,label:"Inválido",url:"javascript:alert(1)"},
+    {kind:"want_to_play",visible:true,name:"Rota Boreal"},
+    {kind:"want_to_play",visible:false,name:"Jogo reservado"},
     {kind:"playing",visible:false,name:"Oculto"}
   ], achievements:["alpha"]}})`);
   const root = d.getElementById('profile-board-widgets');
-  assert.deepEqual([...root.querySelectorAll('h3')].map(el => el.textContent), ['Jogo favorito', 'Sobre mim', 'Conquistas', 'Link']);
+  assert.deepEqual([...root.querySelectorAll('h3')].map(el => el.textContent), ['Jogo favorito', 'Sobre mim', 'Conquistas', 'Link', 'Quero jogar']);
   assert.match(root.querySelector('img').src, /attachments\/[a-f]{32}\/capa$/);
   assert.match(root.textContent, /<b>Sobre<\/b>/);
   assert.equal(root.querySelector('b'), null);
   assert.equal(root.querySelector('.profile-board-achievements li').textContent, 'Alpha');
   assert.equal(root.querySelector('a').href, 'https://example.org/jogo');
+  d.querySelector('[data-profile-tab="wishlist"]').click();
+  const wishlist = d.getElementById('profile-wishlist-widgets');
+  assert.match(wishlist.textContent, /Rota Boreal/);
+  assert.doesNotMatch(wishlist.textContent, /Jogo reservado|Jogo A/);
   await h.run('receive("UserProfile", {user:{username:"Bia"}})');
   assert.equal(root.textContent, 'Mural indisponível.');
+  assert.equal(wishlist.textContent, 'Lista de desejos indisponível.');
 });
 
 test('bloco personalizado e marcos automáticos funcionam no editor e na aba do mural', async t => {

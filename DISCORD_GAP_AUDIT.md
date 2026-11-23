@@ -149,16 +149,17 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 
 | Recurso | Discord | Sancord | St | Falta | P | Dif | Dep |
 |---|---|---|---|---|---|---|---|
-| Cadastro | E-mail, senha, data de nascimento e verificação | Usuário e senha (Argon2id), regras de senha | 🟡 | E-mail e verificação | P1 | M | Envio de e-mail |
-| Login | E-mail ou telefone e senha, QR e passkey | Usuário e senha, limite de tentativas | 🟡 | Passkey e QR (não prioritários) | P3 | A | — |
+| Cadastro | E-mail, senha, data de nascimento e verificação | Card central com nome de usuário e senha. Validação inline e confirmação de unicidade no servidor | ✅ | Verificação por e-mail depende de decisão de produto | P1 | M | Envio de e-mail |
+| Login | E-mail ou telefone e senha, QR e passkey | Card único com usuário e senha, estados de conexão, limite de tentativas e seleção de conta salva | ✅ | Passkey depende de suporte no backend | P3 | A | Infraestrutura de autenticação |
+| Login por QR | Aprovação no aplicativo mobile | Autenticação da build atual em uma coluna | — | Fora do escopo enquanto não houver aplicativo mobile e aprovação real | — | — | Sancord Mobile |
 | Logout | Sim | Sim | ✅ | — | — | — | — |
-| Manter sessão | Sim | "Manter conectado" (30 dias ou 24 h) | ✅ | — | — | — | — |
-| Recuperação de senha | Por e-mail | Não existe | ❌ | Fluxo de reset por e-mail ou código | **P0** | M | E-mail na conta |
+| Manter sessão | Sim | Sessão persistente ou temporária, cifrada com DPAPI no Windows e isolada por servidor | ✅ | — | — | — | — |
+| Recuperação de senha | Por e-mail | Tela integrada com código de uso único gerado nas configurações da conta. A redefinição revoga sessões antigas | ✅ | Envio de instruções por e-mail depende de infraestrutura própria | — | — | — |
 | Alterar senha | Sim, exige a atual | Sim (`ChangePassword`) | ✅ | Encerrar as outras sessões ao trocar | P1 | B | Sessões |
-| Alterar e-mail | Sim | Não há e-mail | ❌ | Campo, verificação e troca | P1 | M | E-mail |
+| Alterar e-mail | Sim | E-mail opcional alterado nas configurações com a senha atual | 🟡 | Verificação do endereço | P1 | M | Envio de e-mail |
 | Alterar username | Sim | Sim (`UpdateUsername`), migra cargos, castigos e convites | ✅ | — | — | — | — |
 | Nome de exibição | Separado do username | Nome de usuário único; nome de exibição parcial no perfil | 🟡 | Separar nome de exibição e @username de forma consistente | P2 | M | — |
-| Sessões e dispositivos | Lista e encerrar sessão | Sessões existem no banco, sem interface | ❌ | Listar, encerrar uma, encerrar todas | P1 | M | — |
+| Sessões e dispositivos | Lista e encerrar sessão | Configurações listam e revogam sessões. O login restaura sessões válidas e oferece as contas salvas | ✅ | — | — | — | — |
 | 2FA / passkeys | App, SMS, chaves de segurança e passkeys | Não existe | ❌ | TOTP e códigos de backup | P2 | A | Recuperação |
 | Excluir ou desativar conta | Sim | Não existe | ❌ | Fluxo com confirmação e o destino das mensagens | P1 | M | Política de dados |
 | Confirmar ações sensíveis | Senha ou MFA | Só a senha na troca de senha | 🟡 | Pedir senha para excluir servidor ou conta | P2 | B | — |
@@ -358,7 +359,7 @@ Colunas: **Recurso | Discord | Sancord hoje | Status | O que falta | Prioridade 
 | Bitrate do canal | Configurável por canal | Ajustes de qualidade no cliente | 🟡 | Bitrate por canal | P3 | B | — |
 | Arquitetura e escala | SFU próprio, centenas de pessoas | **Malha P2P**: cada um envia para cada um; acima de ~5–6 pessoas degrada | ⚠️ | SFU | **P1** | MA | Servidor de mídia |
 | Travessia de NAT | Servidores próprios | Só STUN padrão; TURN configurável mas **não provisionado** | ⚠️ | Subir TURN (coturn) e testar | **P0** | M | Servidor ou VPS |
-| Reconexão e perda de pacote | Robustas | Retomada da voz tratada no cliente; sem medição | 🟡 | Ensaios de queda de rede | P1 | M | TURN |
+| Reconexão e perda de pacote | Robustas | Retomada sinalizada e confirmada pelo servidor após reconectar. Câmera e tela param durante a queda. | 🟡 | Validar fluxo de áudio entre redes independentes sob perda de pacote | P1 | M | TURN |
 | Latência e qualidade (ping) | Painel de conexão | Indicador de ping e sinal | 🟡 | Estatísticas detalhadas | P3 | B | — |
 | Criptografia ponta a ponta | DAVE (desde 05/2026) | DTLS-SRTP entre os pares (é ponta a ponta na malha P2P, mas sem verificação de identidade como o DAVE) | 🟡 | Documentar com precisão; se houver SFU, avaliar E2EE | P2 | A | SFU |
 | Moderação de voz (silenciar, ensurdecer, mover, desconectar, limite) | Sim | Sim | ✅ | — | — | — | — |
@@ -901,3 +902,74 @@ Referências de hierarquia e interação desktop. [Perfis personalizados](https:
 | Chamadas | Sala, participantes e dock separados. Perfil compartilhado, volume local e palco privado | Estados de fala e mídia usam a sessão atual. O painel de qualidade usa estatísticas WebRTC existentes. |
 
 Referências de ergonomia para ações, anexos e navegação em voz. [Anexos](https://support.discord.com/hc/en-us/articles/25444343291031-File-Attachments-FAQ) · [Enquetes](https://support.discord.com/hc/en-us/articles/22163184112407-Polls-FAQ) · [Canais de voz](https://support.discord.com/hc/en-us/articles/19583625604887-Voice-Channels-FAQs) · [Chat da sala de voz](https://support.discord.com/hc/en-us/articles/4412085582359-Text-Channels-Text-Chat-In-Voice-Channels)
+
+### 22/11/2026 · Jornadas de perfil e personalização no desktop
+
+A inspeção do Discord Desktop cobriu o menu do próprio perfil, a abertura de um perfil pelo menu de contexto, o perfil completo, o editor e o seletor de estilo do nome. O Sancord usa essas jornadas como referência e mantém suas superfícies de Configurações, cores e arte. [Perfis personalizados](https://support.discord.com/hc/en-us/articles/4403147417623-Custom-Profiles) · [Estilos de nome](https://support.discord.com/hc/en-us/articles/33833879643927-Discord-Display-Name-Styles-FAQ) · [Widgets](https://support.discord.com/hc/en-us/articles/35344672307607-Profile-Widgets-FAQ)
+
+| Área | Resultado no Sancord | Diferenças e escopo |
+|---|---|---|
+| Cartão rápido e completo | Avatar sobreposto à esquerda, nome, usuário, selos, pronomes, status, bio, cargos, conexões, data e nota privada conforme o contexto. A nota do cartão rápido usa o mesmo armazenamento do perfil completo. | O cartão rápido tem 334 px no desktop de QA, altura conforme o conteúdo e rolagem para perfis longos. Mantém “Perfil completo” como ação explícita. |
+| Editor e seletores | Configurações, personalização, perfil e mural em colunas quando há espaço. A prévia usa o renderer de identidade da visita. Cada seletor mostra sua categoria, aplica ao rascunho ou cancela, e a barra geral salva o perfil. | A navegação de Configurações permanece no Sancord. Seletores usam a coluna do editor. A referência observada abria o seletor de nome em uma janela sobreposta. O mural do Sancord vira painel recolhível em espaço menor. |
+| Cosméticos | Arte original em planos frontal e traseiro para Órbita, Portal Galáctico e Sakura. Molduras Core, Cosmic e Sakura têm cantos vetoriais, laterais e detalhes segmentados. Sinal Core, Rastro Celeste e Brisa de Pétalas têm arte animada de entrada com replay. As placas Core, Brasa e Maré ganharam padrões e brilho. | A maior parte do catálogo anterior conserva a arte existente. A inspeção de movimento cobriu amostras, e cada item e combinação ainda pode ser validado individualmente. A coleção usa a posse do catálogo Sancord. |
+| Nome exibido e perfil por servidor | Fonte, efeito e cores podem ser combinados. O estilo combinado usa o campo existente e cada peça é validada pelo backend. A prévia local continua mostrando a herança de campos globais. | O perfil por servidor ainda abre o formulário próprio do Sancord. Fontes e efeitos têm opções do seu catálogo. Clientes antigos mostram texto para estilos novos e a composição exige o backend que a valida. |
+| Mural e atividade | Abas Mural, Atividade e Lista de desejos. A lista de desejos projeta widgets “Quero jogar”, com o mesmo armazenamento e visibilidade do mural. | O catálogo de dados do Sancord permite jogos cadastrados pelo usuário e links próprios. O limite é de oito widgets por mural, e não há catálogo de jogos integrado. |
+| Menu próprio, painel e membros | O avatar no menu abre o perfil completo. Status, coleção, insígnias, alternância de conta e copiar ID seguem os controles existentes. A lista continua agrupando cargos destacados, Disponível e Offline. | Engrenagem, microfone e fone têm controles independentes no painel próprio do Sancord. |
+
+O QA do `SancordApp.exe` capturou cartão e cosméticos em 1366×768, 1920×1080 e 2560×1440. Os ensaios incluem efeito durante a abertura, movimento reduzido, editor, contexto Claro, molduras, perfil por servidor e menu do próprio usuário. O mesmo executável, com backend Rust isolado, passou por login, troca de presença, cancelamento, aplicação e salvamento. Uma segunda conta leu pela rede a combinação fonte+efeito, a decoração e a lista de desejos salvas. As capturas de `qa-profile-parity/` usam contas descartáveis e arte do Sancord. A segunda rodada no Discord foi interrompida, portanto a comparação manual ficou limitada às jornadas observadas.
+
+### 22/11/2026 · Login, cadastro e recuperação no Windows
+
+- O fluxo abre com um card de 448 px em uma coluna, logo Sancord e barra de título nativa. Login, criação de conta e redefinição de senha compartilham a mesma superfície. O formulário usa apenas os campos aceitos pelo backend. O fluxo atual prescinde de QR, telefone e data de nascimento.
+- A ação principal mostra o carregamento até o WebSocket confirmar o usuário. Erros de autenticação aparecem junto aos campos. Indisponibilidade do servidor oferece nova tentativa e problemas de credencial têm resposta neutra.
+- A recuperação usa código já gerado pelo titular da conta. O backend consome o código, redefine a senha e revoga as sessões anteriores. MFA, passkeys e verificação por e-mail dependem de infraestrutura que o produto ainda precisa definir.
+- O cliente Windows cifra os tokens e as contas salvas via DPAPI, com ligação à origem do servidor. A migração remove as chaves legadas depois de gravar o valor protegido. Quando o usuário escolhe uma sessão temporária, o aplicativo pede login ao reabrir. Conexões remotas de autenticação exigem HTTPS.
+- O QA nativo usa o backend Rust em loopback e contas descartáveis. As capturas estão em `qa-auth/`. A centralização foi conferida em 1366×768, 1600×900, 1920×1080 e 2560×1440, com escalas de 100%, 125% e 150% emuladas no WebView2.
+
+A comparação de hierarquia e navegação usou a documentação oficial e as capturas do executável do Sancord. [Referência de login desktop](https://support.discord.com/hc/pt-br/articles/360057027354-Como-fazer-login-em-sua-conta) · [Referência de cadastro](https://support.discord.com/hc/en-us/articles/31676852332439-Discord-Sign-Up-and-Registration-Guide)
+
+### 22/11/2026 · Reconexão, modo offline, cache DPAPI e fila de envio durável
+
+- O cliente desktop ganhou máquina de estados de conexão (`static/js/connection.js`) com backoff automático, detecção de socket zumbi via heartbeat, distinção entre queda de rede, servidor fora do ar, queda do WebSocket e manutenção, retomada automática da sala de voz (com câmera e tela interrompidas durante a queda) e ressincronização do histórico ao voltar.
+- Sessões persistentes gravam um snapshot offline cifrado com DPAPI no Windows (`static/js/offline-cache.js`, limite de 60 KB e validade de 7 dias), permitindo reabrir o Sancord sem conexão e consultar servidores, canais, membros e mensagens recentes enquanto tenta reconectar.
+- Mensagens e respostas enviadas sem conexão entram na fila local (`static/js/outbox.js`) e são entregues sem duplicação via `connection_v1` e recibos duráveis no SQLite (`SCHEMA_VERSION = 22`). Uploads interrompidos durante a queda são sinalizados com opção de tentar novamente ou remover.
+- Validado em Windows com `node --test tests/frontend-*.test.cjs` (227 aprovados), `cargo test --locked --all-targets --target-dir target-dev` (181 aprovados), `node scripts/auth-qa.mjs --reconnect` (capturas em `qa-reconnect/`) e `scripts/test-migration.ps1` (migração real somente leitura `v21 → v22`, 33 tabelas preservadas por hash, integridade OK). Pendente apenas validação física de áudio/vídeo entre redes independentes com TURN.
+
+### 22/11/2026 · Detecção de jogos, Rich Presence e Pesquisa Avançada de Mensagens
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| Game Detection | ✅ | Detector nativo Windows em `src/bin/desktop_activity.rs` (`EnumWindows` + `GetForegroundWindow` + `QueryFullProcessImageNameW` com handles RAII, polling a cada 4 s, blocklist de sistema/navegadores/Sancord/Discord, catálogo local + manifestos Steam `.acf` e Epic `.item`, prioridade para foreground/estabilidade no Alt+Tab e jogos registrados/renomeáveis pelo usuário). |
+| Activity Status | ✅ | Separado da presença (`status_kind` e `custom_status`), propagado em tempo real via `UpdateActivity` / `UserActivityUpdated`, com timer estável (`há Xh Ymin`), privacidade local (`Mostrar atividade atual como status`), audiência sincronizada (`ProfilePrivacy.activity`), ocultação no modo Invisível e exibição na lista de membros, popout, perfil completo, prévia e Ativo Agora. |
+| Rich Presence | 🟡 | Modelo estruturado completo (`UserActivity`: `kind`, `application_id`, `name`, `details`, `state`, `started_at`/`ends_at`, `large_image`/`small_image`, `party_size`/`party_max`, `buttons`, `join_secret`/`spectate_secret`, `source`, `metadata`) validado no backend (`src/activity.rs`), renderizado sem inventar campos e com arquitetura multi-fonte (`rpc` > `game_detector` > `manual`). SDK/pipe local de RPC para jogos externos fica preparado para evolução futura. |
+| Advanced Search | ✅ | Evolução sobre o índice SQLite FTS5 existente (`messages_fts` com `unicode61 remove_diacritics 2`, triggers realtime de insert/edit/delete): busca em texto, nomes de anexos (`relatorio.pdf`), títulos/tags de threads e fóruns, DMs isoladas, paginação real (25/página com `total_count` e `offset`), ordenação (`recent`, `oldest`, `relevance` com `bm25`), rate limit dedicado, highlight seguro e preview inline `Ver contexto` (`GetMessageContext`). |
+| Search Filters | ✅ | Parser textual (`de:`, `em:#canal`, `tem:imagem\|vídeo\|áudio\|arquivo\|link\|embed\|reação\|enquete` com múltiplos `tem:`, `menciona:@nome` e `menciona:eu`, `antes:`, `depois:`, `durante:`, `fixadas`) combinado com chips visuais removíveis e barra rápida de filtros. Permissões revalidadas no backend antes e depois da consulta. |
+| Search Suggestions | ✅ | Popover interativo ao focar/digitar (`static/js/search.js`) com autocomplete dinâmico de usuários (`de:` / `menciona:`), canais e threads legíveis (`em:`), tipos suportados (`tem:`), datas sugeridas e histórico local de buscas recentes (limitado e limpável) com navegação por teclado. |
+| Jump to Message | ✅ | Clique no resultado (ou no preview de contexto) abre servidor/canal/thread/DM correto via `jumpToMessage(channelId, messageId)`, carrega janela ao redor com `around_id` para mensagens antigas e aplica destaque temporário (`flash-highlight`). |
+
+Validação local: **232/232** testes de frontend (`node --test tests/frontend-*.test.cjs`, incluindo `tests/frontend-activity-search.test.cjs` e `tests/frontend-advanced.test.cjs`) e **190/190** testes Rust (`cargo test --locked --all-targets --target-dir target-dev`, incluindo `activity::tests`, `desktop_activity::tests` e `tests::activity_search::*`).
+
+### 22/11/2026 · Menu Contextual de DM/Amigo (sem Apps), DMs Fixadas, Favoritos e Correções Visuais
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| DM Context Menu | ✅ | Novo `DmContextMenu` (`static/js/dm-context-menu.js`) sobre `SancordUI` reutilizável (`ContextMenu`, `ContextMenuItem`, `ContextMenuDangerItem`, `ContextMenuSubmenu`, `ContextMenuSeparator`, `ContextMenuLabel` em `static/js/ui-kit.js`), com ícones vetoriais `SancordIcons`, subtítulo em *Adicionar nota*, hover + teclado (`↑`/`↓`/`→`/`←`/`Enter`/`Esc`), reposicionamento junto às bordas, inversão lateral de submenu e scroll em janelas baixas. **Sem "Apps"**, sem cabeçalho grande e sem bloco permanente de Notificações no menu principal. |
+| Favorites | ✅ | `favorite_dms` em `UserPrefs` (`UpdateUserPrefs`/`UserPrefsUpdated`) integrado diretamente à aba **Favoritos** em Home (`renderHomeStarredView` + badge `home-starred-badge`) e marcador discreto na DM, alternando *Adicionar aos favoritos* / *Remover dos favoritos*. |
+| Pinned DMs | ✅ | `pinned_dms` em `UserPrefs` (sanitizado e sem duplicação), exibindo seção **FIXADAS** no topo da lista de DMs (`renderDmList`) e alternando *Fixar* / *Desafixar*. |
+| Private Notes | ✅ | Reaproveita `UserPrefs.user_notes` privado no SQLite (nunca enviado ao alvo) com editor rápido modal (*Adicionar/Editar/Remover nota*) acessível direto do menu com subtítulo *"Visível apenas para você"*. |
+| Relationship Actions | ✅ | Estado dinâmico real: *Adicionar amigo*, *Remover amigo* (com confirmação), *Cancelar solicitação*, *Aceitar amizade*, *Ignorar* / *Deixar de ignorar* (`UserPrefs.ignored_users`), *Bloquear* (danger + confirmação) / *Desbloquear* (`BlockUser`/`UnblockUser`), além de *Fechar mensagem direta* (`ClientMessage::CloseDm`, oculta sem apagar histórico e reaparece ao chegar nova mensagem). |
+| Mute | ✅ | Unificado em **Silenciar @usuário >** (ou *Reativar som* com tempo restante) reutilizando `MUTE_CHOICES`/`setMute` e movendo as opções de **Notificações** da DM para dentro do submenu. |
+| Invite to Server | ✅ | Submenu **Convidar para o servidor >** filtrando apenas servidores elegíveis (`create_invites`, `!invites_paused`, alvo não membro e não banido) e enviando convite real via `InviteFriendToServer`. |
+| Developer IDs | ✅ | `FriendInfo.id` preenchido com o `account.id` real no backend; *Copiar ID do usuário* e *Copiar ID do canal* exibidos somente com Developer Mode ON. |
+
+Também corrigidos nesta rodada: truncamento com reticências (`overflow: hidden` + `text-overflow: ellipsis`) para nomes longos na barra inferior esquerda (`#self-profile-trigger`/`#self-username`) e preservação de personalizações de perfil de membros offline na lista de servidores (`GuildServer.member_roster` projetado com `ProfilePrivacy` em `src/access.rs`). Validação local: **236/236** testes de frontend e **192/192** testes Rust aprovados.
+
+### 22/11/2026 · Self Profile Menu Compacto e Personalização de Insígnias
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| Self Profile Menu | ✅ | Popover vertical compacto (`clamp(296px, 21vw, 316px)`), altura pelo conteúdo, borda discreta sem contorno roxo artificial (preservando *Profile Frames* reais quando equipadas), banner proporcional (`68 px`), avatar sobreposto (`68 px`) com recorte sincronizado ao tema (`--profile-surface`), nome estilizado, `@username`, badges visíveis com tooltip no cabeçalho, status personalizado e **2 cards de ações** (*Editar perfil* + *Status atual >* ; *Mudar de conta >* + *Copiar ID do usuário* apenas com Developer Mode ON). Removidos botões *Insígnias*, *Minha coleção* e ausentes *Clipes*/*Orbs*. |
+| Profile Badges | ✅ | Separação no backend (`src/cosmetics.rs`) entre badges possuídas (`owned_badges`, autoritativo no servidor) e exibidas (`profile.badges`), com metadado `can_hide`, teto simultâneo de 6 badges visíveis, inclusão automática de novas badges quando houver vaga, preservação de posse de molduras/permissões ao ocultar e atualização em tempo real em todos os contextos sem poluir a lista de membros. |
+| Badge Customization | ✅ | Novo subeditor dedicado em **Configurações → Perfis → Perfil principal → Insígnias** (`static/js/profile-editor.js`), recolhido na lateral até clique, listando somente badges realmente possuídas, com prévia ao vivo no cartão central, ativar/ocultar (respeitando `can_hide`), reordenação por botões `↑`/`↓` e drag-and-drop, *Restaurar padrão*, *Cancelar/Aplicar* no subeditor e persistência validada no servidor (`UpdateProfile` com interseção estrita `requested ∩ owned`). |
+
+Validação local: **237/237** testes de frontend (`node --test tests/frontend-*.test.cjs`) e **194/194** testes Rust (`cargo test --locked --all-targets --target-dir target-dev`) aprovados; binários de QA recompilados em `target-dev/debug`.

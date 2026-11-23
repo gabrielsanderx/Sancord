@@ -643,6 +643,7 @@ function onUserProfile(p) {
       (p.server_id ?? null) !== currentPopoverServerId || profilePopoverModal?.classList.contains("hidden")) return;
   currentPopoverPrivacy = { bio_visible: p.bio_visible, banner_visible: p.banner_visible };
   renderVisitedBoard(p.board);
+  renderProfileWishlist(p.board, document.getElementById("profile-wishlist-widgets"));
   renderVisitedProfileLinks(p.links);
 
   if (profileCardMemberSince) {

@@ -17,6 +17,8 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 type AuthReply = (StatusCode, Json<AuthResponse>);
+const INVALID_LOGIN: &str = "Nome de usuário ou senha incorretos.";
+const INVALID_RECOVERY: &str = "Nome de usuário ou código de recuperação inválido.";
 
 fn auth_err(status: StatusCode, msg: impl Into<String>) -> AuthReply {
     (
@@ -120,6 +122,9 @@ pub async fn register_handler(State(state): State<SharedState>, Json(req): Json<
         profile_board: Default::default(),
         created_community: false,
         profile_sharing: Default::default(),
+        badge_order: Vec::new(),
+        hidden_badges: Vec::new(),
+        owned_badges: Vec::new(),
         profile: Default::default(),
         token: String::new(),
     };
@@ -143,10 +148,9 @@ pub async fn login_handler(State(state): State<SharedState>, Json(req): Json<Aut
             );
         }
         let Some(acc) = st.accounts.get(&key) else {
-            return auth_err(
-                StatusCode::UNAUTHORIZED,
-                "Usuário não encontrado. Clique em 'Criar Conta' se for sua primeira vez.",
-            );
+            drop(st);
+            state.write().await.login_limiter.record_failure(&key, now);
+            return auth_err(StatusCode::UNAUTHORIZED, INVALID_LOGIN);
         };
         (
             acc.id.clone(),
@@ -181,7 +185,7 @@ pub async fn login_handler(State(state): State<SharedState>, Json(req): Json<Aut
     if !valid {
         st.login_limiter.record_failure(&key, now);
         warn!("Senha incorreta para '{key}'");
-        return auth_err(StatusCode::UNAUTHORIZED, "Senha incorreta.");
+        return auth_err(StatusCode::UNAUTHORIZED, INVALID_LOGIN);
     }
     st.login_limiter.clear(&key);
     if let Some(new_hash) = rehash {
@@ -192,7 +196,7 @@ pub async fn login_handler(State(state): State<SharedState>, Json(req): Json<Aut
         st.save_accounts();
     }
     let Some(acc) = st.account_by_id(&account_id).cloned() else {
-        return auth_err(StatusCode::UNAUTHORIZED, "Conta não encontrada.");
+        return auth_err(StatusCode::UNAUTHORIZED, INVALID_LOGIN);
     };
     let token = st.create_session(&account_id, req.remember);
     auth_ok(token, &acc)
@@ -242,17 +246,11 @@ pub async fn recover_password_handler(
         }
         let Some(acc) = st.accounts.get(&key) else {
             st.login_limiter.record_failure(&key, now);
-            return auth_err(
-                StatusCode::UNAUTHORIZED,
-                "Usuário não encontrado ou código de recuperação inválido.",
-            );
+            return auth_err(StatusCode::UNAUTHORIZED, INVALID_RECOVERY);
         };
         let Some(code_hash) = acc.recovery_code_hash.clone() else {
             st.login_limiter.record_failure(&key, now);
-            return auth_err(
-                StatusCode::UNAUTHORIZED,
-                "Esta conta não possui um código de recuperação ativo.",
-            );
+            return auth_err(StatusCode::UNAUTHORIZED, INVALID_RECOVERY);
         };
         (acc.id.clone(), code_hash)
     };
@@ -274,7 +272,7 @@ pub async fn recover_password_handler(
             let mut st = state.write().await;
             st.login_limiter.record_failure(&key, now);
             warn!("Código de recuperação incorreto para '{key}'");
-            return auth_err(StatusCode::UNAUTHORIZED, "Código de recuperação inválido.");
+            return auth_err(StatusCode::UNAUTHORIZED, INVALID_RECOVERY);
         }
         other => {
             error!("Falha na recuperação de senha: {other:?}");
@@ -287,10 +285,10 @@ pub async fn recover_password_handler(
 
     let mut st = state.write().await;
     let Some(acc) = st.accounts.get_mut(&key) else {
-        return auth_err(StatusCode::UNAUTHORIZED, "Conta não encontrada.");
+        return auth_err(StatusCode::UNAUTHORIZED, INVALID_RECOVERY);
     };
     if acc.recovery_code_hash.as_deref() != Some(stored_code_hash.as_str()) {
-        return auth_err(StatusCode::UNAUTHORIZED, "Este código de recuperação já foi utilizado.");
+        return auth_err(StatusCode::UNAUTHORIZED, INVALID_RECOVERY);
     }
     acc.password_hash = new_pw_hash;
     acc.recovery_code_hash = None;
@@ -307,6 +305,7 @@ pub async fn health_handler(State(state): State<SharedState>) -> Json<serde_json
     let st = state.read().await;
     Json(serde_json::json!({
         "ok": true,
+        "maintenance_mode": st.config.maintenance_mode,
         "version": env!("CARGO_PKG_VERSION"),
         "protocol_version": PROTOCOL_VERSION,
         "client_delivery": "embedded-desktop",

@@ -198,7 +198,7 @@ function attachmentHarness({ hasNewer, near }) {
   } };
   return {
     images, chatMessagesEl,
-    context: load(['buildAttachmentsNode'], {
+    context: load(['monitorChatMedia', 'buildAttachmentsNode'], {
       state: {}, document, chatMessagesEl,
       getActiveTextChannelId: () => 'geral', getHistoryState: () => ({ hasNewer }), isNearBottom: () => near,
     }),

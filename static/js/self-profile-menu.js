@@ -41,13 +41,9 @@
   // ---------------------------------------------------------------------------
   // Sessões multi-conta isoladas por origem (nunca mistura tokens entre contas)
   // ---------------------------------------------------------------------------
-  function accountsKey() {
-    return typeof SancordNet !== "undefined" ? SancordNet.sessionKey(ACCOUNTS_STORAGE_BASE) : ACCOUNTS_STORAGE_BASE;
-  }
-
   function readBucket(storage) {
     try {
-      const raw = storage.getItem(accountsKey());
+      const raw = SancordSessions.get(storage, ACCOUNTS_STORAGE_BASE);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed)
@@ -59,10 +55,8 @@
   }
 
   function writeBucket(storage, list) {
-    try {
-      if (!list.length) storage.removeItem(accountsKey());
-      else storage.setItem(accountsKey(), JSON.stringify(list));
-    } catch (_) {}
+    if (!list.length) return SancordSessions.remove(storage, ACCOUNTS_STORAGE_BASE);
+    return SancordSessions.set(storage, ACCOUNTS_STORAGE_BASE, JSON.stringify(list));
   }
 
   function listSavedAccounts() {
@@ -87,7 +81,7 @@
     const activeToken = typeof getStoredToken === "function" ? getStoredToken() : null;
     if (activeToken && state?.selfUser?.username) {
       const lower = state.selfUser.username.toLowerCase();
-      const remembered = Boolean(localStorage.getItem(SancordNet.sessionKey("sancord_token")));
+      const remembered = remembersActiveSession();
       put({
         id: state.selfUser.id || null,
         username: state.selfUser.username,
@@ -106,11 +100,11 @@
     if (!lower) return;
     const remember = entry.remember !== undefined
       ? Boolean(entry.remember)
-      : Boolean(localStorage.getItem(SancordNet.sessionKey("sancord_token")));
+      : remembersActiveSession();
 
     // Remove eventual duplicata na outra camada para evitar tokens concorrentes da mesma conta.
     const otherStore = remember ? sessionStorage : localStorage;
-    writeBucket(otherStore, readBucket(otherStore).filter((a) => a.username.toLowerCase() !== lower));
+    const clearDuplicate = writeBucket(otherStore, readBucket(otherStore).filter((a) => a.username.toLowerCase() !== lower));
 
     const targetStore = remember ? localStorage : sessionStorage;
     const existing = readBucket(targetStore);
@@ -125,7 +119,7 @@
       remember,
     };
     const next = [...existing.filter((a) => a.username.toLowerCase() !== lower), merged];
-    writeBucket(targetStore, next);
+    return Promise.all([clearDuplicate, writeBucket(targetStore, next)]);
   }
 
   function removeSavedAccount(username) {
@@ -136,27 +130,21 @@
   }
 
   function clearAllSavedAccounts() {
-    try {
-      localStorage.removeItem(accountsKey());
-      sessionStorage.removeItem(accountsKey());
-    } catch (_) {}
+    SancordSessions.remove(localStorage, ACCOUNTS_STORAGE_BASE);
+    SancordSessions.remove(sessionStorage, ACCOUNTS_STORAGE_BASE);
   }
 
   async function switchToSavedAccount(account) {
-    if (!account || !account.token) return false;
+    if (!account?.token || !SancordNet.secureForAuth) return false;
     closeSelfProfileMenu();
     try {
-      const res = await SancordNet.fetch("/api/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: account.token }),
-      });
+      const res = await requestAuth("/api/session", { token: account.token });
       if (res.status === 401) {
         removeSavedAccount(account.username);
         if (typeof showErrorToast === "function") {
           showErrorToast(`A sessão de @${account.username} expirou. Faça login novamente.`);
         }
-        beginAddAccountFlow(account.username);
+        beginAddAccountFlow(account.username, "auth.error.session");
         return false;
       }
       const data = await res.json();
@@ -167,15 +155,13 @@
       if (typeof leaveVoiceChannel === "function") leaveVoiceChannel();
       if (typeof closeSettingsModal === "function") closeSettingsModal();
       previousAccountBeforeAdd = null;
-      if (state.ws) {
-        state.ws.onclose = null;
-        state.ws.close();
-        state.ws = null;
-      }
-      if (typeof storeSession === "function") storeSession(data.token, data.username || account.username, account.remember);
-      registerSavedAccount({ ...account, username: data.username || account.username, token: data.token });
-      if (typeof loginModal !== "undefined" && loginModal) loginModal.classList.add("hidden");
-      if (typeof connectWebSocket === "function") connectWebSocket(data.token);
+      if (state.selfUser?.username?.toLowerCase() !== account.username.toLowerCase()) {
+        SancordOutbox.bind(null);
+        SancordOfflineCache.clear();
+      } else SancordOutbox.suspend();
+      SancordConnection.stop();
+      await storeSession(data.token, data.username || account.username, account.remember);
+      startAuthConnection(data.token);
       if (typeof showUiToast === "function") showUiToast(`Conta alternada para ${account.display_name || account.username}`);
       return true;
     } catch (_) {
@@ -184,11 +170,11 @@
     }
   }
 
-  function beginAddAccountFlow(prefillUsername = "") {
+  function beginAddAccountFlow(prefillUsername = "", error) {
     closeSelfProfileMenu();
     const curToken = typeof getStoredToken === "function" ? getStoredToken() : null;
     if (curToken && state?.selfUser?.username) {
-      const remembered = Boolean(localStorage.getItem(SancordNet.sessionKey("sancord_token")));
+      const remembered = remembersActiveSession();
       registerSavedAccount({
         id: state.selfUser.id,
         username: state.selfUser.username,
@@ -206,27 +192,11 @@
     }
     if (typeof leaveVoiceChannel === "function") leaveVoiceChannel();
     if (typeof closeSettingsModal === "function") closeSettingsModal();
-    if (state.ws) {
-      state.ws.onclose = null;
-      state.ws.close();
-      state.ws = null;
-    }
-    if (typeof reconnect !== "undefined") {
-      reconnect.stopped = true;
-      clearTimeout(reconnect.timer);
-      clearInterval(reconnect.countdownTimer);
-    }
-    if (typeof setConnectionBanner === "function") setConnectionBanner("hidden");
+    SancordOutbox.bind(null);
+    SancordOfflineCache.clear();
+    SancordConnection.stop();
     if (typeof clearStoredSession === "function") clearStoredSession();
-    if (typeof loginModal !== "undefined" && loginModal) {
-      loginModal.classList.remove("hidden");
-      if (typeof usernameInput !== "undefined" && usernameInput) {
-        usernameInput.value = prefillUsername || "";
-        usernameInput.focus();
-      }
-      if (typeof passwordInput !== "undefined" && passwordInput) passwordInput.value = "";
-      if (typeof showAuthError === "function") showAuthError("");
-    }
+    showAuthScreen({ username: prefillUsername, error });
     if (typeof showUiToast === "function") showUiToast("Entre com outra conta para adicioná-la ao seletor.");
   }
 
@@ -414,15 +384,17 @@
       `<div class="spm-header">` +
         `<div class="profile-card-banner spm-banner" data-profile-slot="banner"></div>` +
         `<div class="spm-identity">` +
-          `<div class="profile-card-avatar-wrap spm-avatar-wrap" data-profile-slot="avatar-wrap">` +
-            `<div class="avatar large-avatar spm-avatar" data-profile-slot="avatar">?</div>` +
+          `<button type="button" class="profile-card-avatar-wrap spm-avatar-wrap" data-profile-slot="avatar-wrap" aria-label="Abrir meu perfil completo">` +
+            `<span class="avatar large-avatar spm-avatar" data-profile-slot="avatar">?</span>` +
             `<span class="status-badge online" data-profile-slot="dot"></span>` +
-          `</div>` +
+          `</button>` +
           `<div class="spm-name-block">` +
             `<div class="profile-nameplate-wrap"><strong class="styled-name spm-display-name" data-profile-slot="name">Usuário</strong></div>` +
-            `<div class="spm-handle" data-profile-slot="handle">@usuario</div>` +
-            `<div class="profile-badges spm-badges hidden" data-profile-slot="badges" aria-label="Insígnias"></div>` +
-            `<div class="spm-custom-status hidden" data-profile-slot="status"></div>` +
+            `<div class="spm-subline">` +
+              `<span class="spm-handle" data-profile-slot="handle">@usuario</span>` +
+              `<div class="profile-badges spm-badges hidden" data-profile-slot="badges" aria-label="Insígnias"></div>` +
+            `</div>` +
+            `<div class="spm-custom-status" data-profile-slot="status" data-custom-status-only hidden></div>` +
           `</div>` +
         `</div>` +
       `</div>` +
@@ -434,6 +406,12 @@
     submenuEl.setAttribute("role", "menu");
 
     document.body.append(menuEl, submenuEl);
+    menuEl.querySelector(".spm-avatar-wrap").addEventListener("click", () => {
+      const u = state.selfUser;
+      if (!u) return;
+      closeSelfProfileMenu();
+      openMemberProfilePopover(u.id, { author_name: u.username }, { global: true });
+    });
     menuEl.addEventListener("keydown", onMenuKeyDown);
     submenuEl.addEventListener("keydown", onSubmenuKeyDown);
     submenuEl.addEventListener("pointerenter", cancelSubmenuIntent);
@@ -509,31 +487,24 @@
       renderProfileCardIdentity(menuEl, { ...slots, effect: null }, noHeavyEffect, "SELF_PROFILE_MENU", u.display_name || u.username);
     }
 
-    const statusEl = menuEl.querySelector('[data-profile-slot="status"]');
-    const customTxt = typeof customStatusText === "function" ? customStatusText(u) : (u.custom_status || "");
-    if (statusEl) {
-      statusEl.textContent = customTxt;
-      statusEl.classList.toggle("hidden", !customTxt);
-    }
-
     const body = menuEl.querySelector(".spm-body");
     body.replaceChildren();
 
     const sk = u.status_kind || "online";
     const statusLabel = (typeof STATUS_LABELS !== "undefined" && STATUS_LABELS[sk]) || "Online";
-    const realBadges = (u.badges || []).filter((id) => typeof BADGE_ICONS === "undefined" || BADGE_ICONS[id]);
     const devMode = Boolean(state?.audioSettings?.developerMode);
 
-    // Grupo 1: Editar perfil & Status
-    const group1 = document.createElement("div");
-    group1.className = "spm-group";
-    group1.append(
+    // Card 1: Editar perfil + Status atual
+    const card1 = document.createElement("div");
+    card1.className = "spm-card";
+    card1.append(
       makeMenuRow({
         id: "spm-edit-profile",
         icon: "edit",
         label: "Editar perfil",
         action: () => openProfileEditorAt(null),
       }),
+      cardDividerEl(),
       makeMenuRow({
         id: "spm-status-trigger",
         dotStatus: sk,
@@ -542,41 +513,13 @@
         onHoverSubmenu: true,
       })
     );
-    body.append(group1);
+    body.append(card1);
 
-    // Grupo 2: Recursos reais do Sancord (Insígnias quando possuir + Minha coleção)
-    const group2 = document.createElement("div");
-    group2.className = "spm-group";
-    if (realBadges.length > 0) {
-      group2.append(
-        makeMenuRow({
-          id: "spm-badges-trigger",
-          icon: "shield",
-          label: "Insígnias",
-          meta: String(realBadges.length),
-          hasSubmenu: "badges",
-          onHoverSubmenu: true,
-        })
-      );
-    }
-    const ownedCount = state?.cosmetics?.owned?.size || 0;
-    group2.append(
-      makeMenuRow({
-        id: "spm-collection-trigger",
-        icon: "palette",
-        label: "Minha coleção",
-        meta: ownedCount > 0 ? String(ownedCount) : "",
-        hasSubmenu: "collection",
-        onHoverSubmenu: true,
-      })
-    );
-    body.append(dividerEl(), group2);
-
-    // Grupo 3: Conta & Modo Desenvolvedor
-    const group3 = document.createElement("div");
-    group3.className = "spm-group";
+    // Card 2: Mudar de conta + Copiar ID (somente com Modo Desenvolvedor ligado)
+    const card2 = document.createElement("div");
+    card2.className = "spm-card";
     const savedAccounts = listSavedAccounts();
-    group3.append(
+    card2.append(
       makeMenuRow({
         id: "spm-accounts-trigger",
         icon: "users",
@@ -587,7 +530,8 @@
       })
     );
     if (devMode) {
-      group3.append(
+      card2.append(
+        cardDividerEl(),
         makeMenuRow({
           id: "spm-copy-id",
           icon: "copy",
@@ -596,7 +540,7 @@
         })
       );
     }
-    body.append(dividerEl(), group3);
+    body.append(card2);
   }
 
   function dividerEl() {
@@ -606,11 +550,22 @@
     return hr;
   }
 
+  function cardDividerEl() {
+    const hr = document.createElement("div");
+    hr.className = "spm-card-divider";
+    hr.setAttribute("role", "separator");
+    return hr;
+  }
+
   // ---------------------------------------------------------------------------
-  // Submenus (Status, Insígnias, Minha coleção, Mudar de conta)
+  // Submenus (Status, Mudar de conta)
   // ---------------------------------------------------------------------------
   function openSubmenu(kind, anchorRow) {
     ensureDom();
+    if (kind !== "status" && kind !== "accounts") {
+      closeSubmenu();
+      return;
+    }
     activeSubmenu = kind;
     for (const row of menuEl.querySelectorAll("[data-spm-submenu]")) {
       row.setAttribute("aria-expanded", String(row.dataset.spmSubmenu === kind));
@@ -620,8 +575,6 @@
     submenuEl.dataset.submenuKind = kind;
 
     if (kind === "status") renderStatusSubmenu(submenuEl);
-    else if (kind === "badges") renderBadgesSubmenu(submenuEl);
-    else if (kind === "collection") renderCollectionSubmenu(submenuEl);
     else if (kind === "accounts") renderAccountsSubmenu(submenuEl);
 
     submenuEl.classList.remove("hidden");
@@ -689,57 +642,6 @@
         })
       );
     }
-  }
-
-  function renderBadgesSubmenu(host) {
-    const title = document.createElement("div");
-    title.className = "spm-submenu-title";
-    title.textContent = "Suas insígnias";
-    host.append(title);
-
-    const ids = (state?.selfUser?.badges || []).filter((id) => typeof BADGE_ICONS === "undefined" || BADGE_ICONS[id]);
-    for (const id of ids) {
-      const def = typeof badgeDef === "function" ? badgeDef(id) : null;
-      const item = document.createElement("div");
-      item.className = "spm-badge-item";
-      const svgPath = (typeof BADGE_ICONS !== "undefined" && BADGE_ICONS[id]) || "";
-      item.innerHTML =
-        `<span class="profile-badge ${def?.category === "trust" ? "badge-trust" : "badge-cosmetic"}">` +
-          `<svg viewBox="0 0 24 24" aria-hidden="true">${svgPath}</svg>` +
-        `</span>` +
-        `<div class="spm-row-stack">` +
-          `<span class="spm-row-label">${escapeHtml(def?.name || id)}</span>` +
-          `<span class="spm-row-sub">${escapeHtml(def?.description || "Insígnia verificada da conta")}</span>` +
-        `</div>`;
-      host.append(item);
-    }
-  }
-
-  function renderCollectionSubmenu(host) {
-    const title = document.createElement("div");
-    title.className = "spm-submenu-title";
-    title.textContent = "Cosméticos do Sancord";
-    host.append(title);
-
-    const items = [
-      ["decoration", "star", "Decorações de avatar"],
-      ["frame", "image", "Molduras de perfil"],
-      ["effect", "signal", "Efeitos de perfil"],
-      ["nameplate", "tag", "Placas de identificação"],
-      ["name", "edit", "Estilos de nome"],
-    ];
-    for (const [subview, icon, label] of items) {
-      host.append(makeMenuRow({ icon, label, inSubmenu: true, action: () => openProfileEditorAt(subview) }));
-    }
-    host.append(dividerEl());
-    host.append(
-      makeMenuRow({
-        icon: "palette",
-        label: "Abrir coleção e presets",
-        inSubmenu: true,
-        action: () => openProfileEditorAt("collection"),
-      })
-    );
   }
 
   function renderAccountsSubmenu(host) {

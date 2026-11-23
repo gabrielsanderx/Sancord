@@ -35,7 +35,7 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use tracing::{error, info, warn};
 
-pub const SCHEMA_VERSION: i64 = 21;
+pub const SCHEMA_VERSION: i64 = 22;
 
 /// Metadados de um arquivo enviado (o conteúdo fica em `data/uploads/`).
 #[derive(Debug, Clone, PartialEq)]
@@ -162,6 +162,7 @@ pub enum WriteOp {
     SetMemberTimeout { server_id: String, user_lower: String, until_ms: Option<i64> },
     RenameMemberTimeout { from: String, to: String },
     UpsertMessage(Box<ChatMessage>),
+    DeliverChat { message: Box<ChatMessage>, account_id: String, nonce: String },
     UpsertScheduled(crate::scheduled::ScheduledMessage),
     DeleteScheduled { id: String },
     PublishScheduled { id: String, message: Box<ChatMessage> },
@@ -606,6 +607,32 @@ fn migrate_schema(conn: &Connection) -> DbResult<()> {
              COMMIT;",
         )?;
     }
+    if version < 22 {
+        let txn = conn.unchecked_transaction()?;
+        for name in ["client_nonce", "client_account_id"] {
+            let present: bool = txn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('messages') WHERE name = ?1)",
+                [name], |row| row.get(0),
+            )?;
+            if !present {
+                txn.execute_batch(&format!("ALTER TABLE messages ADD COLUMN {name} TEXT;"))?;
+            }
+        }
+        txn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS chat_receipts (
+                account_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                nonce TEXT NOT NULL,
+                PRIMARY KEY (account_id, nonce)
+             ) WITHOUT ROWID;
+             CREATE TRIGGER IF NOT EXISTS acknowledge_chat_delivery AFTER INSERT ON messages
+             WHEN NEW.client_nonce IS NOT NULL
+             BEGIN
+                INSERT INTO chat_receipts (account_id, nonce) VALUES (NEW.client_account_id, NEW.client_nonce);
+             END;
+             PRAGMA user_version = 22;",
+        )?;
+        txn.commit()?;
+    }
     Ok(())
 }
 
@@ -628,13 +655,21 @@ pub struct SearchFilter {
     pub terms: Vec<String>,
     pub author_lower: Option<String>,
     pub has: Option<String>,
+    /// Múltiplos filtros `tem:` (todos devem casar).
+    pub has_list: Vec<String>,
     pub before: Option<i64>,
     pub after: Option<i64>,
     pub pinned: bool,
-    /// Menções diretas, @everyone e cargos do usuário (`mention_roles`); exclui as próprias mensagens.
+    /// Menções diretas (`@usuario`); quando `mentions_include_roles` é true inclui também `@everyone` e cargos.
     pub mentions_user: Option<String>,
+    pub mentions_include_roles: bool,
     /// IDs dos cargos do usuário (sem "everyone") que contam como menção.
     pub mention_roles: Vec<String>,
+    /// IDs de threads/posts de fórum cujo título/tags já casaram com todos os `terms`.
+    pub matching_thread_channels: Vec<String>,
+    /// "recent" | "oldest" | "relevance"
+    pub sort: String,
+    pub offset: usize,
     pub limit: usize,
 }
 
@@ -1110,6 +1145,7 @@ fn apply(conn: &Connection, op: WriteOp) -> DbResult<()> {
             )?;
         }
         WriteOp::UpsertMessage(msg) => upsert_message(conn, &msg)?,
+        WriteOp::DeliverChat { message, account_id, nonce } => store_message(conn, &message, Some((&account_id, &nonce)))?,
         WriteOp::UpsertScheduled(job) => {
             conn.execute("INSERT INTO scheduled_messages (id,account_id,channel_id,content,send_at,error)
                           VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET error=excluded.error",
@@ -1186,12 +1222,16 @@ fn apply(conn: &Connection, op: WriteOp) -> DbResult<()> {
 }
 
 fn upsert_message(conn: &Connection, msg: &ChatMessage) -> DbResult<()> {
+    store_message(conn, msg, None)
+}
+
+fn store_message(conn: &Connection, msg: &ChatMessage, receipt: Option<(&str, &str)>) -> DbResult<()> {
     let mut stored = msg.clone();
     stored.nonce = None;
     let data = serde_json::to_string(&stored)?;
     conn.execute(
-        "INSERT INTO messages (id, channel_id, author_id, author_name, content, created_at, edited, pinned, data)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO messages (id, channel_id, author_id, author_name, content, created_at, edited, pinned, data, client_account_id, client_nonce)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET content = excluded.content, edited = excluded.edited,
            pinned = excluded.pinned, data = excluded.data, author_name = excluded.author_name",
         params![
@@ -1203,7 +1243,9 @@ fn upsert_message(conn: &Connection, msg: &ChatMessage) -> DbResult<()> {
             stored.created_at,
             stored.edited as i64,
             stored.pinned as i64,
-            data
+            data,
+            receipt.map(|(account, _)| account),
+            receipt.map(|(_, nonce)| nonce),
         ],
     )?;
     Ok(())
@@ -1263,6 +1305,13 @@ fn writer_loop(mut conn: Connection, rx: mpsc::Receiver<WriteOp>) {
 }
 
 impl Db {
+    pub fn has_chat_receipt(&self, account_id: &str, nonce: &str) -> DbResult<bool> {
+        self.with_reader(|conn| Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM chat_receipts WHERE account_id = ?1 AND nonce = ?2)",
+            params![account_id, nonce],
+            |row| row.get(0),
+        )?))
+    }
     /// Abre (ou cria) o banco, aplica o esquema e, se o banco estiver vazio,
     /// importa os arquivos JSON antigos encontrados em `legacy_dir`.
     pub fn open(path: &Path, legacy_dir: Option<&Path>) -> DbResult<(Db, Option<ImportReport>)> {
@@ -1397,6 +1446,7 @@ impl Db {
                         member_timeouts: HashMap::new(),
                         member_nicks: HashMap::new(),
                         member_profiles: HashMap::new(),
+                        member_roster: HashMap::new(),
                         emojis: Vec::new(),
                         temporary_members: Vec::new(),
                     })
@@ -1964,51 +2014,162 @@ impl Db {
     }
 
     /// Busca no histórico persistido. O chamador limita `channels` ao que a pessoa pode ler.
-    pub fn search_messages(&self, f: &SearchFilter) -> DbResult<(Vec<ChatMessage>, bool)> {
+    /// Retorna `(mensagens_da_pagina, has_more, total_count)`.
+    pub fn search_messages(&self, f: &SearchFilter) -> DbResult<(Vec<ChatMessage>, bool, usize)> {
         if f.channels.is_empty() {
-            return Ok((Vec::new(), false));
+            return Ok((Vec::new(), false, 0));
         }
         self.with_reader(|c| {
-            let channels = serde_json::to_string(&f.channels)?;
-            let fts = (!f.terms.is_empty()).then(|| fts_query(&f.terms));
-            let sql = format!(
-                "SELECT m.data FROM messages m
-                 {join}
-                 WHERE m.channel_id IN (SELECT value FROM json_each(?1))
-                   {fts_cond}
-                   AND (?3 IS NULL OR lower(m.author_name) = ?3)
-                   AND (?4 IS NULL OR m.created_at < ?4)
-                   AND (?5 IS NULL OR m.created_at > ?5)
-                   AND (?6 = 0 OR m.pinned = 1)
-                   AND (?7 IS NULL
-                        OR (?7 = 'link' AND (m.content LIKE '%http://%' OR m.content LIKE '%https://%'))
-                        OR (?7 = 'file' AND json_array_length(json_extract(m.data, '$.attachments')) > 0)
-                        OR (?7 = 'image' AND (json_extract(m.data, '$.image_url') IS NOT NULL
-                            OR EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.attachments')) a
-                                       WHERE json_extract(a.value, '$.kind') = 'image'))))
-                   AND (?8 IS NULL OR (lower(m.author_name) <> ?8 AND (
-                        EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.mentions.users')) u WHERE u.value = ?8)
-                        OR json_extract(m.data, '$.mentions.everyone') = 1
-                        OR EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.mentions.roles')) r
-                                   WHERE r.value IN (SELECT value FROM json_each(?10))))))
-                 ORDER BY m.created_at DESC, m.id DESC LIMIT ?9",
-                join = if fts.is_some() { "JOIN messages_fts ON messages_fts.rowid = m.rowid" } else { "" },
-                fts_cond = if fts.is_some() { "AND messages_fts MATCH ?2" } else { "AND ?2 IS NULL" },
+            use rusqlite::types::Value as SqlVal;
+
+            let mut params_vec: Vec<SqlVal> = Vec::new();
+            let push_param = |vec: &mut Vec<SqlVal>, v: SqlVal| -> usize {
+                vec.push(v);
+                vec.len()
+            };
+
+            let p_channels = push_param(&mut params_vec, SqlVal::Text(serde_json::to_string(&f.channels)?));
+            let has_terms = !f.terms.is_empty();
+
+            let (cte_sql, join_sql, text_cond) = if has_terms {
+                let p_fts = push_param(&mut params_vec, SqlVal::Text(fts_query(&f.terms)));
+                let mut att_checks = Vec::new();
+                for term in &f.terms {
+                    let escaped = term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+                    let p_like = push_param(&mut params_vec, SqlVal::Text(format!("%{escaped}%")));
+                    att_checks.push(format!(
+                        "lower(coalesce(json_extract(a.value, '$.filename'), '')) LIKE ?{p_like} ESCAPE '\\'"
+                    ));
+                }
+                let att_cond = format!(
+                    "EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.attachments')) a WHERE {})",
+                    att_checks.join(" AND ")
+                );
+                let thread_cond = if !f.matching_thread_channels.is_empty() {
+                    let p_th = push_param(
+                        &mut params_vec,
+                        SqlVal::Text(serde_json::to_string(&f.matching_thread_channels)?),
+                    );
+                    format!(" OR m.channel_id IN (SELECT value FROM json_each(?{p_th}))")
+                } else {
+                    String::new()
+                };
+                (
+                    format!(
+                        "WITH fts_hits AS (SELECT rowid, bm25(messages_fts) AS rank FROM messages_fts WHERE messages_fts MATCH ?{p_fts})"
+                    ),
+                    "LEFT JOIN fts_hits ON fts_hits.rowid = m.rowid".to_string(),
+                    format!("AND (fts_hits.rowid IS NOT NULL OR {att_cond}{thread_cond})"),
+                )
+            } else {
+                (String::new(), String::new(), String::new())
+            };
+
+            let mut where_extra = String::new();
+            if let Some(author) = &f.author_lower {
+                let p = push_param(&mut params_vec, SqlVal::Text(author.clone()));
+                where_extra.push_str(&format!(" AND lower(m.author_name) = ?{p}"));
+            }
+            if let Some(before) = f.before {
+                let p = push_param(&mut params_vec, SqlVal::Integer(before));
+                where_extra.push_str(&format!(" AND m.created_at < ?{p}"));
+            }
+            if let Some(after) = f.after {
+                let p = push_param(&mut params_vec, SqlVal::Integer(after));
+                where_extra.push_str(&format!(" AND m.created_at > ?{p}"));
+            }
+            if f.pinned {
+                where_extra.push_str(" AND m.pinned = 1");
+            }
+
+            let mut combined_has: Vec<&str> = Vec::new();
+            if let Some(h) = f.has.as_deref() {
+                combined_has.push(h);
+            }
+            for h in &f.has_list {
+                if !combined_has.contains(&h.as_str()) {
+                    combined_has.push(h.as_str());
+                }
+            }
+            for h in combined_has {
+                match h {
+                    "link" => where_extra.push_str(" AND (m.content LIKE '%http://%' OR m.content LIKE '%https://%')"),
+                    "file" => where_extra.push_str(" AND json_array_length(json_extract(m.data, '$.attachments')) > 0"),
+                    "image" => where_extra.push_str(
+                        " AND (json_extract(m.data, '$.image_url') IS NOT NULL \
+                          OR EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.attachments')) a \
+                                     WHERE json_extract(a.value, '$.kind') = 'image'))",
+                    ),
+                    "video" => where_extra.push_str(
+                        " AND EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.attachments')) a \
+                                      WHERE json_extract(a.value, '$.kind') = 'video' \
+                                         OR lower(coalesce(json_extract(a.value, '$.content_type'), '')) LIKE 'video/%')",
+                    ),
+                    "audio" => where_extra.push_str(
+                        " AND EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.attachments')) a \
+                                      WHERE json_extract(a.value, '$.kind') = 'audio' \
+                                         OR lower(coalesce(json_extract(a.value, '$.content_type'), '')) LIKE 'audio/%')",
+                    ),
+                    "embed" => where_extra.push_str(" AND json_array_length(json_extract(m.data, '$.embeds')) > 0"),
+                    "reaction" => where_extra.push_str(
+                        " AND EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.reactions')) r \
+                                      WHERE json_array_length(r.value) > 0)",
+                    ),
+                    "poll" => where_extra.push_str(" AND json_extract(m.data, '$.poll') IS NOT NULL"),
+                    _ => {}
+                }
+            }
+
+            if let Some(target) = &f.mentions_user {
+                let p_u = push_param(&mut params_vec, SqlVal::Text(target.clone()));
+                if f.mentions_include_roles {
+                    let p_roles = push_param(&mut params_vec, SqlVal::Text(serde_json::to_string(&f.mention_roles)?));
+                    where_extra.push_str(&format!(
+                        " AND (lower(m.author_name) <> ?{p_u} AND (\
+                            EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.mentions.users')) u WHERE u.value = ?{p_u}) \
+                            OR json_extract(m.data, '$.mentions.everyone') = 1 \
+                            OR EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.mentions.roles')) r \
+                                       WHERE r.value IN (SELECT value FROM json_each(?{p_roles})))))"
+                    ));
+                } else {
+                    where_extra.push_str(&format!(
+                        " AND EXISTS (SELECT 1 FROM json_each(json_extract(m.data, '$.mentions.users')) u WHERE u.value = ?{p_u})"
+                    ));
+                }
+            }
+
+            let order_sql = match f.sort.as_str() {
+                "oldest" => "ORDER BY m.created_at ASC, m.id ASC",
+                "relevance" if has_terms => "ORDER BY CASE WHEN fts_hits.rowid IS NOT NULL THEN 0 ELSE 1 END ASC, COALESCE(fts_hits.rank, 0.0) ASC, m.created_at DESC, m.id DESC",
+                _ => "ORDER BY m.created_at DESC, m.id DESC",
+            };
+
+            let count_sql = format!(
+                "{cte_sql} SELECT COUNT(*) FROM messages m {join_sql} \
+                 WHERE m.channel_id IN (SELECT value FROM json_each(?{p_channels})) \
+                 {text_cond} {where_extra}"
             );
-            let mut stmt = c.prepare(&sql)?;
+            let total_count: usize = c.query_row(
+                &count_sql,
+                rusqlite::params_from_iter(params_vec.iter()),
+                |r| Ok(r.get::<_, i64>(0)?.max(0) as usize),
+            )?;
+
+            if total_count == 0 || f.offset >= total_count {
+                return Ok((Vec::new(), false, total_count));
+            }
+
+            let p_limit = push_param(&mut params_vec, SqlVal::Integer((f.limit + 1) as i64));
+            let p_offset = push_param(&mut params_vec, SqlVal::Integer(f.offset as i64));
+            let select_sql = format!(
+                "{cte_sql} SELECT m.data FROM messages m {join_sql} \
+                 WHERE m.channel_id IN (SELECT value FROM json_each(?{p_channels})) \
+                 {text_cond} {where_extra} \
+                 {order_sql} LIMIT ?{p_limit} OFFSET ?{p_offset}"
+            );
+            let mut stmt = c.prepare(&select_sql)?;
             let rows = stmt.query_map(
-                params![
-                    channels,
-                    fts,
-                    f.author_lower,
-                    f.before,
-                    f.after,
-                    f.pinned as i64,
-                    f.has,
-                    f.mentions_user,
-                    (f.limit + 1) as i64,
-                    serde_json::to_string(&f.mention_roles)?
-                ],
+                rusqlite::params_from_iter(params_vec.iter()),
                 |r| r.get::<_, String>(0),
             )?;
             let raw = rows.collect::<Result<Vec<_>, _>>()?;
@@ -2018,7 +2179,7 @@ impl Db {
                 .take(f.limit)
                 .filter_map(|s| serde_json::from_str(&s).ok())
                 .collect();
-            Ok((list, more))
+            Ok((list, more, total_count))
         })
     }
 
@@ -2410,6 +2571,7 @@ mod tests {
             member_timeouts: HashMap::new(),
             member_nicks: HashMap::new(),
             member_profiles: HashMap::new(),
+            member_roster: HashMap::new(),
             emojis: Vec::new(),
             invites_paused: false,
             rules_text: None,

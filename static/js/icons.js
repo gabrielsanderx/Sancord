@@ -54,6 +54,7 @@ const SancordIcons = (() => {
     check: '<path d="m4 12 5 5L20 6"/>',
     globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3q-7 9 0 18M12 3q7 9 0 18"/>',
     eye: '<path d="M2 12q10-16 20 0-10 16-20 0z"/><circle cx="12" cy="12" r="3"/>',
+    'eye-off': '<path d="M3 3l18 18M8 6q8-4 14 6-2 3-5 5M14 19q-7 1-12-7 2-3 4-4M10 10a3 3 0 0 0 4 4"/>',
     rotate: '<path d="M3 10V3m0 7h7M3 10a9 9 0 1 1 1 9"/>',
     moon: '<path d="M20 15A9 9 0 0 1 9 4 9 9 0 1 0 20 15z"/>',
     noise: '<path d="M3 10v4M7 6v12M12 3v18M17 7v10M21 10v4"/>',

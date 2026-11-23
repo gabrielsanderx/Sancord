@@ -374,6 +374,10 @@ function onVoiceMoved({ channel_id, by }) {
 
 /** O servidor recusou a entrada (sem permissão, canal cheio...): desfaz a interface. */
 function onJoinVoiceRejected() {
+  if (state.voiceRecovery) {
+    leaveVoiceChannel({ silent: true });
+    return;
+  }
   setTimeout(() => {
     if (state.currentVoiceChannel && state.selfUser?.voice_channel_id !== state.currentVoiceChannel) {
       leaveVoiceChannel();
@@ -381,15 +385,59 @@ function onJoinVoiceRejected() {
   }, 0);
 }
 
-/** Reconexão do WebSocket: volta para a mesma chamada com o estado de mídia atual. */
-function resumeVoiceAfterReconnect() {
+function setVoiceRecovery(status) {
+  const node = document.getElementById("voice-reconnect-status");
+  node?.classList.toggle("hidden", !status);
+  if (node) node.textContent = status || "";
+}
+
+function cancelVoiceRecovery() {
+  clearTimeout(state.voiceRecovery?.timer);
+  state.voiceRecovery = null;
+  setVoiceRecovery("");
+}
+
+function suspendVoiceForReconnect() {
+  state.voiceJoinRequestId = (state.voiceJoinRequestId || 0) + 1;
   const channel = state.currentVoiceChannel;
   if (!channel) return;
+  cancelVoiceRecovery();
+  state.voiceRecovery = { channel, joining: false };
+  setVoiceRecovery("Conexão de voz interrompida · Reconectando…");
+  stopScreenSharing(false);
+  stopCamera(false);
+  stopVoicePingMonitor();
+  clearUnansweredCallTimer();
   cleanupAllPeers();
-  sendWs("JoinVoice", { channel_id: channel });
-  syncVoiceStateWithServer();
+  applyLocalMuteState();
   renderVoiceStage();
-  showUiToast("Conexão restabelecida — voltando para a chamada.");
+}
+
+function resumeVoiceAfterReconnect() {
+  const recovery = state.voiceRecovery;
+  if (!recovery || recovery.joining || recovery.channel !== state.currentVoiceChannel) return;
+  const channel = recovery.channel;
+  const privateCall = isPrivateVoiceId(channel);
+  if (privateCall ? !state.voiceMembers[channel]?.length : !voicePermissions().connect_voice) {
+    leaveVoiceChannel({ silent: true });
+    showUiToast(privateCall ? "A chamada privada terminou." : "O canal de voz não está mais disponível.");
+    return;
+  }
+  if (!sendWs("JoinVoice", { channel_id: channel, resume: true })) return;
+  recovery.joining = true;
+  recovery.timer = setTimeout(() => {
+    if (state.voiceRecovery !== recovery) return;
+    leaveVoiceChannel({ silent: true });
+    showUiToast("Não foi possível recuperar a chamada. Você pode entrar novamente.");
+  }, 8000);
+}
+
+function confirmVoiceRecovery() {
+  const recovery = state.voiceRecovery;
+  if (!recovery?.joining || state.selfUser?.voice_channel_id !== recovery.channel) return;
+  cancelVoiceRecovery();
+  syncVoiceStateWithServer();
+  startVoicePingMonitor();
 }
 
 // ---------------------------------------------------------------------------

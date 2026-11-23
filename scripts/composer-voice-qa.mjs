@@ -98,8 +98,12 @@ export async function runComposerVoiceQa(page, evaluate) {
   await evaluate(`SancordUI.closeContextMenu(); openDmConversation('dm:lume__nina', state.users.get('nina'));
     state.currentVoiceChannel = 'dmvoice:lume__nina'; activeVoiceChannelName.textContent = 'Nina';
     updateDmCallButtonUI();
-    state.voiceMembers[state.currentVoiceChannel] = ['lume','nina']; stageTitle.textContent = 'Chamada privada · Nina';
+    stageTitle.textContent = 'Chamada privada · Nina';
     voiceStage.classList.remove('hidden'); renderVoiceStage(); updateVoiceDockContext(state.currentVoiceChannel);`);
+  assert.match(await evaluate(`document.getElementById('voice-stage-waiting')?.textContent`), /Aguardando participantes/);
+  await snapshot('10a-chamada-aguardando');
+  await evaluate(`state.voiceMembers[state.currentVoiceChannel] = ['lume','nina']; renderVoiceStage();`);
+  assert.equal(await evaluate(`Boolean(document.getElementById('voice-stage-waiting'))`), false);
   assert.equal(await evaluate(`document.querySelectorAll('#private-stage-controls button').length`), 5);
   await snapshot('10-chamada-privada');
   await resize(1920,1080);

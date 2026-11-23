@@ -156,15 +156,14 @@
     box.replaceChildren();
     if (!hits.length) {
       const empty = document.createElement("div");
-      empty.className = "settings-search-empty";
-      empty.textContent = "Nenhuma configuração encontrada.";
+      empty.className = "ui-empty-compact";
+      empty.innerHTML = SancordUI.emptyHTML({ icon: "search", title: "Nenhuma configuração encontrada", description: "Experimente outro termo." });
       box.appendChild(empty);
     } else {
       for (const hit of hits) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "settings-search-hit";
-        btn.setAttribute("role", "option");
         const page = document.createElement("span");
         page.className = "settings-search-hit-page";
         page.textContent = hit.tabTitle;
@@ -195,6 +194,29 @@
   settingsSearchInput?.addEventListener("input", (e) => {
     renderSettingsSearchResults(e.target.value);
   });
+
+  const settingsSearchResults = document.getElementById("settings-search-results");
+  function navigateSettingsSearch(e) {
+    if (!settingsSearchResults || settingsSearchResults.classList.contains("hidden")) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      settingsSearchInput.value = "";
+      renderSettingsSearchResults("");
+      settingsSearchInput.focus();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp"].includes(e.key)) return;
+    const hits = [...settingsSearchResults.querySelectorAll(".settings-search-hit")];
+    if (!hits.length) return;
+    e.preventDefault();
+    const current = hits.indexOf(document.activeElement);
+    if (current === 0 && e.key === "ArrowUp") settingsSearchInput.focus();
+    else if (e.key === "ArrowUp" && current < 0) hits.at(-1).focus();
+    else hits[Math.min(hits.length - 1, current + (e.key === "ArrowDown" ? 1 : -1))].focus();
+  }
+  settingsSearchInput?.addEventListener("keydown", navigateSettingsSearch);
+  settingsSearchResults?.addEventListener("keydown", navigateSettingsSearch);
 
   // -------------------------------------------------------------------------
   // 2. Conta, Segurança, Dispositivos, Conexões & Perfis por Servidor
@@ -1102,6 +1124,12 @@
     // 1. WebSocket
     const wsOpen = state.ws?.readyState === 1;
     push("WebSocket", wsOpen ? "Conectado ✓" : "Desconectado", wsOpen ? "ok" : "err");
+    if (state.audioSettings?.developerMode) {
+      const connection = SancordConnection.status();
+      push("Sessão em tempo real", `${connection.phase}${connection.reason ? ` • ${connection.reason}` : ""}`, connection.phase === "CONNECTED" ? "ok" : "warn");
+      push("Tentativas de reconexão", `${connection.attempt}${connection.nextAt ? ` • próxima em ${Math.max(0, Math.ceil((connection.nextAt - Date.now()) / 1000))} s` : ""}`, "ok");
+      if (connection.lastHeartbeat) push("Último heartbeat", new Date(connection.lastHeartbeat).toISOString(), "ok");
+    }
 
     // 2. HTTP /api/health ping
     try {

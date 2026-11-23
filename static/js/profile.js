@@ -8,11 +8,37 @@
 // Depende de globais do app.js/chat.js (state, sendWs, renderMarkdown...).
 // ============================================================================
 
-state.cosmetics = state.cosmetics || { catalog: [], owned: new Set(), loaded: false };
+state.cosmetics = state.cosmetics || {
+  catalog: [],
+  owned: new Set(),
+  badges: [],
+  ownedBadges: null,
+  badgeOrder: [],
+  hiddenBadges: [],
+  maxVisibleBadges: 6,
+  loaded: false,
+};
 
-function onCosmeticsState({ catalog, owned, badges, collection }) {
-  state.cosmetics = { catalog: catalog || [], owned: new Set(owned || []), badges: badges || [], loaded: true };
+function onCosmeticsState({ catalog, owned, badges, owned_badges, badge_order, hidden_badges, max_visible_badges, collection }) {
+  const prevDirty = typeof isProfileFieldsDirty === "function" && isProfileFieldsDirty();
+  state.cosmetics = {
+    catalog: catalog || [],
+    owned: new Set(owned || []),
+    badges: badges || [],
+    ownedBadges: Array.isArray(owned_badges) ? [...owned_badges] : null,
+    badgeOrder: Array.isArray(badge_order) ? [...badge_order] : [],
+    hiddenBadges: Array.isArray(hidden_badges) ? [...hidden_badges] : [],
+    maxVisibleBadges: Number(max_visible_badges) > 0 ? Number(max_visible_badges) : 6,
+    loaded: true,
+  };
+  if (typeof profileDraft !== "undefined" && !prevDirty) {
+    profileDraft.badge_order = [...state.cosmetics.badgeOrder];
+    profileDraft.hidden_badges = [...state.cosmetics.hiddenBadges];
+  }
   syncNameStyleOptions();
+  if (typeof renderPeBadgesEditor === "function" && typeof peView !== "undefined" && peView === "badges") {
+    renderPeBadgesEditor();
+  }
   if (typeof refreshLiveProfilePreview === "function") refreshLiveProfilePreview();
   onCosmeticCollectionUpdated(collection);
 }
@@ -21,6 +47,12 @@ function onCosmeticsState({ catalog, owned, badges, collection }) {
 function ownsCosmetic(kind, id) {
   if (!id || id === "none" || id === "default") return true;
   if (!state.cosmetics?.loaded) return true;
+  if (kind === "name_style" && id.includes("+")) {
+    if (id === "default+default") return true;
+    const { font, effect } = profileNameParts(id);
+    return font !== "default" && effect !== "default" && composeProfileNameStyle(font, effect) === id &&
+      ownsCosmetic(kind, font) && ownsCosmetic(kind, effect);
+  }
   return state.cosmetics.owned.has(`${kind}:${id}`);
 }
 
@@ -79,6 +111,7 @@ function configureProfileEffect(layer, id) {
   if (layer.dataset.profileEffect !== effect) {
     stopProfileEffect(layer);
     layer.dataset.profileEffect = effect;
+    layer.innerHTML = profileEffectArt(effect);
   }
   updateProfileEffectButtons();
 }
@@ -255,12 +288,15 @@ function profileTextTone(u) {
 
 function applyProfileTheme(cardEl, u) {
   if (!cardEl) return;
+  const t = profileTheme(u);
   const bg = profileThemeBackground(u);
   cardEl.style.background = bg || "var(--bg-floating)";
+  if (t.primary) cardEl.style.setProperty("--profile-surface", t.primary);
+  else cardEl.style.removeProperty("--profile-surface");
   const tone = profileTextTone(u);
   cardEl.classList.toggle("profile-text-dark", tone === "dark");
   cardEl.classList.toggle("profile-text-light", tone === "light");
-  const hl = profileTheme(u).highlight;
+  const hl = t.highlight;
   if (hl) cardEl.style.setProperty("--profile-highlight", hl);
   else cardEl.style.removeProperty("--profile-highlight");
 }
@@ -421,8 +457,14 @@ async function openServerProfileDialog(serverId) {
     { name: "profile_frame", kind: "profile_frame", label: "Moldura de perfil" },
     { name: "profile_effect", kind: "profile_effect", label: "Efeito de perfil" },
     { name: "nameplate_style", kind: "nameplate", label: "Placa de nome" },
-    { name: "name_style", kind: "name_style", label: "Estilo do nome" },
   ];
+  const nameParts = profileNameParts(local?.name_style || state.selfUser.name_style);
+  const nameStyleItems = serverCosmeticOptions("name_style", "").slice(1);
+  const fontOptions = [{ value: "default", label: "Padrão" }, ...nameStyleItems.filter(({ value }) => PROFILE_NAME_FONTS.has(value))];
+  const effectOptions = [{ value: "default", label: "Sólido" }, ...nameStyleItems.filter(({ value }) => !PROFILE_NAME_FONTS.has(value))];
+  if (!fontOptions.some(({ value }) => value === nameParts.font)) fontOptions.push({ value: nameParts.font, label: nameParts.font });
+  if (!effectOptions.some(({ value }) => value === nameParts.effect)) effectOptions.push({ value: nameParts.effect, label: nameParts.effect });
+  const usesNameGradient = values => (values.name_style_mode === "custom" ? values.name_effect : profileNameParts(state.selfUser.name_style).effect) === "custom-gradient";
   const hasNameColors = Boolean(local?.name_color || local?.name_color_secondary || local?.name_gradient_direction);
   const hasTheme = Boolean(local?.theme_primary || local?.theme_accent || local?.theme_highlight || local?.theme_mode || local?.theme_direction);
   const directionOptions = [
@@ -439,9 +481,13 @@ async function openServerProfileDialog(serverId) {
     const overrides = Object.fromEntries(SERVER_PROFILE_OVERRIDE_FIELDS.map(field => [field, null]));
     overrides.bio = values.bio.trim() || null;
     for (const { name } of cosmeticFields) overrides[name] = values[name] || null;
+    if (values.name_style_mode === "custom") {
+      const style = composeProfileNameStyle(values.name_font, values.name_effect);
+      overrides.name_style = style === "default" ? "default+default" : style;
+    }
     if (values.name_color_mode === "custom") {
       overrides.name_color = values.name_color;
-      if ((values.name_style || state.selfUser.name_style) === "custom-gradient") {
+      if (usesNameGradient(values)) {
         overrides.name_color_secondary = values.name_color_secondary;
         overrides.name_gradient_direction = values.name_gradient_direction;
       }
@@ -500,13 +546,19 @@ async function openServerProfileDialog(serverId) {
         value: local?.[name] || "",
         options: serverCosmeticOptions(kind, local?.[name] || ""),
       })),
+      { name: "name_style_mode", label: "Estilo do nome neste servidor", type: "select", value: local?.name_style ? "custom" : "inherit", options: [
+        { value: "inherit", label: "Usar estilo do perfil global" },
+        { value: "custom", label: "Personalizar estilo neste servidor" },
+      ] },
+      { name: "name_font", label: "Fonte", type: "select", value: nameParts.font, options: fontOptions, visibleWhen: v => v.name_style_mode === "custom" },
+      { name: "name_effect", label: "Efeito do nome", type: "select", value: nameParts.effect, options: effectOptions, visibleWhen: v => v.name_style_mode === "custom" },
       { name: "name_color_mode", label: "Cor do nome neste servidor", type: "select", value: hasNameColors ? "custom" : "inherit", options: [
         { value: "inherit", label: "Usar cor do perfil global" },
         { value: "custom", label: "Personalizar cor neste servidor" },
       ] },
       { name: "name_color", label: "Cor principal do nome", type: "color", value: local?.name_color || state.selfUser?.name_color || "#ffffff", visibleWhen: (v) => v.name_color_mode === "custom" },
-      { name: "name_color_secondary", label: "Segunda cor do nome (gradiente)", type: "color", value: local?.name_color_secondary || state.selfUser?.name_color_secondary || "#5865f2", visibleWhen: (v) => v.name_color_mode === "custom" && (v.name_style || state.selfUser?.name_style) === "custom-gradient" },
-      { name: "name_gradient_direction", label: "Direção do gradiente do nome", type: "select", value: local?.name_gradient_direction || state.selfUser?.name_gradient_direction || "horizontal", options: directionOptions, visibleWhen: (v) => v.name_color_mode === "custom" && (v.name_style || state.selfUser?.name_style) === "custom-gradient" },
+      { name: "name_color_secondary", label: "Segunda cor do nome (gradiente)", type: "color", value: local?.name_color_secondary || state.selfUser?.name_color_secondary || "#5865f2", visibleWhen: v => v.name_color_mode === "custom" && usesNameGradient(v) },
+      { name: "name_gradient_direction", label: "Direção do gradiente do nome", type: "select", value: local?.name_gradient_direction || state.selfUser?.name_gradient_direction || "horizontal", options: directionOptions, visibleWhen: v => v.name_color_mode === "custom" && usesNameGradient(v) },
       { name: "theme_override", label: "Tema do cartão neste servidor", type: "select", value: hasTheme ? "custom" : "inherit", options: [
         { value: "inherit", label: "Usar tema do perfil global" },
         { value: "custom", label: "Personalizar tema neste servidor" },
@@ -562,9 +614,14 @@ function draftPreviewUser() {
   const media = (typeof profileDraft !== "undefined" && profileDraft.media) || {};
   const pick = (k, field) => (media[k] === "remove" ? null : media[k]?.url || u[field]);
   const socials = collectSocialProfileFields();
+  const ownedBadges = typeof getOwnedBadgesList === "function" ? getOwnedBadgesList() : (u.badges || []);
+  const previewBadges = typeof computeVisibleBadges === "function" && typeof profileDraft !== "undefined"
+    ? computeVisibleBadges(ownedBadges, profileDraft.badge_order, profileDraft.hidden_badges, getMaxVisibleBadges())
+    : (u.badges || []);
   return {
     ...u,
     ...(typeof profileDraft !== "undefined" ? profileDraft : {}),
+    badges: previewBadges,
     avatar_url: pick("avatar", "avatar_url"),
     banner_url: pick("banner", "banner_url"),
     avatar_animated: Boolean(media.avatar ? media.avatar.animated : u.avatar_animated),
@@ -720,13 +777,6 @@ document.getElementById("settings-theme-direction")?.addEventListener("change", 
 document.getElementById("settings-remove-avatar-btn")?.addEventListener("click", (e) => {
   e.stopPropagation();
   setPendingProfileMedia("avatar", "remove");
-});
-document.getElementById("settings-remove-avatar-btn")?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") {
-    e.preventDefault();
-    e.stopPropagation();
-    setPendingProfileMedia("avatar", "remove");
-  }
 });
 document.getElementById("settings-bio-input")?.addEventListener("input", updateBioCounter);
 // ===========================================================================
@@ -897,6 +947,58 @@ function badgeDef(id) {
   return (state.cosmetics?.badges || []).find((b) => b.id === id) || null;
 }
 
+function getOwnedBadgesList() {
+  if (Array.isArray(state.cosmetics?.ownedBadges)) {
+    return state.cosmetics.ownedBadges.filter((id) => BADGE_ICONS[id]);
+  }
+  return (state.selfUser?.badges || []).filter((id) => BADGE_ICONS[id]);
+}
+
+function getMaxVisibleBadges() {
+  const n = Number(state.cosmetics?.maxVisibleBadges);
+  return Number.isFinite(n) && n > 0 ? n : 6;
+}
+
+function badgeCanHide(id) {
+  const def = badgeDef(id);
+  return def ? def.can_hide !== false : true;
+}
+
+function computeOrderedOwnedBadges(owned, badgeOrder) {
+  const ownedList = (owned || []).filter((id) => BADGE_ICONS[id]);
+  const ownedSet = new Set(ownedList);
+  const ordered = [];
+  const seen = new Set();
+  for (const id of badgeOrder || []) {
+    if (ownedSet.has(id) && !seen.has(id)) {
+      seen.add(id);
+      ordered.push(id);
+    }
+  }
+  for (const id of ownedList) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      ordered.push(id);
+    }
+  }
+  return ordered;
+}
+
+function computeVisibleBadges(owned, badgeOrder, hiddenBadges, maxVisible = getMaxVisibleBadges()) {
+  const ordered = computeOrderedOwnedBadges(owned, badgeOrder);
+  const hiddenSet = new Set(hiddenBadges || []);
+  const mandatory = [];
+  const optional = [];
+  for (const id of ordered) {
+    if (!badgeCanHide(id)) mandatory.push(id);
+    else if (!hiddenSet.has(id)) optional.push(id);
+  }
+  const remainingSlots = Math.max(0, maxVisible - mandatory.length);
+  const allowedOptional = new Set(optional.slice(0, remainingSlots));
+  const mandatorySet = new Set(mandatory);
+  return ordered.filter((id) => mandatorySet.has(id) || allowedOptional.has(id));
+}
+
 function renderProfileBadges(host, badgeIds) {
   if (!host) return;
   host.innerHTML = "";
@@ -955,7 +1057,7 @@ function buildPickerPreview(kind, id, size = "small") {
   const wrap = document.createElement("div");
   if (kind === "profile_frame") {
     wrap.className = `profile-card ${size === "large" ? "compact-profile-preview" : "pf-mini profile-picker-thumbnail"}`;
-    const view = size === "large" ? u : { ...u, avatar_url: null, banner_url: null, bio: null, badges: [] };
+    const view = size === "large" ? u : { ...u, avatar_url: null, banner_url: null, bio: null, badges: [], created_at: null, pronouns: null, custom_status: null };
     renderCompactProfile(wrap, { ...view, profile_frame: id, profile_effect: null }, u.display_name || u.username || "Perfil", u.username || "perfil", true);
   } else {
     const px = size === "large" ? 96 : 52;

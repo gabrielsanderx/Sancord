@@ -165,6 +165,8 @@ pub struct ConnRate {
     pub invite_create: SlidingWindow,
     pub invite_join: SlidingWindow,
     pub invite_dm: SlidingWindow,
+    pub activity: SlidingWindow,
+    pub search: SlidingWindow,
 }
 
 impl ConnRate {
@@ -173,6 +175,12 @@ impl ConnRate {
     }
     pub fn allow_reaction(&mut self, now: i64) -> bool {
         self.reactions.allow(now, 15, 5_000)
+    }
+    pub fn allow_activity(&mut self, now: i64) -> bool {
+        self.activity.allow(now, 12, 10_000)
+    }
+    pub fn allow_search(&mut self, now: i64) -> bool {
+        self.search.allow(now, 20, 10_000)
     }
     /// "Digitando" é reenviado pelo cliente a cada ~2 s; mais que isso é descartado.
     pub fn allow_typing(&mut self, now: i64) -> bool {

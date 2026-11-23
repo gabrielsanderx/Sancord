@@ -184,11 +184,13 @@ pub fn normalize_recovery_code(raw: &str) -> String {
 #[derive(Default)]
 pub struct LoginRateLimiter {
     failures: std::collections::HashMap<String, (u32, i64)>,
+    next_cleanup_ms: i64,
 }
 
 impl LoginRateLimiter {
     const MAX_FAILURES: u32 = 8;
     const WINDOW_MS: i64 = 10 * 60 * 1000;
+    const MAX_TRACKED_NAMES: usize = 10_000;
 
     pub fn is_blocked(&self, key: &str, now_ms: i64) -> bool {
         match self.failures.get(key) {
@@ -198,15 +200,23 @@ impl LoginRateLimiter {
     }
 
     pub fn record_failure(&mut self, key: &str, now_ms: i64) {
+        if key.is_empty() || key.len() > MAX_USERNAME_LEN * 4 {
+            return;
+        }
+        if self.failures.len() >= Self::MAX_TRACKED_NAMES && !self.failures.contains_key(key) {
+            if now_ms >= self.next_cleanup_ms {
+                self.failures.retain(|_, (_, start)| now_ms - *start < Self::WINDOW_MS);
+                self.next_cleanup_ms = now_ms.saturating_add(1000);
+            }
+            if self.failures.len() >= Self::MAX_TRACKED_NAMES {
+                return;
+            }
+        }
         let entry = self.failures.entry(key.to_string()).or_insert((0, now_ms));
         if now_ms - entry.1 >= Self::WINDOW_MS {
             *entry = (0, now_ms);
         }
         entry.0 += 1;
-        // Evita crescimento ilimitado do mapa.
-        if self.failures.len() > 10_000 {
-            self.failures.retain(|_, (_, start)| now_ms - *start < Self::WINDOW_MS);
-        }
     }
 
     pub fn clear(&mut self, key: &str) {

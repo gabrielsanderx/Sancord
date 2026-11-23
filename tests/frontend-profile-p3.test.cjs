@@ -65,6 +65,12 @@ test('seletor respeita posse, permite replay e só altera o rascunho ao escolher
   d.getElementById('profile-preview-replay').click();
   assert.ok(layer.classList.contains('is-playing'), '↻ da prévia também reproduz');
   view.querySelector('.pe-back').click();
+  assert.equal(h.run('profileDraft.profile_effect'), 'aurora', 'Voltar cancela somente a escolha');
+  assert.equal(layer.classList.contains('is-playing'), false, 'cancelar interrompe a prévia');
+  d.getElementById('open-effect-picker-btn').click();
+  view.querySelector('[data-id="core-signal"]').click();
+  view.querySelector('.pe-chooser-actions .btn-primary').click();
+  assert.equal(h.run('profileDraft.profile_effect'), 'core-signal', 'Aplicar mantém o efeito no rascunho');
   h.run('closeSettingsModal()');
   await h.flush();
   d.querySelector('.sancord-dialog form').dispatchEvent(new h.w.Event('submit', { cancelable: true }));

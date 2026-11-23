@@ -72,6 +72,9 @@ function closeComposerPickers() {
 function syncComposerChrome() {
   const context = composerContext();
   const { available, attach } = context;
+  const offline = SancordConnection.isInterrupted();
+  document.getElementById("composer-offline")?.classList.toggle("hidden", !offline || !available);
+  composerSend.setAttribute("aria-label", offline ? "Adicionar mensagem à fila" : "Enviar mensagem");
   if ((!attach || !context.richMedia) && typeof cancelVoiceRecording === "function") cancelVoiceRecording(false);
   chatForm.classList.toggle("hidden", chatInput.disabled);
   composerReadonly.classList.toggle("hidden", !chatInput.disabled);
@@ -89,7 +92,8 @@ function syncComposerChrome() {
 }
 
 function updateComposerSendButton() {
-  composerSend.disabled = chatInput.disabled || currentSlowmodeWait(getActiveTextChannelId()) > 0 ||
+  const offline = SancordConnection.isInterrupted();
+  composerSend.disabled = chatInput.disabled || (!offline && currentSlowmodeWait(getActiveTextChannelId()) > 0) ||
     (!chatInput.value.trim() && state.composerFiles.length === 0);
 }
 

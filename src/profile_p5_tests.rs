@@ -207,7 +207,7 @@ async fn server_profile_cosmetics_and_theme_validate_persist_redact_and_clear() 
             "profile_frame": "minimal",
             "profile_effect": "aurora",
             "nameplate_style": "core-stripe",
-            "name_style": "custom-gradient",
+            "name_style": "retro+custom-gradient",
             "name_color": "#C984ED",
             "name_color_secondary": "#4CCFBE",
             "name_gradient_direction": "diagonal",
@@ -225,7 +225,7 @@ async fn server_profile_cosmetics_and_theme_validate_persist_redact_and_clear() 
     assert_eq!(event["profile"]["profile_frame"], "minimal");
     assert_eq!(event["profile"]["profile_effect"], "aurora");
     assert_eq!(event["profile"]["nameplate_style"], "core-stripe");
-    assert_eq!(event["profile"]["name_style"], "custom-gradient");
+    assert_eq!(event["profile"]["name_style"], "retro+custom-gradient");
     assert_eq!(event["profile"]["name_color"], "#c984ed");
     assert_eq!(event["profile"]["name_color_secondary"], "#4ccfbe");
     assert_eq!(event["profile"]["name_gradient_direction"], "diagonal");
@@ -242,6 +242,7 @@ async fn server_profile_cosmetics_and_theme_validate_persist_redact_and_clear() 
         let reopened = crate::state::ServerState::load(Config::for_tests(srv.dir.clone())).unwrap();
         let state = reopened.read().await;
         let profile = &state.find_server(&sid).unwrap().member_profiles["membrocosm"];
+        assert_eq!(profile.name_style.as_deref(), Some("retro+custom-gradient"));
         assert_eq!(profile.avatar_decoration.as_deref(), Some("nebula-orbit"));
         assert_eq!(profile.profile_frame.as_deref(), Some("minimal"));
         assert_eq!(profile.theme_primary.as_deref(), Some("#1e1f29"));

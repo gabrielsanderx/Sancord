@@ -202,28 +202,34 @@ fn extra_items() -> Vec<CosmeticItem> {
 
 /// Badges oficiais. "trust" = confirmação/confiança (sempre visíveis, nunca confundidas com
 /// cosmético); "cosmetic" = lembranças. Só o servidor concede.
+/// `can_hide` indica se o titular pode ocultar a badge da exibição do perfil (badges de sistema/bot
+/// obrigatórias podem definir `can_hide: false`).
 #[derive(Debug, Clone, Serialize)]
 pub struct BadgeDef {
     pub id: &'static str,
     pub name: &'static str,
     pub category: &'static str,
     pub description: &'static str,
+    pub can_hide: bool,
 }
 
+/// Limite máximo de badges exibidas simultaneamente no perfil público.
+pub const MAX_VISIBLE_BADGES: usize = 6;
+
 pub const BADGES: &[BadgeDef] = &[
-    BadgeDef { id: "founder", name: "Fundação", category: "trust", description: "Fundou o projeto Sancord." },
-    BadgeDef { id: "developer", name: "Desenvolvimento", category: "trust", description: "Faz parte da equipe de desenvolvimento." },
-    BadgeDef { id: "moderator", name: "Moderação oficial", category: "trust", description: "Modera a comunidade oficial." },
-    BadgeDef { id: "verified_bot", name: "Bot verificado", category: "trust", description: "Integração verificada pelo Sancord." },
-    BadgeDef { id: "verified_developer", name: "Dev verificado", category: "trust", description: "Desenvolvedor de integração verificado." },
-    BadgeDef { id: "contributor", name: "Contribuição", category: "trust", description: "Contribuiu com código, tradução ou documentação." },
-    BadgeDef { id: "bug_hunter", name: "Caça-Bugs", category: "trust", description: "Ajudou a encontrar problemas importantes." },
-    BadgeDef { id: "event_winner", name: "Vencedora de evento", category: "trust", description: "Venceu um evento oficial." },
-    BadgeDef { id: "early_user", name: "Pioneira", category: "cosmetic", description: "Conta criada na fase inicial do Sancord." },
-    BadgeDef { id: "alpha", name: "Alpha", category: "cosmetic", description: "Participou do Alpha." },
-    BadgeDef { id: "beta", name: "Beta", category: "cosmetic", description: "Participou do Beta." },
-    BadgeDef { id: "community", name: "Comunidade", category: "cosmetic", description: "Reconhecimento da comunidade." },
-    BadgeDef { id: "supporter", name: "Apoio inicial", category: "cosmetic", description: "Apoiou o Sancord no início." },
+    BadgeDef { id: "founder", name: "Fundação", category: "trust", description: "Fundou o projeto Sancord.", can_hide: true },
+    BadgeDef { id: "developer", name: "Desenvolvimento", category: "trust", description: "Faz parte da equipe de desenvolvimento.", can_hide: true },
+    BadgeDef { id: "moderator", name: "Moderação oficial", category: "trust", description: "Modera a comunidade oficial.", can_hide: true },
+    BadgeDef { id: "verified_bot", name: "Bot verificado", category: "trust", description: "Integração verificada pelo Sancord.", can_hide: false },
+    BadgeDef { id: "verified_developer", name: "Dev verificado", category: "trust", description: "Desenvolvedor de integração verificado.", can_hide: true },
+    BadgeDef { id: "contributor", name: "Contribuição", category: "trust", description: "Contribuiu com código, tradução ou documentação.", can_hide: true },
+    BadgeDef { id: "bug_hunter", name: "Caça-Bugs", category: "trust", description: "Ajudou a encontrar problemas importantes.", can_hide: true },
+    BadgeDef { id: "event_winner", name: "Vencedora de evento", category: "trust", description: "Venceu um evento oficial.", can_hide: true },
+    BadgeDef { id: "early_user", name: "Pioneira", category: "cosmetic", description: "Conta criada na fase inicial do Sancord.", can_hide: true },
+    BadgeDef { id: "alpha", name: "Alpha", category: "cosmetic", description: "Participou do Alpha.", can_hide: true },
+    BadgeDef { id: "beta", name: "Beta", category: "cosmetic", description: "Participou do Beta.", can_hide: true },
+    BadgeDef { id: "community", name: "Comunidade", category: "cosmetic", description: "Reconhecimento da comunidade.", can_hide: true },
+    BadgeDef { id: "supporter", name: "Apoio inicial", category: "cosmetic", description: "Apoiou o Sancord no início.", can_hide: true },
 ];
 
 pub fn badge(id: &str) -> Option<&'static BadgeDef> {
@@ -242,9 +248,9 @@ fn parse_pt_date(s: &str) -> Option<(i32, u32, u32)> {
     Some((y, m, d))
 }
 
-/// Badges efetivas = concedidas pelo operador (arquivo `badges.json` na pasta de dados) +
-/// automáticas. Ordenadas: confiança primeiro, depois cosméticas, na ordem de `BADGES`.
-pub fn effective_badges(acc: &Account, granted: &[String]) -> Vec<String> {
+/// Todas as badges realmente possuídas pela conta (concedidas pelo operador + automáticas),
+/// em ordem canônica de `BADGES`. O cliente nunca altera esta lista.
+pub fn owned_badges(acc: &Account, granted: &[String]) -> Vec<String> {
     let mut set: Vec<String> = granted.iter().filter(|b| badge(b).is_some()).cloned().collect();
     // Sem data legível (contas muito antigas) também conta como fase inicial.
     let early = acc.created_at.as_deref().and_then(parse_pt_date).map_or(true, |(y, m, d)| (y, m, d) < EARLY_USER_CUTOFF);
@@ -252,6 +258,122 @@ pub fn effective_badges(acc: &Account, granted: &[String]) -> Vec<String> {
         set.push("early_user".into());
     }
     BADGES.iter().filter(|b| set.iter().any(|s| s == b.id)).map(|b| b.id.to_string()).collect()
+}
+
+/// Lista de badges possuídas pela conta em memória (com fallback seguro para `acc.profile.badges`
+/// em testes que constroem `Account` manualmente).
+pub fn account_owned_badges(acc: &Account) -> &[String] {
+    if !acc.owned_badges.is_empty() {
+        &acc.owned_badges
+    } else {
+        &acc.profile.badges
+    }
+}
+
+/// Aplica ordem e ocultação do usuário sobre as badges realmente possuídas (`owned`):
+/// - Só inclui IDs presentes em `owned` (nunca concede badges novas).
+/// - Novas badges conquistadas fora de `badge_order` entram automaticamente ao final se não estiverem ocultas.
+/// - Badges com `can_hide == false` permanecem sempre visíveis.
+/// - Limita a exibição total a `MAX_VISIBLE_BADGES` (ou mais apenas se houver mais badges obrigatórias).
+pub fn resolve_visible_badges(
+    owned: &[String],
+    badge_order: &[String],
+    hidden_badges: &[String],
+) -> Vec<String> {
+    let mut ordered: Vec<String> = Vec::with_capacity(owned.len());
+    for id in badge_order {
+        if owned.iter().any(|o| o == id) && !ordered.iter().any(|x| x == id) {
+            ordered.push(id.clone());
+        }
+    }
+    for id in owned {
+        if !ordered.iter().any(|x| x == id) {
+            ordered.push(id.clone());
+        }
+    }
+
+    let mut mandatory: Vec<&str> = Vec::new();
+    let mut optional: Vec<&str> = Vec::new();
+    for id in &ordered {
+        let can_hide = badge(id).map_or(true, |def| def.can_hide);
+        if !can_hide {
+            mandatory.push(id.as_str());
+        } else if !hidden_badges.iter().any(|h| h == id) {
+            optional.push(id.as_str());
+        }
+    }
+    let remaining_slots = MAX_VISIBLE_BADGES.saturating_sub(mandatory.len());
+    let allowed_optional: std::collections::HashSet<&str> =
+        optional.into_iter().take(remaining_slots).collect();
+    let mandatory_set: std::collections::HashSet<&str> = mandatory.into_iter().collect();
+
+    ordered
+        .iter()
+        .filter(|id| mandatory_set.contains(id.as_str()) || allowed_optional.contains(id.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Sanitiza as preferências de ordem e ocultação enviadas pelo cliente:
+/// intersecta estritamente com `owned`, remove duplicatas e ignora tentativas de ocultar badges obrigatórias.
+pub fn sanitize_badge_preferences(
+    owned: &[String],
+    requested_order: Option<Vec<String>>,
+    requested_hidden: Option<Vec<String>>,
+    current_order: &[String],
+    current_hidden: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let next_order = match requested_order {
+        Some(req) => {
+            let mut out = Vec::new();
+            for raw in req {
+                let id = raw.trim();
+                if owned.iter().any(|o| o == id) && !out.iter().any(|x| x == id) {
+                    out.push(id.to_string());
+                }
+            }
+            out
+        }
+        None => current_order
+            .iter()
+            .filter(|id| owned.iter().any(|o| o == *id))
+            .cloned()
+            .collect(),
+    };
+    let next_hidden = match requested_hidden {
+        Some(req) => {
+            let mut out = Vec::new();
+            for raw in req {
+                let id = raw.trim();
+                if owned.iter().any(|o| o == id)
+                    && badge(id).is_some_and(|def| def.can_hide)
+                    && !out.iter().any(|x| x == id)
+                {
+                    out.push(id.to_string());
+                }
+            }
+            out
+        }
+        None => current_hidden
+            .iter()
+            .filter(|id| owned.iter().any(|o| o == *id) && badge(id).is_some_and(|def| def.can_hide))
+            .cloned()
+            .collect(),
+    };
+    (next_order, next_hidden)
+}
+
+/// Atualiza simultaneamente `acc.owned_badges` e `acc.profile.badges` (exibição efetiva).
+pub fn sync_account_badges(acc: &mut Account, granted: &[String]) {
+    let owned = owned_badges(acc, granted);
+    acc.owned_badges = owned.clone();
+    acc.profile.badges = resolve_visible_badges(&owned, &acc.badge_order, &acc.hidden_badges);
+}
+
+/// Badges efetivas exibidas no perfil = badges possuídas + preferências de ordem/visibilidade.
+pub fn effective_badges(acc: &Account, granted: &[String]) -> Vec<String> {
+    let owned = owned_badges(acc, granted);
+    resolve_visible_badges(&owned, &acc.badge_order, &acc.hidden_badges)
 }
 
 /// Lê `badges.json` ({"usuario": ["founder", ...]}) da pasta de dados. Ausente ou inválido = vazio.
@@ -285,9 +407,7 @@ pub fn save_badge_grants(
 /// Conta autorizada a gerenciar selos via painel administrativo:
 /// possui badge `founder`/`developer` ou está listada em `SANCORD_OPERATORS`.
 pub fn is_badge_operator(acc: &Account) -> bool {
-    if acc
-        .profile
-        .badges
+    if account_owned_badges(acc)
         .iter()
         .any(|b| matches!(b.as_str(), "founder" | "developer"))
     {
@@ -312,7 +432,7 @@ pub fn owns(acc: &Account, item: &CosmeticItem) -> bool {
         "free" => true,
         a => {
             if let Some(badge) = a.strip_prefix("badge:") {
-                if acc.profile.badges.iter().any(|b| b == badge) {
+                if account_owned_badges(acc).iter().any(|b| b == badge) {
                     return true;
                 }
             }
@@ -336,12 +456,28 @@ pub fn kind_name(kind: Kind) -> &'static str {
     }
 }
 
+const NAME_FONTS: &[&str] = &["gta", "retro", "gothic", "modern", "rounded", "mono"];
+
 /// Valor pedido pelo cliente para equipar: `Ok(None)` = tirar; `Ok(Some(id))` = equipar.
 /// "none", "default" e vazio tiram o item.
 pub fn check_equip(acc: &Account, kind: Kind, requested: &str) -> Result<Option<String>, &'static str> {
     let id = requested.trim();
     if id.is_empty() || id == "none" || id == "default" {
         return Ok(None);
+    }
+    if let (Kind::NameStyle, Some((font, effect))) = (kind, id.split_once('+')) {
+        if (font, effect) == ("default", "default") {
+            return Ok(Some(id.to_string()));
+        }
+        if !NAME_FONTS.contains(&font) || NAME_FONTS.contains(&effect) {
+            return Err("Escolha uma fonte e um efeito válidos para o nome.");
+        }
+        let font = find(kind, font).ok_or("Esta fonte não existe no catálogo do Sancord.")?;
+        let effect = find(kind, effect).ok_or("Este efeito de nome não existe no catálogo do Sancord.")?;
+        if !owns(acc, font) || !owns(acc, effect) {
+            return Err("Você ainda não possui este item.");
+        }
+        return Ok(Some(id.to_string()));
     }
     let item = find(kind, id).ok_or("Este item não existe no catálogo do Sancord.")?;
     if !owns(acc, item) {
@@ -383,5 +519,32 @@ mod tests {
             assert!(matches!(i.rarity, "common" | "rare" | "epic" | "legendary" | "event" | "founder"));
             assert!(i.availability == "free" || i.availability == "grant" || i.availability.starts_with("badge:"));
         }
+    }
+
+    #[test]
+    fn badge_visibility_order_cap_and_security() {
+        let owned: Vec<String> = vec![
+            "founder", "developer", "moderator", "verified_bot",
+            "contributor", "bug_hunter", "early_user", "alpha",
+        ].into_iter().map(String::from).collect();
+
+        // Sanitização descarta badges não possuídas e impede ocultar badge obrigatória (verified_bot).
+        let (order, hidden) = sanitize_badge_preferences(
+            &owned,
+            Some(vec!["alpha".into(), "event_winner".into(), "founder".into(), "alpha".into()]),
+            Some(vec!["developer".into(), "verified_bot".into(), "supporter".into()]),
+            &[],
+            &[],
+        );
+        assert_eq!(order, vec!["alpha", "founder"]);
+        assert_eq!(hidden, vec!["developer"]);
+
+        // Resolução preserva ordem personalizada, inclui novas badges automaticamente, mantém obrigatória e aplica limite 6.
+        let visible = resolve_visible_badges(&owned, &order, &hidden);
+        assert_eq!(visible.len(), MAX_VISIBLE_BADGES);
+        assert_eq!(visible[0], "alpha");
+        assert_eq!(visible[1], "founder");
+        assert!(visible.contains(&"verified_bot".to_string()));
+        assert!(!visible.contains(&"developer".to_string()));
     }
 }

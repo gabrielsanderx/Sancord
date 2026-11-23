@@ -236,7 +236,7 @@ document.getElementById("audit-action-filter")?.addEventListener("change", () =>
 document.getElementById("audit-more-btn")?.addEventListener("click", () => loadAuditLog(false));
 
 // ---------------------------------------------------------------------------
-// Busca no histórico
+// Busca no histórico — parser compartilhado (a UI completa está em search.js)
 // ---------------------------------------------------------------------------
 
 /** Data AAAA-MM-DD (ou DD/MM/AAAA) para ms; `endOfDay` inclui o dia inteiro. */
@@ -250,116 +250,130 @@ function parseSearchDate(raw, endOfDay) {
   return Number.isNaN(date.getTime()) ? null : date.getTime();
 }
 
-/** "relatório de:ana tem:link antes:2026-11-01" -> pedido de busca. */
+/**
+ * Interpreta texto livre e filtros em português/inglês:
+ * "minecraft de:Gabriel em:#geral tem:imagem depois:2026-01-01 menciona:@Ana fixadas"
+ */
 function parseSearchQuery(text) {
-  const out = { query: "", author: null, has: null, before: null, after: null, pinned: false, mentions_me: false };
+  const tokens = [];
+  const src = String(text || "").trim();
+  let cur = "";
+  let quote = null;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (/\s/.test(ch)) {
+      if (cur) {
+        tokens.push(cur);
+        cur = "";
+      }
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) tokens.push(cur);
+
+  const out = {
+    query: "",
+    author: null,
+    in_channel: null,
+    has: null,
+    has_list: [],
+    before: null,
+    before_raw: null,
+    after: null,
+    after_raw: null,
+    during_raw: null,
+    pinned: false,
+    mentions_me: false,
+    mentions_user: null,
+    filters: [],
+  };
   const words = [];
-  const hasMap = { link: "link", links: "link", arquivo: "file", arquivos: "file", file: "file", imagem: "image", imagens: "image", image: "image" };
-  for (const token of String(text || "").trim().split(/\s+/).filter(Boolean)) {
-    const [rawKey, ...rest] = token.split(":");
-    const key = rawKey.toLowerCase();
-    const value = rest.join(":");
-    if (rest.length && (key === "de" || key === "from") && value) out.author = value.replace(/^@/, "");
-    else if (rest.length && (key === "tem" || key === "has") && hasMap[value.toLowerCase()]) out.has = hasMap[value.toLowerCase()];
-    else if (rest.length && (key === "antes" || key === "before") && parseSearchDate(value, false) !== null) out.before = parseSearchDate(value, false);
-    else if (rest.length && (key === "depois" || key === "after") && parseSearchDate(value, true) !== null) out.after = parseSearchDate(value, true);
-    else if (rest.length && (key === "menciona" || key === "mentions") && /^(eu|me|mim)$/i.test(value)) out.mentions_me = true;
-    else if (["fixadas", "fixada", "pinned"].includes(key) && (!rest.length || /^(sim|true|1)$/i.test(value))) out.pinned = true;
-    else words.push(token);
+  const hasMap = {
+    link: "link", links: "link",
+    arquivo: "file", arquivos: "file", file: "file",
+    imagem: "image", imagens: "image", image: "image",
+    video: "video", vídeo: "video", videos: "video", vídeos: "video",
+    audio: "audio", áudio: "audio", audios: "audio", áudios: "audio", voz: "audio",
+    embed: "embed", embeds: "embed",
+    reacao: "reaction", reação: "reaction", reacoes: "reaction", reações: "reaction", reaction: "reaction",
+    enquete: "poll", enquetes: "poll", poll: "poll",
+  };
+  for (const token of tokens) {
+    const colon = token.indexOf(":");
+    const hasColon = colon > 0;
+    const key = (hasColon ? token.slice(0, colon) : token).toLowerCase();
+    const value = hasColon ? token.slice(colon + 1) : "";
+
+    if (hasColon && (key === "de" || key === "from") && value) {
+      out.author = value.replace(/^@/, "");
+      out.filters.push({ kind: "author", label: `De: ${out.author}`, raw: token });
+    } else if (hasColon && (key === "em" || key === "in") && value) {
+      out.in_channel = value.replace(/^#/, "");
+      out.filters.push({ kind: "in_channel", label: `Em: #${out.in_channel}`, raw: token });
+    } else if (hasColon && (key === "tem" || key === "has") && hasMap[value.toLowerCase()]) {
+      const norm = hasMap[value.toLowerCase()];
+      if (!out.has_list.includes(norm)) {
+        out.has_list.push(norm);
+        out.filters.push({ kind: "has", value: norm, label: `Tem: ${value.toLowerCase()}`, raw: token });
+      }
+      out.has = out.has_list[0] || null;
+    } else if (hasColon && (key === "antes" || key === "before") && parseSearchDate(value, false) !== null) {
+      out.before = parseSearchDate(value, false);
+      out.before_raw = value;
+      out.filters.push({ kind: "before", label: `Antes: ${value}`, raw: token });
+    } else if (hasColon && (key === "depois" || key === "after") && parseSearchDate(value, true) !== null) {
+      out.after = parseSearchDate(value, true);
+      out.after_raw = value;
+      out.filters.push({ kind: "after", label: `Depois: ${value}`, raw: token });
+    } else if (hasColon && (key === "durante" || key === "during" || key === "data") && parseSearchDate(value, false) !== null) {
+      const start = parseSearchDate(value, false);
+      const end = parseSearchDate(value, true);
+      out.after = start - 1;
+      out.before = end + 1;
+      out.during_raw = value;
+      out.filters.push({ kind: "during", label: `Em: ${value}`, raw: token });
+    } else if (hasColon && ["menciona", "menções", "mencoes", "mentions"].includes(key) && value) {
+      const clean = value.replace(/^@/, "");
+      if (/^(eu|me|mim)$/i.test(clean)) {
+        out.mentions_me = true;
+        out.filters.push({ kind: "mentions_me", label: "Menciona: você", raw: token });
+      } else if (clean) {
+        out.mentions_user = clean;
+        out.filters.push({ kind: "mentions_user", label: `Menciona: @${clean}`, raw: token });
+      }
+    } else if (["fixadas", "fixada", "pinned"].includes(key) && (!hasColon || /^(sim|true|1)$/i.test(value))) {
+      out.pinned = true;
+      out.filters.push({ kind: "pinned", label: "Fixadas", raw: token });
+    } else {
+      words.push(token);
+    }
   }
   out.query = words.join(" ");
   return out;
 }
 
-const searchState = { seq: 0, lastRequest: null, terms: [] };
-
-function searchPanel() {
-  return document.getElementById("search-results-panel");
-}
-
 function hideSearchResults() {
-  searchPanel()?.classList.add("hidden");
+  if (typeof SancordSearch !== "undefined") SancordSearch.hide();
+  else document.getElementById("search-results-panel")?.classList.add("hidden");
 }
 
-function runServerSearch(text) {
-  const parsed = parseSearchQuery(text);
-  const hasFilter = parsed.query || parsed.author || parsed.has || parsed.pinned || parsed.mentions_me;
-  if (!hasFilter) {
-    hideSearchResults();
-    return;
-  }
-  const scope = document.getElementById("search-scope")?.value || "here";
-  const payload = { ...parsed, request_id: `s${++searchState.seq}` };
-  if (scope === "here") {
-    if (state.activeView === "home" && state.activeDmId) payload.channel_id = state.activeDmId;
-    else if (state.activeView !== "home") payload.server_id = getActiveServer()?.id || null;
-    else payload.private_only = true;
-  }
-  searchState.lastRequest = payload.request_id;
-  searchState.terms = parsed.query.toLowerCase().split(/\s+/).filter(Boolean);
-  const panel = searchPanel();
-  const list = document.getElementById("search-results-list");
-  if (list) list.innerHTML = `<div class="pinned-empty">Buscando…</div>`;
-  panel?.classList.remove("hidden");
-  sendWs("SearchMessages", payload);
+function runServerSearch(text, opts) {
+  if (typeof SancordSearch !== "undefined") SancordSearch.run(text, opts);
 }
 
-function onSearchResults({ request_id, hits, has_more }) {
-  if (request_id && request_id !== searchState.lastRequest) return; // resposta antiga
-  const list = document.getElementById("search-results-list");
-  const title = document.getElementById("search-results-title");
-  if (!list) return;
-  const n = (hits || []).length;
-  if (title) title.textContent = `🔎 ${n}${has_more ? "+" : ""} resultado${n === 1 ? "" : "s"}`;
-  list.innerHTML = "";
-  if (n === 0) {
-    list.innerHTML = SancordUI.emptyHTML({icon:"search",title:"Nenhum resultado",description:"Experimente outros termos ou os filtros de autor, data e anexos."});
-    return;
-  }
-  for (const hit of hits) {
-    const m = hit.message;
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "search-hit";
-    const where = document.createElement("div");
-    where.className = "search-hit-where";
-    where.textContent = `${hit.server_name ? `${hit.server_name} • ` : ""}${hit.channel_name.startsWith("@") ? hit.channel_name : hit.server_id ? `#${hit.channel_name}` : hit.channel_name}`;
-    const head = document.createElement("div");
-    head.className = "search-hit-head";
-    const author = document.createElement("strong");
-    author.textContent = m.author_name;
-    const when = document.createElement("span");
-    when.textContent = formatDateTime(m.created_at);
-    head.append(author, when);
-    const body = document.createElement("div");
-    body.className = "search-hit-body";
-    const text = decodeCustomEmojis(m.content) || (m.attachments?.length ? `📎 ${m.attachments.map((a) => a.filename).join(", ")}` : m.image_url ? "📷 Imagem" : "");
-    body.textContent = text.length > 220 ? `${text.slice(0, 220)}…` : text;
-    row.append(where, head, body);
-    row.addEventListener("click", () => {
-      hideSearchResults();
-      jumpToMessage(m.channel_id, m.id);
-    });
-    list.appendChild(row);
-  }
-  if (has_more) {
-    const more = document.createElement("div");
-    more.className = "pinned-empty";
-    more.textContent = "Mostrando os 25 mais recentes. Refine a busca para ver outros.";
-    list.appendChild(more);
-  }
+function onSearchResults(payload) {
+  if (typeof SancordSearch !== "undefined") SancordSearch.onResults(payload);
 }
 
-document.getElementById("search-scope")?.addEventListener("change", () => {
-  if (chatSearchInput?.value.trim()) runServerSearch(chatSearchInput.value);
-});
-
-document.addEventListener("mousedown", (e) => {
-  const panel = searchPanel();
-  if (panel && !panel.classList.contains("hidden") && !panel.contains(e.target) && e.target !== chatSearchInput) {
-    hideSearchResults();
-  }
-});
+function onMessageContext(payload) {
+  if (typeof SancordSearch !== "undefined") SancordSearch.onContext(payload);
+}
 
 // ---------------------------------------------------------------------------
 // Castigo (timeout) de membros — o servidor autoriza e aplica; aqui só

@@ -228,7 +228,7 @@ async fn name_gradient_and_plate_sync_between_sessions_and_persist() {
     wait_for(&mut second, "Welcome").await;
 
     send(&mut desktop, json!({"type":"UpdateProfile","payload":{
-        "name_style":"custom-gradient", "nameplate_style":"core-stripe", "name_color":"#bc8ef1",
+        "name_style":"retro+custom-gradient", "nameplate_style":"core-stripe", "name_color":"#bc8ef1",
         "name_color_secondary":"#52CFC8", "name_gradient_direction":"diagonal", "bio":"Etapa 4"
     }})).await;
     loop {
@@ -238,7 +238,7 @@ async fn name_gradient_and_plate_sync_between_sessions_and_persist() {
         if !sessions.iter().any(|u| u["bio"] == "Etapa 4") { continue; }
         assert_eq!(sessions.len(), 2);
         for u in sessions {
-            assert_eq!(u["name_style"], "custom-gradient");
+            assert_eq!(u["name_style"], "retro+custom-gradient");
             assert_eq!(u["nameplate_style"], "core-stripe");
             assert_eq!(u["name_color_secondary"], "#52cfc8");
             assert_eq!(u["name_gradient_direction"], "diagonal");
@@ -259,6 +259,7 @@ async fn name_gradient_and_plate_sync_between_sessions_and_persist() {
     let reopened = crate::state::ServerState::load(Config::for_tests(srv.dir.clone())).unwrap();
     let st = reopened.read().await;
     let saved = &st.accounts["perfilgradiente"];
+    assert_eq!(saved.name_style.as_deref(), Some("retro+custom-gradient"));
     assert_eq!(saved.nameplate_style.as_deref(), Some("core-stripe"));
     assert_eq!(saved.profile.name_color_secondary.as_deref(), Some("#52cfc8"));
     assert_eq!(saved.profile.name_gradient_direction.as_deref(), Some("diagonal"));

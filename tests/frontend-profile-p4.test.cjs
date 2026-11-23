@@ -20,7 +20,11 @@ test('editor integra catálogo, duas cores, direção e placa ao rascunho e ao p
     input.dispatchEvent(new h.w.Event(event, { bubbles:true }));
   }
   assert.ok(d.getElementById('settings-name-showcase').classList.contains('name-style-gradient'));
-  change('settings-name-style-select', 'custom-gradient');
+  d.querySelector('[data-pe-open="name"]').click();
+  d.querySelector('[data-style-part="font"][data-style-sample="retro"]').click();
+  d.querySelector('[data-pe-name-tab="effects"]').click();
+  d.querySelector('[data-style-part="effect"][data-style-sample="custom-gradient"]').click();
+  d.querySelector('[data-pe-name-tab="colors"]').click();
   assert.equal(d.getElementById('settings-name-gradient-controls').classList.contains('hidden'), false);
   change('settings-name-color-input', '#a677dd', 'input');
   change('settings-name-color-secondary', '#46cebd', 'input');
@@ -28,6 +32,8 @@ test('editor integra catálogo, duas cores, direção e placa ao rascunho e ao p
   const gradient = d.getElementById('settings-name-showcase').style.getPropertyValue('--sancord-name-gradient');
   assert.match(gradient, /^radial-gradient\(ellipse/);
   assert.match(gradient, /#a677dd.*#46cebd/);
+  assert.equal(d.getElementById('preview-card-name').dataset.nameFont, 'retro');
+  d.querySelector('[data-pe-view="name"] .pe-chooser-actions .btn-primary').click();
   // A placa abre um subeditor na lateral; o perfil completo continua visível.
   d.getElementById('open-nameplate-picker-btn').click();
   const view = d.querySelector('[data-pe-view="nameplate"]');
@@ -41,11 +47,11 @@ test('editor integra catálogo, duas cores, direção e placa ao rascunho e ao p
   assert.ok(d.querySelector('#live-profile-preview-card .profile-nameplate-wrap').classList.contains('nameplate-core-stripe'));
   assert.equal(h.run('sent.some(packet => packet.type === "UpdateProfile")'), false);
   assert.equal(h.run('state.selfUser.name_style'), 'gradient');
-  view.querySelector('.pe-back').click();
+  view.querySelector('.pe-chooser-actions .btn-primary').click();
   assert.equal(d.querySelector('[data-pe-view="home"]').classList.contains('hidden'), false);
   h.run('saveProfileBtn.click()');
   const payload = JSON.parse(h.run('JSON.stringify(sent.find(packet => packet.type === "UpdateProfile").data)'));
-  assert.equal(payload.name_style, 'custom-gradient');
+  assert.equal(payload.name_style, 'retro+custom-gradient');
   assert.equal(payload.name_color, '#a677dd');
   assert.equal(payload.name_color_secondary, '#46cebd');
   assert.equal(payload.name_gradient_direction, 'radial');

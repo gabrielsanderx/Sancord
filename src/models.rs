@@ -284,6 +284,15 @@ pub struct UserPrefs {
     /// Etapa C7: GIFs favoritos (IDs de anexos GIF), do mais recente ao mais antigo.
     #[serde(default)]
     pub favorite_gifs: Vec<String>,
+    /// DMs/grupos fixados no topo da lista de conversas (privado do usuário).
+    #[serde(default)]
+    pub pinned_dms: Vec<String>,
+    /// DMs/grupos favoritados (exibidos também na área Favoritos).
+    #[serde(default)]
+    pub favorite_dms: Vec<String>,
+    /// DMs ocultadas pelo usuário via "Fechar mensagem direta" (reabrem com nova mensagem ou OpenDm).
+    #[serde(default)]
+    pub closed_dms: Vec<String>,
 }
 
 impl UserPrefs {
@@ -371,6 +380,24 @@ impl UserPrefs {
                 }
             })
             .take(Self::MAX_STARRED_MESSAGES)
+            .collect()
+    }
+
+    pub const MAX_DM_LIST_PREFS: usize = 100;
+
+    pub fn sanitize_dm_ids(list: Vec<String>) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        list.into_iter()
+            .filter_map(|id| {
+                let clean = id.trim().to_string();
+                let valid_prefix = clean.starts_with("dm:") || clean.starts_with("gdm:");
+                if valid_prefix && clean.len() <= 120 && seen.insert(clean.clone()) {
+                    Some(clean)
+                } else {
+                    None
+                }
+            })
+            .take(Self::MAX_DM_LIST_PREFS)
             .collect()
     }
 }
@@ -726,6 +753,10 @@ pub struct GuildServer {
     /// Campos que substituem o perfil global apenas neste servidor.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub member_profiles: HashMap<String, ServerMemberProfile>,
+    /// Resumo visual (já filtrado por privacidade) dos membros do servidor, preenchido
+    /// somente na projeção de saída para preservar personalizações de membros offline.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub member_roster: HashMap<String, FriendInfo>,
     /// Etapa C5: emojis próprios do servidor (tabela `server_emojis`).
     #[serde(default)]
     pub emojis: Vec<ServerEmoji>,
@@ -888,6 +919,12 @@ pub struct SearchHit {
     pub channel_name: String,
     pub server_id: Option<String>,
     pub server_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_channel_name: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_thread: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_forum: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1165,6 +1202,14 @@ pub struct Account {
     pub created_community: bool,
     #[serde(default)]
     pub profile_sharing: ProfileSharing,
+    /// Preferências privadas do titular sobre ordem e ocultação de badges exibidas no perfil.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub badge_order: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_badges: Vec<String>,
+    /// Todas as badges realmente possuídas pela conta (derivadas no servidor, nunca persistidas diretamente).
+    #[serde(skip)]
+    pub owned_badges: Vec<String>,
     #[serde(flatten, default)]
     pub profile: ProfileExtras,
     /// Token legado (texto puro) das versões antigas. Só é lido durante a
@@ -1220,6 +1265,58 @@ pub struct AuthResponse {
     pub username: Option<String>,
     pub avatar_color: Option<String>,
     pub avatar_url: Option<String>,
+}
+
+fn default_activity_kind() -> String {
+    "playing".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActivityButton {
+    pub label: String,
+    pub url: String,
+}
+
+/// Atividade em tempo real / Rich Presence separada de `status_kind` e `custom_status`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserActivity {
+    #[serde(default = "default_activity_kind")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_id: Option<String>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub large_image: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub large_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub small_image: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub small_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub party_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub party_size: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub party_max: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub buttons: Vec<ActivityButton>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spectate_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub metadata: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1282,6 +1379,8 @@ pub struct UserInfo {
     pub camera_stream_id: Option<String>,
     #[serde(default)]
     pub screen_stream_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<UserActivity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1577,6 +1676,9 @@ impl FriendsStore {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FriendInfo {
+    /// ID estável da conta (usado por "Copiar ID do usuário" no Modo Desenvolvedor).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub username: String,
     pub avatar_color: String,
     #[serde(default)]
@@ -1619,6 +1721,8 @@ pub struct FriendInfo {
     pub online: bool,
     #[serde(default)]
     pub voice_channel_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<UserActivity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1694,6 +1798,11 @@ pub enum ClientMessage {
         theme_direction: Option<String>,
         #[serde(default)]
         profile_frame: Option<String>,
+        /// Preferências de ordem e ocultação das badges possuídas pela conta (validadas no servidor).
+        #[serde(default)]
+        badge_order: Option<Vec<String>>,
+        #[serde(default)]
+        hidden_badges: Option<Vec<String>>,
     },
 
     /// Perfil P1: avatar ou banner a partir de uma imagem enviada em /api/attachments.
@@ -2042,6 +2151,10 @@ pub enum ClientMessage {
         mutes: Option<HashMap<String, i64>>,
         #[serde(default)]
         favorite_gifs: Option<Vec<String>>,
+        #[serde(default)]
+        pinned_dms: Option<Vec<String>>,
+        #[serde(default)]
+        favorite_dms: Option<Vec<String>>,
     },
 
     /// Deletar um canal personalizado
@@ -2281,8 +2394,11 @@ pub enum ClientMessage {
     /// Abrir ou iniciar conversa privada (DM) com um usuário
     OpenDm { target_username: String },
 
+    /// Ocultar DM da lista recente do usuário atual (não apaga histórico nem amizade)
+    CloseDm { dm_id: String },
+
     /// Entrar em um canal de voz (público ou privado de DM)
-    JoinVoice { channel_id: String },
+    JoinVoice { channel_id: String, #[serde(default)] resume: bool },
 
     /// Sair do canal de voz atual
     LeaveVoice,
@@ -2327,9 +2443,12 @@ pub enum ClientMessage {
         /// Filtros
         #[serde(default)]
         author: Option<String>,
-        /// "link" | "file" | "image"
+        /// "link" | "file" | "image" | "video" | "audio" | "embed" | "reaction" | "poll"
         #[serde(default)]
         has: Option<String>,
+        /// Múltiplos filtros `tem:` combinados (AND).
+        #[serde(default)]
+        has_list: Vec<String>,
         #[serde(default)]
         before: Option<i64>,
         #[serde(default)]
@@ -2338,6 +2457,29 @@ pub enum ClientMessage {
         pinned: bool,
         #[serde(default)]
         mentions_me: bool,
+        /// Menção direta a qualquer usuário (`menções:@nome`).
+        #[serde(default)]
+        mentions_user: Option<String>,
+        /// "recent" | "oldest" | "relevance"
+        #[serde(default)]
+        sort: Option<String>,
+        /// Paginação (0-based).
+        #[serde(default)]
+        offset: usize,
+    },
+
+    /// Preview compacto de mensagens vizinhas (antes/depois) para um resultado da busca.
+    GetMessageContext {
+        #[serde(default)]
+        request_id: Option<String>,
+        channel_id: String,
+        message_id: String,
+    },
+
+    /// Atualizar atividade em tempo real / Rich Presence (None limpa a atividade)
+    UpdateActivity {
+        #[serde(default)]
+        activity: Option<UserActivity>,
     },
 
     /// Atualizar estado de mídia (mute, deafen, compartilhamento de tela, câmera e qualidade)
@@ -2424,8 +2566,16 @@ pub enum ServerMessage {
     CosmeticsState {
         catalog: Vec<crate::cosmetics::CosmeticItem>,
         owned: Vec<String>,
-        /// Definições das badges (nome, categoria trust/cosmetic, descrição).
+        /// Definições das badges (nome, categoria trust/cosmetic, descrição, can_hide).
         badges: Vec<crate::cosmetics::BadgeDef>,
+        /// IDs de badges realmente possuídas pela conta (inclusive as ocultadas pelo titular).
+        owned_badges: Vec<String>,
+        /// Ordem personalizada escolhida pelo titular.
+        badge_order: Vec<String>,
+        /// Badges ocultadas pelo titular.
+        hidden_badges: Vec<String>,
+        /// Limite máximo de badges exibidas simultaneamente.
+        max_visible_badges: usize,
         collection: CosmeticCollection,
     },
     CosmeticCollectionUpdated { collection: CosmeticCollection },
@@ -2445,6 +2595,8 @@ pub enum ServerMessage {
     /// Autenticação do WebSocket recusada (token ausente, inválido ou expirado).
     /// O servidor fecha a conexão logo depois; o cliente deve voltar ao login.
     AuthFailed { message: String },
+    Pong,
+    ChatAccepted { nonce: String },
 
     /// Página de histórico pedida com `LoadMessages`
     MessagesPage {
@@ -2599,6 +2751,28 @@ pub enum ServerMessage {
         request_id: Option<String>,
         hits: Vec<SearchHit>,
         has_more: bool,
+        #[serde(default)]
+        total_count: usize,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default)]
+        sort: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    MessageContext {
+        request_id: Option<String>,
+        channel_id: String,
+        message_id: String,
+        messages: Vec<ChatMessage>,
+    },
+
+    UserActivityUpdated {
+        user_id: String,
+        username: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        activity: Option<UserActivity>,
     },
 
     /// Repasse de Offer WebRTC

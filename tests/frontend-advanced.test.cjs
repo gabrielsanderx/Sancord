@@ -37,10 +37,25 @@ test('datas: antes = início do dia, depois = fim do dia; inválidas viram texto
   const p = c.parseSearchQuery('antes:2026-11-10 depois:01/11/2026');
   assert.equal(p.before, new Date(2026, 10, 10, 0, 0, 0).getTime());
   assert.equal(p.after, new Date(2026, 10, 1, 23, 59, 59).getTime());
-  const bad = c.parseSearchQuery('antes:ontem tem:video');
+  const bad = c.parseSearchQuery('antes:ontem tem:holograma');
   assert.equal(bad.before, null);
   assert.equal(bad.has, null);
-  assert.equal(bad.query, 'antes:ontem tem:video');
+  assert.equal(bad.query, 'antes:ontem tem:holograma');
+});
+
+test('filtros avançados: canal, menção a usuário, múltiplos tem:, durante: e chips', () => {
+  const p = c.parseSearchQuery('minecraft de:Gabriel em:#geral tem:imagem tem:vídeo tem:enquete menções:@Ana durante:2026-10-15');
+  assert.equal(p.query, 'minecraft');
+  assert.equal(p.author, 'Gabriel');
+  assert.equal(p.in_channel, 'geral');
+  assert.deepEqual(Array.from(p.has_list), ['image', 'video', 'poll']);
+  assert.equal(p.has, 'image');
+  assert.equal(p.mentions_user, 'Ana');
+  assert.equal(p.mentions_me, false);
+  assert.ok(p.after < new Date(2026, 9, 15, 0, 0, 0).getTime());
+  assert.ok(p.before > new Date(2026, 9, 15, 23, 59, 59).getTime());
+  assert.ok(p.filters.some((f) => f.kind === 'in_channel' && f.label === 'Em: #geral'));
+  assert.ok(p.filters.some((f) => f.kind === 'mentions_user' && f.label === 'Menciona: @Ana'));
 });
 
 test('frase do registro de auditoria', () => {

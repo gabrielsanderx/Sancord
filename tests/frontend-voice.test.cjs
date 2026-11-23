@@ -85,24 +85,26 @@ function appFunction(name) {
   return appSource.slice(start, appSource.indexOf('\n}', start) + 2);
 }
 
-test('retomada da voz só envia uma entrada depois de aplicar o Welcome', () => {
+test('retomada da voz pede uma entrada e só ativa o áudio após confirmação', () => {
   const sent = [];
-  const ws = { readyState: 1 };
+  const state = { currentVoiceChannel: 'voz', voiceRecovery: { channel: 'voz', joining: false } };
   const c = vm.createContext({
-    state: { ws, currentVoiceChannel: 'voz', historyState: new Map() }, Map,
-    reconnect: { attempt: 1 }, WebSocket: { OPEN: 1 },
-    wsStatusDot: { classList: { add() {} } },
-    clearTimeout() {}, clearInterval() {}, setTimeout() {}, setConnectionBanner() {},
-    cleanupAllPeers() {}, syncVoiceStateWithServer() {}, renderVoiceStage() {}, showUiToast() {},
-    sendWs: (type, payload) => sent.push({ type, payload }),
+    state, isPrivateVoiceId: () => false, voicePermissions: () => ({ connect_voice: true }),
+    setTimeout() {}, cancelVoiceRecovery() { state.voiceRecovery = null; }, startVoicePingMonitor() {},
+    syncVoiceStateWithServer() { sent.push('audio'); },
+    sendWs: (type, payload) => { sent.push({ type, payload }); return true; },
   });
-  vm.runInContext(appFunction('onConnectionReady'), c);
-  const start = source.indexOf('function resumeVoiceAfterReconnect(');
-  vm.runInContext(source.slice(start, source.indexOf('\n}', start) + 2), c);
-  c.onConnectionReady(ws);
-  assert.equal(sent.length, 0, 'não deve entrar antes de receber o estado e ICE do Welcome');
+  for (const name of ['resumeVoiceAfterReconnect', 'confirmVoiceRecovery']) {
+    const start = source.indexOf(`function ${name}(`);
+    vm.runInContext(source.slice(start, source.indexOf('\n}', start) + 2), c);
+  }
   c.resumeVoiceAfterReconnect();
-  assert.equal(sent.filter(e => e.type === 'JoinVoice').length, 1);
+  c.resumeVoiceAfterReconnect();
+  c.confirmVoiceRecovery();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{ type: 'JoinVoice', payload: { channel_id: 'voz', resume: true } }]);
+  state.selfUser = { voice_channel_id: 'voz' };
+  c.confirmVoiceRecovery();
+  assert.equal(sent.at(-1), 'audio');
 });
 
 test('evento atrasado do peer antigo não fecha a conexão substituta', () => {

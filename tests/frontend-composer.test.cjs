@@ -40,6 +40,28 @@ test('menu abre recursos permitidos, navega por teclado e some em canal somente 
   assert.match(d.getElementById('composer-readonly').textContent, /Você não tem permissão/);
 });
 
+test('salto no chat aceita apenas a resposta do alvo atual e cancela ao sair da conversa', async t => {
+  const h = await fixture(t);
+  h.run(`
+    Element.prototype.scrollIntoView = function () {};
+    state.chatHistory.c1 = [];
+    globalThis.page = id => ({ channel_id: 'c1', around_id: id, has_more: true, has_more_after: true,
+      messages: [{ id, channel_id: 'c1', author_name: 'Bia', author_color: '#7862d4', content: 'Uma mensagem', created_at: 1000 }] });
+    chatSearchInput.value = state.searchQuery = 'de:Bia';
+    jumpToMessage('c1', 'antiga');
+    jumpToMessage('c1', 'atual');
+    handleMessagesPageV2(page('antiga'));
+  `);
+  assert.equal(h.run('getHistoryState("c1").loading'), true);
+  assert.equal(h.run('state.chatHistory.c1.length'), 0);
+  h.run(`handleMessagesPageV2(page('atual'))`);
+  assert.equal(h.document.querySelector('.flash-highlight')?.dataset.msgId, 'atual');
+  assert.equal(h.document.getElementById('chat-search-input').value, '');
+  h.run(`jumpToMessage('c1', 'depois'); switchToHomeFriendsView(); handleMessagesPageV2(page('depois'))`);
+  assert.equal(h.run('getHistoryState("c1").loading'), false);
+  assert.equal(h.run('state.chatHistory.c1[0].id'), 'atual');
+});
+
 test('atalhos mantêm multilinha e cada conversa conserva rascunho, anexos e contexto de envio', async t => {
   const h = await fixture(t), d = h.document, input = d.getElementById('chat-input');
   h.run(`globalThis.uploads = [];

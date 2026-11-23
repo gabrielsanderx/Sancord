@@ -6,12 +6,12 @@ const { JSDOM, VirtualConsole } = require('jsdom');
 const root = path.resolve(__dirname, '../..');
 
 // Isola somente o DOM. Não acessa contas, rede, banco ou dispositivos reais.
-async function openInterface(t) {
+async function openInterface(t, { url = 'https://sancord.invalid/' } = {}) {
   const errors = [], captures = [];
   const console = new VirtualConsole();
   console.on('jsdomError', error => errors.push(error.message));
   const dom = new JSDOM(fs.readFileSync(path.join(root, 'static/index.html'), 'utf8'), {
-    url: 'https://sancord.invalid/', runScripts: 'outside-only',
+    url, runScripts: 'outside-only',
     virtualConsole: console, pretendToBeVisual: true,
   });
   t.after(() => dom.window.close());

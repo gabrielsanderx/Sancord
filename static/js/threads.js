@@ -224,7 +224,7 @@ function openThread(threadId) {
   state.currentTextChannel = t.id;
   switchToServerView();
   if (!(state.chatHistory[t.id] || []).length) {
-    sendWs("LoadMessages", { channel_id: t.id });
+    if (!getHistoryState(t.id).loading) requestHistoryPage(t.id);
   }
 }
 

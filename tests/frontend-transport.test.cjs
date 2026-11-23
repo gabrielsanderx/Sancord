@@ -9,9 +9,9 @@ function transport(endpoint) {
     window: { location: { search: `?endpoint=${encodeURIComponent(endpoint)}`, origin: 'http://sancord.localhost' } },
   });
 }
-test('interface interna encaminha HTTP, mídia e WebSocket ao backend escolhido', () => {
+test('interface interna encaminha HTTP, mídia e WebSocket ao backend escolhido', async () => {
   const net = transport('http://127.0.0.1:3100');
-  assert.equal(net.fetch('/api/login').url, 'http://127.0.0.1:3100/api/login');
+  assert.equal((await net.fetch('/api/login')).url, 'http://127.0.0.1:3100/api/login');
   assert.equal(net.url('/api/attachments/a/foto.png'), 'http://127.0.0.1:3100/api/attachments/a/foto.png');
   assert.equal(net.websocketUrl(), 'ws://127.0.0.1:3100/ws');
   assert.equal(transport('https://example.com').websocketUrl(), 'wss://example.com/ws');

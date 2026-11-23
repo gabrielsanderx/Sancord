@@ -58,55 +58,190 @@ const SancordUI = (() => {
   }
 
   /**
-   * items: { label, onSelect, danger?, disabled?, hint?, icon? } | { separator: true } | { header: "..." }
+   * Construtores reutilizáveis para menus contextuais (DM, mensagens, servidores, canais, membros).
    */
-  function contextMenu(x, y, items, { anchor = null, above = false, onClose = null, label = null } = {}) {
+  const ContextMenuItem = (opts) => ({ ...opts });
+  const ContextMenuDangerItem = (opts) => ({ ...opts, danger: true });
+  const ContextMenuSubmenu = (opts) => ({ ...opts, submenu: Array.isArray(opts.submenu) ? opts.submenu : [] });
+  const ContextMenuSeparator = () => ({ separator: true });
+  const ContextMenuLabel = (header) => ({ header: String(header || "") });
+
+  function buildMenuItemButton(item, { onActivate, onSubmenuOpen, onSubmenuHover, onSubmenuLeave }) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `msg-ctx-item${item.danger ? " danger" : ""}${item.sublabel ? " has-sublabel" : ""}${item.checked ? " is-checked" : ""}`;
+    btn.setAttribute("role", item.checked !== undefined ? "menuitemradio" : "menuitem");
+    if (item.checked !== undefined) btn.setAttribute("aria-checked", item.checked ? "true" : "false");
+    btn.disabled = Boolean(item.disabled);
+    if (item.id) btn.dataset.ctxId = item.id;
+    if (item.ariaLabel) btn.setAttribute("aria-label", item.ariaLabel);
+
+    const left = document.createElement("span");
+    left.className = "msg-ctx-item-left";
+    if (item.icon) {
+      const ic = document.createElement("span");
+      ic.className = "sancord-menu-icon";
+      if (typeof SancordIcons !== "undefined") ic.appendChild(SancordIcons.node(item.icon));
+      else ic.textContent = item.icon;
+      ic.setAttribute("aria-hidden", "true");
+      left.appendChild(ic);
+    }
+    const textWrap = document.createElement("span");
+    textWrap.className = "sancord-menu-text";
+    const lbl = document.createElement("span");
+    lbl.className = "sancord-menu-label";
+    lbl.textContent = item.label;
+    textWrap.appendChild(lbl);
+    if (item.sublabel) {
+      const sub = document.createElement("span");
+      sub.className = "sancord-menu-sublabel";
+      sub.textContent = item.sublabel;
+      textWrap.appendChild(sub);
+    }
+    left.appendChild(textWrap);
+    btn.appendChild(left);
+
+    const right = document.createElement("span");
+    right.className = "sancord-menu-right";
+    if (item.hint) {
+      const hint = document.createElement("span");
+      hint.className = "sancord-menu-hint";
+      hint.textContent = item.hint;
+      right.appendChild(hint);
+    }
+    if (item.checked) {
+      const chk = document.createElement("span");
+      chk.className = "sancord-menu-check";
+      if (typeof SancordIcons !== "undefined") chk.appendChild(SancordIcons.node("check"));
+      else chk.textContent = "✓";
+      chk.setAttribute("aria-hidden", "true");
+      right.appendChild(chk);
+    }
+    if (item.submenu) {
+      btn.setAttribute("aria-haspopup", "menu");
+      btn.setAttribute("aria-expanded", "false");
+      const chev = document.createElement("span");
+      chev.className = "sancord-menu-chevron";
+      if (typeof SancordIcons !== "undefined") chev.appendChild(SancordIcons.node("chevron"));
+      else chev.textContent = "›";
+      chev.setAttribute("aria-hidden", "true");
+      right.appendChild(chev);
+    }
+    if (right.childElementCount > 0) btn.appendChild(right);
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (btn.disabled) return;
+      if (item.submenu) {
+        onSubmenuOpen?.(btn, item, true);
+        return;
+      }
+      onActivate?.(item);
+    });
+    if (item.submenu && !btn.disabled) {
+      btn.addEventListener("mouseenter", () => onSubmenuHover?.(btn, item));
+      btn.addEventListener("mouseleave", () => onSubmenuLeave?.());
+    }
+    return btn;
+  }
+
+  /**
+   * items: { label, sublabel?, onSelect, danger?, disabled?, hint?, icon?, checked?, submenu? }
+   *        | { separator: true } | { header: "..." }
+   */
+  function contextMenu(x, y, items, { anchor = null, above = false, onClose = null, label = null, compact = false, className = "" } = {}) {
     closeContextMenu();
     const visible = items.filter(Boolean);
     if (visible.length === 0) return;
     const prevFocus = document.activeElement;
 
     menuEl = document.createElement("div");
-    menuEl.className = "msg-context-menu sancord-menu";
+    menuEl.className = `msg-context-menu sancord-menu${compact ? " is-compact" : ""}${className ? ` ${className}` : ""}`;
     menuEl.setAttribute("role", "menu");
     if (label) menuEl.setAttribute("aria-label", label);
     const buttons = [];
     let submenu = null;
     let submenuTrigger = null;
+    let hoverOpenTimer = null;
+    let hoverCloseTimer = null;
+
+    function clearHoverTimers() {
+      clearTimeout(hoverOpenTimer);
+      clearTimeout(hoverCloseTimer);
+      hoverOpenTimer = null;
+      hoverCloseTimer = null;
+    }
+
     function closeSubmenu(restoreFocus = false) {
+      clearHoverTimers();
       submenu?.remove();
       submenu = null;
       submenuTrigger?.setAttribute("aria-expanded", "false");
-      if (restoreFocus) submenuTrigger?.focus();
+      if (restoreFocus) submenuTrigger?.focus({ preventScroll: true });
       submenuTrigger = null;
     }
-    function openSubmenu(trigger, item) {
-      if (submenuTrigger === trigger) { closeSubmenu(true); return; }
-      closeSubmenu();
+
+    function scheduleCloseSubmenu() {
+      clearTimeout(hoverCloseTimer);
+      hoverCloseTimer = setTimeout(() => closeSubmenu(false), 180);
+    }
+
+    function activateItem(item) {
+      if (item.keepOpen !== true) closeContextMenu();
+      try {
+        item.onSelect?.();
+      } catch (err) {
+        console.error("[Sancord] Erro na ação do menu:", err);
+      }
+    }
+
+    function openSubmenu(trigger, item, focusFirst = false) {
+      clearHoverTimers();
+      if (submenuTrigger === trigger && submenu) {
+        if (focusFirst) submenu.querySelector("button:not(:disabled)")?.focus({ preventScroll: true });
+        return;
+      }
+      closeSubmenu(false);
       submenuTrigger = trigger;
       trigger.setAttribute("aria-expanded", "true");
       submenu = document.createElement("div");
       submenu.className = "msg-context-menu sancord-menu sancord-submenu";
       submenu.setAttribute("role", "menu");
       submenu.setAttribute("aria-label", item.label);
-      for (const child of item.submenu.filter(Boolean)) {
-        const option = document.createElement("button");
-        option.type = "button";
-        option.className = "msg-ctx-item";
-        option.setAttribute("role", "menuitem");
-        option.disabled = Boolean(child.disabled);
-        option.textContent = child.label;
-        option.addEventListener("click", () => { closeContextMenu(); child.onSelect?.(); });
-        submenu.append(option);
+      submenu.addEventListener("mouseenter", clearHoverTimers);
+      submenu.addEventListener("mouseleave", scheduleCloseSubmenu);
+
+      const children = (item.submenu || []).filter(Boolean);
+      for (const child of children) {
+        if (child.separator) {
+          const sep = document.createElement("div");
+          sep.className = "sancord-menu-sep";
+          sep.setAttribute("role", "separator");
+          submenu.appendChild(sep);
+          continue;
+        }
+        if (child.header) {
+          const h = document.createElement("div");
+          h.className = "sancord-menu-header";
+          h.textContent = child.header;
+          submenu.appendChild(h);
+          continue;
+        }
+        const opt = buildMenuItemButton(child, { onActivate: activateItem });
+        submenu.appendChild(opt);
       }
-      document.body.append(submenu);
+      document.body.appendChild(submenu);
       const root = menuEl.getBoundingClientRect();
+      const trigRect = trigger.getBoundingClientRect();
       const rect = submenu.getBoundingClientRect();
-      const x = root.right + rect.width + 12 <= innerWidth ? root.right + 4 : root.left - rect.width - 4;
-      submenu.style.left = `${Math.max(8, x)}px`;
-      submenu.style.top = `${Math.max(8, Math.min(trigger.getBoundingClientRect().top, innerHeight - rect.height - 8))}px`;
-      submenu.querySelector("button:not(:disabled)")?.focus({ preventScroll: true });
+      const fitsRight = root.right + rect.width + 12 <= window.innerWidth;
+      const sx = fitsRight ? root.right + 4 : root.left - rect.width - 4;
+      const sy = Math.max(8, Math.min(trigRect.top - 4, window.innerHeight - rect.height - 8));
+      submenu.style.left = `${Math.max(8, Math.min(sx, window.innerWidth - rect.width - 8))}px`;
+      submenu.style.top = `${sy}px`;
+      if (focusFirst) submenu.querySelector("button:not(:disabled)")?.focus({ preventScroll: true });
     }
+
     for (const item of visible) {
       if (item.separator) {
         const sep = document.createElement("div");
@@ -126,52 +261,26 @@ const SancordUI = (() => {
         menuEl.appendChild(item.control);
         continue;
       }
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = `msg-ctx-item${item.danger ? " danger" : ""}`;
-      btn.setAttribute("role", "menuitem");
-      btn.disabled = Boolean(item.disabled);
-      const left = document.createElement("span");
-      left.className = "msg-ctx-item-left";
-      if (item.icon) {
-        const ic = document.createElement("span");
-        ic.className = "sancord-menu-icon";
-        if (typeof SancordIcons !== "undefined") ic.appendChild(SancordIcons.node(item.icon));
-        else ic.textContent = item.icon;
-        ic.setAttribute("aria-hidden", "true");
-        left.appendChild(ic);
-      }
-      const lbl = document.createElement("span");
-      lbl.textContent = item.label;
-      left.appendChild(lbl);
-      btn.appendChild(left);
-      if (item.hint) {
-        const hint = document.createElement("span");
-        hint.className = "sancord-menu-hint";
-        hint.textContent = item.hint;
-        btn.appendChild(hint);
-      }
-      if (item.submenu) {
-        btn.setAttribute("aria-haspopup", "menu");
-        btn.setAttribute("aria-expanded", "false");
-        btn.append(SancordIcons.node("arrow"));
-      }
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (item.submenu) { openSubmenu(btn, item); return; }
-        closeContextMenu();
-        try {
-          item.onSelect?.();
-        } catch (err) {
-          console.error("[Sancord] Erro na ação do menu:", err);
-        }
+      const btn = buildMenuItemButton(item, {
+        onActivate: activateItem,
+        onSubmenuOpen: (b, it) => openSubmenu(b, it, true),
+        onSubmenuHover: (b, it) => {
+          clearHoverTimers();
+          hoverOpenTimer = setTimeout(() => openSubmenu(b, it, false), 90);
+        },
+        onSubmenuLeave: scheduleCloseSubmenu,
       });
+      if (!item.submenu) {
+        btn.addEventListener("mouseenter", () => {
+          if (submenu) scheduleCloseSubmenu();
+        });
+      }
       buttons.push(btn);
       menuEl.appendChild(btn);
     }
     document.body.appendChild(menuEl);
 
-    // Posiciona dentro da janela.
+    // Posiciona dentro da janela sem cortar bordas.
     let px = x;
     let py = y;
     if (anchor) {
@@ -187,8 +296,10 @@ const SancordUI = (() => {
     enabled[0]?.focus({ preventScroll: true });
 
     const onKey = (e) => {
-      const active = submenu && (submenu.contains(document.activeElement) || document.activeElement === submenuTrigger)
-        ? [...submenu.querySelectorAll("button:not(:disabled)")] : enabled;
+      const inSub = Boolean(submenu && submenu.contains(document.activeElement));
+      const active = inSub
+        ? [...submenu.querySelectorAll("button:not(:disabled)")]
+        : enabled;
       const idx = active.indexOf(document.activeElement);
       if (e.key === "Escape") {
         e.preventDefault();
@@ -196,7 +307,7 @@ const SancordUI = (() => {
         if (submenu) { closeSubmenu(true); return; }
         closeContextMenu();
         (anchor || prevFocus)?.focus?.({ preventScroll: true });
-      } else if (e.key === "ArrowRight" && e.target.getAttribute?.("aria-haspopup") === "menu") {
+      } else if (e.key === "ArrowRight" && !inSub && e.target.getAttribute?.("aria-haspopup") === "menu") {
         e.preventDefault();
         e.target.click();
       } else if (e.key === "ArrowLeft" && submenu) {
@@ -204,12 +315,12 @@ const SancordUI = (() => {
         closeSubmenu(true);
       } else if (e.target.type === "range" && e.key !== "Tab") {
         return;
-      } else if (e.key === "ArrowDown") {
+      } else if (e.key === "ArrowDown" && active.length) {
         e.preventDefault();
-        active[(idx + 1) % active.length]?.focus();
-      } else if (e.key === "ArrowUp") {
+        active[(idx + 1 + active.length) % active.length]?.focus({ preventScroll: true });
+      } else if (e.key === "ArrowUp" && active.length) {
         e.preventDefault();
-        active[(idx - 1 + active.length) % active.length]?.focus();
+        active[(idx - 1 + active.length) % active.length]?.focus({ preventScroll: true });
       } else if (e.key === "Tab" && !menuEl.querySelector('input[type="range"]')) {
         closeContextMenu();
       } else if (e.key === "Tab") {
@@ -223,17 +334,17 @@ const SancordUI = (() => {
     const onDown = (e) => {
       if (menuEl && !menuEl.contains(e.target) && !submenu?.contains(e.target) && !anchor?.contains(e.target)) closeContextMenu();
     };
-    const onScrollOrResize = () => closeContextMenu();
+    const onResizeOrBlur = () => closeContextMenu();
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("mousedown", onDown, true);
-    window.addEventListener("resize", onScrollOrResize);
-    window.addEventListener("blur", onScrollOrResize);
+    window.addEventListener("resize", onResizeOrBlur);
+    window.addEventListener("blur", onResizeOrBlur);
     menuCleanup = () => {
-      closeSubmenu();
+      closeSubmenu(false);
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("resize", onScrollOrResize);
-      window.removeEventListener("blur", onScrollOrResize);
+      window.removeEventListener("resize", onResizeOrBlur);
+      window.removeEventListener("blur", onResizeOrBlur);
       onClose?.();
     };
   }
@@ -615,5 +726,19 @@ const SancordUI = (() => {
     const graphic = typeof SancordIcons !== "undefined" ? SancordIcons.html(icon) : "";
     return `<div class="ui-empty" role="status">${graphic}<strong>${escape(title)}</strong>${description ? `<span>${escape(description)}</span>` : ""}</div>`;
   }
-  return { contextMenu, closeContextMenu, formDialog, confirm, tooltip, hideTooltip, emptyHTML };
+  return {
+    contextMenu,
+    closeContextMenu,
+    ContextMenu: contextMenu,
+    ContextMenuItem,
+    ContextMenuDangerItem,
+    ContextMenuSubmenu,
+    ContextMenuSeparator,
+    ContextMenuLabel,
+    formDialog,
+    confirm,
+    tooltip,
+    hideTooltip,
+    emptyHTML,
+  };
 })();

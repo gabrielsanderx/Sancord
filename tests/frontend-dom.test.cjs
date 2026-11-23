@@ -103,6 +103,7 @@ test('perfil offline recebe mídia e moldura do servidor e só mostra amigos em 
     state.servers = [{ id: "teste", member_nicks: { bia: "Apelido no servidor" } }];
     state.friends = [{ username: "Ana", online: true }];
     state.ws = { readyState: WebSocket.OPEN, send() {} };
+    sendWs = () => true;
     openMemberProfilePopover(null, { author_name: "Bia" });
   `);
   const mutual = d.getElementById('profile-mutual-friends-list');
@@ -114,7 +115,8 @@ test('perfil offline recebe mídia e moldura do servidor e só mostra amigos em 
     profile_frame: "core-pulse", badges: ["early_user"]
   }, server_id: "teste", mutual_friends: [], mutual_servers: [] });`);
   assert.equal(d.getElementById('profile-card-name').textContent, 'Apelido no servidor');
-  assert.equal(d.getElementById('profile-card-handle').textContent, '@bia • ela');
+  assert.equal(d.getElementById('profile-card-handle').textContent, '@bia');
+  assert.equal(d.getElementById('profile-card-pronouns').textContent, 'ela');
   assert.equal(d.querySelector('#profile-card-bio strong').textContent, 'Descrição');
   assert.match(d.querySelector('#profile-card-avatar img').src, /avatar\.webp$/);
   assert.match(d.querySelector('#profile-card-banner img').src, /banner\.webp$/);

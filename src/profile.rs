@@ -237,6 +237,10 @@ pub fn cosmetics_state(acc: &crate::models::Account) -> ServerMessage {
         catalog: crate::cosmetics::catalog().to_vec(),
         owned: crate::cosmetics::owned_keys(acc),
         badges: crate::cosmetics::BADGES.to_vec(),
+        owned_badges: crate::cosmetics::account_owned_badges(acc).to_vec(),
+        badge_order: acc.badge_order.clone(),
+        hidden_badges: acc.hidden_badges.clone(),
+        max_visible_badges: crate::cosmetics::MAX_VISIBLE_BADGES,
         collection: acc.cosmetic_collection.clone(),
     }
 }
@@ -336,7 +340,7 @@ pub fn set_user_badges(
     st.badge_grants = next_grants;
 
     let effective = if let Some(acc) = st.accounts.get_mut(&target_lower) {
-        acc.profile.badges = crate::cosmetics::effective_badges(acc, &ordered);
+        crate::cosmetics::sync_account_badges(acc, &ordered);
         acc.profile.badges.clone()
     } else {
         Vec::new()

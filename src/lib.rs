@@ -6,6 +6,7 @@
 //! - Estado (`state.rs`): cache em memória + fan-out de eventos.
 //! - WebRTC: mídia P2P entre clientes; o servidor só repassa a sinalização.
 
+pub mod activity;
 pub mod auth;
 mod access;
 pub mod chat;

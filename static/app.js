@@ -321,6 +321,8 @@ function applySyncedUserPrefs(prefs) {
     sendWs("UpdateUserPrefs", migrationPatch);
   }
   updateHomeStarredBadge();
+  if (typeof renderDmList === "function") renderDmList();
+  if (state.homeSection === "starred" && typeof renderHomeStarredView === "function") renderHomeStarredView();
 }
 
 function saveStarredMessages() {
@@ -333,6 +335,8 @@ function saveStarredMessages() {
     sendWs("UpdateUserPrefs", { starred_messages: list });
   }
   updateHomeStarredBadge();
+  if (typeof renderDmList === "function") renderDmList();
+  if (state.homeSection === "starred" && typeof renderHomeStarredView === "function") renderHomeStarredView();
 }
 
 function saveModerationLists() {
@@ -350,7 +354,8 @@ function saveModerationLists() {
 function updateHomeStarredBadge() {
   const badge = document.getElementById("home-starred-badge");
   if (!badge) return;
-  const count = state.starredMsgIds?.size || 0;
+  const favDms = Array.isArray(state.prefs?.favorite_dms) ? state.prefs.favorite_dms.length : 0;
+  const count = (state.starredMsgIds?.size || 0) + favDms;
   badge.textContent = String(count);
   badge.classList.toggle("hidden", count === 0);
 }
@@ -499,8 +504,6 @@ const tabLogin = document.getElementById("tab-login");
 const authSubmitBtn = document.getElementById("auth-submit-btn");
 const authErrorEl = document.getElementById("auth-error");
 const wsStatusDot = document.getElementById("ws-status-dot");
-
-let authMode = "register"; // "register" | "login"
 
 const textChannelsList = document.getElementById("text-channels-list");
 const voiceChannelsList = document.getElementById("voice-channels-list");
@@ -893,266 +896,50 @@ copyInviteBtn?.addEventListener("click", () => openInviteServerModal());
 // 1. Conexão WebSocket com o Backend Rust (Axum)
 // ============================================================================
 
-// Keep-alive a cada 25s para o túnel Cloudflare nunca fechar o WebSocket por inatividade
-setInterval(() => {
-  sendWs("Ping");
-}, 25000);
-
 // ---------------------------------------------------------------------------
-// Sessão: token em localStorage ("manter conectado") ou sessionStorage.
+// Sessão ativa, persistente ou temporária conforme a preferência da pessoa.
 // ---------------------------------------------------------------------------
 function getStoredToken() {
-  try {
-    return localStorage.getItem(SancordNet.sessionKey("sancord_token")) || sessionStorage.getItem(SancordNet.sessionKey("sancord_token"));
-  } catch (_) {
-    return null;
-  }
+  if (!SancordNet.secureForAuth) return null;
+  return SancordSessions.get(localStorage, "sancord_token") || SancordSessions.get(sessionStorage, "sancord_token");
+}
+
+function getStoredUsername() {
+  return SancordSessions.get(localStorage, "sancord_username") || SancordSessions.get(sessionStorage, "sancord_username");
+}
+
+function remembersActiveSession() {
+  return Boolean(SancordSessions.get(localStorage, "sancord_token"));
 }
 
 function storeSession(token, username, remember) {
-  try {
-    clearStoredSession();
-    const store = remember ? localStorage : sessionStorage;
-    store.setItem(SancordNet.sessionKey("sancord_token"), token);
-    store.setItem(SancordNet.sessionKey("sancord_username"), username || "");
-    if (typeof SancordSelfProfileMenu !== "undefined" && SancordSelfProfileMenu.registerSavedAccount) {
-      SancordSelfProfileMenu.registerSavedAccount({ token, username, remember });
-    }
-  } catch (_) {}
+  const store = remember ? localStorage : sessionStorage;
+  const other = remember ? sessionStorage : localStorage;
+  SancordSessions.remove(other, "sancord_token");
+  SancordSessions.remove(other, "sancord_username");
+  return Promise.all([
+    SancordSessions.set(store, "sancord_token", token),
+    SancordSessions.set(store, "sancord_username", username || ""),
+    SancordSelfProfileMenu.registerSavedAccount({ token, username, remember }),
+  ]).then(([storedToken]) => storedToken === true);
 }
 
 function clearStoredSession() {
-  try {
-    for (const s of [localStorage, sessionStorage]) {
-      s.removeItem(SancordNet.sessionKey("sancord_token"));
-      s.removeItem(SancordNet.sessionKey("sancord_username"));
-    }
-  } catch (_) {}
+  for (const storage of [localStorage, sessionStorage]) {
+    SancordSessions.remove(storage, "sancord_token");
+    SancordSessions.remove(storage, "sancord_username");
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Conexão em tempo real com reconexão automática (backoff exponencial + jitter)
 // ---------------------------------------------------------------------------
-const WS_CLOSE_AUTH_FAILED = 4001;
-const reconnect = { attempt: 0, timer: null, countdownTimer: null, nextAt: 0, stopped: false, everConnected: false };
-let connectionBanner = null;
-
-function ensureConnectionBanner() {
-  if (connectionBanner) return connectionBanner;
-  connectionBanner = document.createElement("div");
-  connectionBanner.id = "connection-banner";
-  connectionBanner.className = "connection-banner hidden";
-  connectionBanner.setAttribute("role", "status");
-  connectionBanner.setAttribute("aria-live", "polite");
-  connectionBanner.innerHTML = `
-    <span class="connection-banner-dot"></span>
-    <span class="connection-banner-text"></span>
-    <button type="button" class="connection-banner-btn">Tentar agora</button>
-  `;
-  connectionBanner.querySelector("button").addEventListener("click", () => reconnectNow());
-  document.body.appendChild(connectionBanner);
-  return connectionBanner;
-}
-
-function setConnectionBanner(mode, text) {
-  const el = ensureConnectionBanner();
-  el.classList.remove("hidden", "is-reconnecting", "is-online", "is-offline");
-  if (mode === "hidden") {
-    el.classList.add("hidden");
-    return;
-  }
-  el.classList.add(`is-${mode}`);
-  el.querySelector(".connection-banner-text").textContent = text;
-  el.querySelector(".connection-banner-btn").classList.toggle("hidden", mode === "online");
-}
-
-function updateReconnectCountdown() {
-  const secs = Math.max(0, Math.ceil((reconnect.nextAt - Date.now()) / 1000));
-  const base = navigator.onLine === false ? "Sem conexão com a internet." : "Conexão perdida.";
-  setConnectionBanner(
-    navigator.onLine === false ? "offline" : "reconnecting",
-    secs > 0 ? `${base} Reconectando em ${secs}s...` : "Reconectando..."
-  );
-}
-
-function scheduleReconnect() {
-  if (reconnect.stopped) return;
-  clearTimeout(reconnect.timer);
-  clearInterval(reconnect.countdownTimer);
-  // 1s, 2s, 4s ... até 30s, com jitter para não sobrecarregar o servidor
-  // quando muitos clientes caem ao mesmo tempo.
-  const base = Math.min(30000, 1000 * 2 ** reconnect.attempt);
-  const delay = Math.round(base * (0.5 + Math.random() * 0.5));
-  reconnect.attempt += 1;
-  reconnect.nextAt = Date.now() + delay;
-  updateReconnectCountdown();
-  reconnect.countdownTimer = setInterval(updateReconnectCountdown, 1000);
-  reconnect.timer = setTimeout(() => {
-    clearInterval(reconnect.countdownTimer);
-    setConnectionBanner("reconnecting", "Reconectando...");
-    const token = getStoredToken();
-    if (token) connectWebSocket(token);
-  }, delay);
-}
-
-function reconnectNow() {
-  if (reconnect.stopped) return;
-  if (state.ws && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)) return;
-  clearTimeout(reconnect.timer);
-  clearInterval(reconnect.countdownTimer);
-  const token = getStoredToken();
-  if (token) {
-    setConnectionBanner("reconnecting", "Reconectando...");
-    connectWebSocket(token);
-  }
-}
-
-window.addEventListener("online", () => reconnectNow());
-window.addEventListener("offline", () => {
-  if (!reconnect.stopped && reconnect.everConnected) updateReconnectCountdown();
-});
-
-/// Sessão recusada pelo servidor: para de reconectar e volta ao login.
-function handleAuthFailure(message) {
-  reconnect.stopped = true;
-  clearTimeout(reconnect.timer);
-  clearInterval(reconnect.countdownTimer);
-  setConnectionBanner("hidden");
-  clearStoredSession();
-  if (state.ws) {
-    state.ws.onclose = null;
-    try { state.ws.close(); } catch (_) {}
-    state.ws = null;
-  }
-  loginModal.classList.remove("hidden");
-  if (message) showAuthError(message);
-  usernameInput?.focus();
-}
-
-function connectWebSocket(token) {
-  if (state.ws) {
-    state.ws.onclose = null;
-    try { state.ws.close(); } catch (_) {}
-  }
-  reconnect.stopped = false;
-
-  const wsUrl = SancordNet.websocketUrl();
-  const ws = new WebSocket(wsUrl);
-  state.ws = ws;
-
-  ws.addEventListener("open", () => {
-    // O primeiro pacote autentica a conexão; o servidor responde com Welcome
-    // (estado completo, inclusive o que foi perdido offline) ou AuthFailed.
-    ws.send(JSON.stringify({ type: "JoinServer", payload: { token } }));
-  });
-
-  ws.addEventListener("message", (event) => {
-    wsMessageQueue = wsMessageQueue
-      .then(async () => {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "Welcome") onConnectionReady(ws);
-        await handleServerMessage(msg);
-      })
-      .catch((err) => {
-        console.error("[Sancord] Erro ao processar evento do servidor:", err);
-      });
-  });
-
-  ws.addEventListener("close", (ev) => {
-    if (state.ws !== ws) return;
-    wsStatusDot.classList.remove("connected");
-    wsStatusDot.title = "Desconectado";
-    failAllPendingSends();
-    if (ev.code === WS_CLOSE_AUTH_FAILED) {
-      handleAuthFailure("Sua sessão expirou. Entre novamente.");
-      return;
-    }
-    if (reconnect.stopped) return;
-    if (selfStatusText) selfStatusText.textContent = "Reconectando...";
-    scheduleReconnect();
-  });
-}
-
-function onConnectionReady(ws) {
-  const wasReconnect = reconnect.attempt > 0;
-  reconnect.attempt = 0;
-  reconnect.everConnected = true;
-  clearTimeout(reconnect.timer);
-  clearInterval(reconnect.countdownTimer);
-  wsStatusDot.classList.add("connected");
-  wsStatusDot.title = "Conectado ao Servidor Sancord";
-  state.historyState = new Map();
-  if (wasReconnect) {
-    setConnectionBanner("online", "Conectado novamente.");
-    setTimeout(() => {
-      if (state.ws === ws && ws.readyState === WebSocket.OPEN) setConnectionBanner("hidden");
-    }, 2000);
-  } else {
-    setConnectionBanner("hidden");
-  }
-  // A retomada da voz ocorre no fim de Welcome, depois de atualizar usuário e ICE.
-}
-
-/// Envia um pacote. Retorna `false` se não há conexão (o chamador decide como avisar).
-function sendWs(type, payload = undefined) {
-  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return false;
-  const packet = payload !== undefined ? { type, payload } : { type };
-  try {
-    state.ws.send(JSON.stringify(packet));
-    return true;
-  } catch (err) {
-    console.error("[Sancord] Falha ao enviar pacote:", type, err);
-    return false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Envio de mensagens com confirmação (nonce) e "Tentar novamente"
-// ---------------------------------------------------------------------------
-const SEND_TIMEOUT_MS = 10000;
-const pendingSends = new Map(); // nonce -> { payload, timer }
-
-function makeNonce() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+function sendWs(type, payload) {
+  return SancordConnection.send(type, payload);
 }
 
 function sendChatPayload(payload) {
-  const nonce = makeNonce();
-  const packet = { ...payload, nonce };
-  if (!sendWs("SendChat", packet)) {
-    notifySendFailure(payload, "Sem conexão com o servidor.");
-    return false;
-  }
-  const timer = setTimeout(() => {
-    if (pendingSends.delete(nonce)) notifySendFailure(payload, "O servidor não confirmou o envio.");
-  }, SEND_TIMEOUT_MS);
-  pendingSends.set(nonce, { payload, timer });
-  return true;
-}
-
-function resolvePendingSend(nonce) {
-  const entry = nonce && pendingSends.get(nonce);
-  if (!entry) return null;
-  clearTimeout(entry.timer);
-  pendingSends.delete(nonce);
-  return entry;
-}
-
-function failAllPendingSends() {
-  for (const [nonce, entry] of pendingSends) {
-    clearTimeout(entry.timer);
-    pendingSends.delete(nonce);
-    notifySendFailure(entry.payload, "A conexão caiu antes da confirmação.");
-  }
-}
-
-function notifySendFailure(payload, reason) {
-  const preview = (payload.content || "").slice(0, 60) || (payload.image_url ? "[Imagem]" : "");
-  showErrorToast(`Não foi possível enviar a mensagem. ${reason}`, {
-    detail: preview ? `“${preview}”` : "",
-    actionLabel: "Tentar novamente",
-    onAction: () => sendChatPayload(payload),
-  });
+  return SancordOutbox.enqueue(payload);
 }
 
 // Toast de erro com ação opcional (separado do toast informativo).
@@ -1216,10 +1003,7 @@ function requestOlderMessages() {
   const list = state.chatHistory?.[chId] || [];
   const oldest = list[0];
   if (!oldest) return;
-  if (sendWs("LoadMessages", { channel_id: chId, before_id: oldest.id, limit: 50 })) {
-    hs.loading = true;
-    chatMessagesEl.classList.add("is-loading-history");
-  }
+  requestHistoryPage(chId, { before_id: oldest.id });
 }
 
 function handleMessagesPage(payload) {
@@ -1251,11 +1035,16 @@ chatMessagesEl?.addEventListener("scroll", () => {
 }, { passive: true });
 
 async function handleServerMessage(msg) {
-  const { type, payload } = msg;
+  const { type, payload, cached = false } = msg;
 
   switch (type) {
     case "AuthFailed": {
-      handleAuthFailure(payload?.message || "Sua sessão expirou. Entre novamente.");
+      SancordConnection.reject(payload?.message);
+      break;
+    }
+
+    case "ChatAccepted": {
+      SancordOutbox.acknowledge(payload.nonce, true);
       break;
     }
 
@@ -1265,9 +1054,7 @@ async function handleServerMessage(msg) {
     }
 
     case "SendFailed": {
-      const entry = resolvePendingSend(payload.nonce);
-      const original = entry?.payload || { channel_id: payload.channel_id, content: "" };
-      notifySendFailure(original, payload.message || "");
+      if (!SancordOutbox.reject(payload.nonce, payload.message)) showErrorToast(payload.message || "Não foi possível enviar a mensagem.");
       break;
     }
 
@@ -1303,23 +1090,28 @@ async function handleServerMessage(msg) {
     }
 
     case "Welcome": {
+      const accountChanged = state.selfUser?.username?.toLowerCase() !== payload.user?.username?.toLowerCase();
+      state.awaitingReconnectSocial = !cached && !accountChanged && SancordConnection.restoredView();
+      const activeDmHistory = state.awaitingReconnectSocial && state.activeDmId ? state.chatHistory[state.activeDmId] : null;
+      state.reconnectViewport = !cached && !accountChanged ? captureHistoryViewport() : null;
       state.prefs = payload.prefs || { guild_layout: [], muted_servers: [], collapsed_categories: [] };
       applySyncedUserPrefs(state.prefs);
       if (typeof scheduleMuteExpiry === "function") scheduleMuteExpiry();
       state.historyPageSize = payload.history_page_size || 50;
       state.historyState = new Map();
       state.selfUser = payload.user;
+      SancordOutbox.bind(payload.user?.username);
       state.composerCapabilities = new Set(payload.composer_capabilities || []);
       resetBoardEditorOnAccountChange();
       resetCollectionOnAccountChange();
       resetProfileSharing();
       try {
         // Mantém o nome salvo em sincronia (usado só para exibição) e registra no seletor de contas.
-        const remembered = Boolean(localStorage.getItem(SancordNet.sessionKey("sancord_token")));
+        const remembered = remembersActiveSession();
         const store = remembered ? localStorage : sessionStorage;
         const curTok = getStoredToken();
-        store.setItem(SancordNet.sessionKey("sancord_username"), payload.user?.username || "");
-        if (curTok && payload.user?.username && typeof SancordSelfProfileMenu !== "undefined") {
+        SancordSessions.set(store, "sancord_username", payload.user?.username || "");
+        if (!cached && curTok && payload.user?.username && typeof SancordSelfProfileMenu !== "undefined") {
           SancordSelfProfileMenu.registerSavedAccount({
             id: payload.user.id,
             username: payload.user.username,
@@ -1339,9 +1131,11 @@ async function handleServerMessage(msg) {
       state.voiceChannels = activeSrv?.voice_channels || [];
       state.voiceMembers = payload.voice_members;
       state.iceServers = payload.ice_servers || [];
-      state.chatHistory = payload.chat_history;
+      state.chatHistory = payload.chat_history || {};
+      if (activeDmHistory) state.chatHistory[state.activeDmId] = activeDmHistory;
       onWelcomeReadStates(payload.read_states);
-      if (!state.textChannels.some((c) => c.id === state.currentTextChannel)) {
+      const currentThread = state.threadIndex?.get(state.currentTextChannel);
+      if (![...state.textChannels, ...state.voiceChannels].some(c => c.id === (currentThread?.parent_id || state.currentTextChannel))) {
         state.currentTextChannel = firstTextChannelId(activeSrv) || "";
       }
 
@@ -1356,17 +1150,16 @@ async function handleServerMessage(msg) {
       renderTextChannels();
       renderVoiceChannels();
       renderMembersSidebar();
-      renderChatMessages();
       updatePinnedBadge();
       refreshAudioDeviceLists();
       if (state.activeView !== "home") {
         applyChannelHeader(activeSrv, state.textChannels.find((c) => c.id === state.currentTextChannel) || state.voiceChannels.find((c) => c.id === state.currentTextChannel));
       }
-      onChannelOpened(getActiveTextChannelId());
+      onChannelOpened(state.activeView === "home" ? state.activeDmId : getActiveTextChannelId());
       if (state.composerCapabilities.has("scheduling_v1")) sendWs("ListScheduledMessages");
-      renderChatMessages();
+      if (!activeDmHistory) renderChatMessages();
       refreshUnreadIndicators();
-      applyDeepLinkFromUrl();
+      if (!cached) applyDeepLinkFromUrl();
       // Fase 8: threads e eventos do servidor aberto.
       if (typeof requestServerThreads === "function") requestServerThreads(state.activeServerId);
       if (typeof requestServerEvents === "function") requestServerEvents(state.activeServerId);
@@ -1383,9 +1176,17 @@ async function handleServerMessage(msg) {
         }, 250);
       }
       // Conta sem servidor nenhum (não existe mais hub automático): abre o Início.
-      if (!activeSrv && state.activeView === "server") switchToHomeFriendsView();
-      // Reconexão do WebSocket no meio de uma chamada: o servidor já nos tirou da voz.
-      resumeVoiceAfterReconnect();
+      if (!activeSrv && (accountChanged || state.activeView === "server")) {
+        if (accountChanged) {
+          state.friendsSearchQuery = "";
+          if (friendsSearchInput) friendsSearchInput.value = "";
+        }
+        switchToHomeFriendsView(accountChanged ? "online" : null);
+      }
+      if (typeof SancordActivity !== "undefined") {
+        SancordActivity.init();
+        SancordActivity.syncToServer(true);
+      }
       break;
     }
 
@@ -1396,6 +1197,7 @@ async function handleServerMessage(msg) {
         updateSelfProfileUI();
         renderMembersSidebar();
         syncSettingsModalFields();
+        if (typeof SancordActivity !== "undefined") SancordActivity.onSelfStatusChanged();
       }
       break;
     }
@@ -1410,6 +1212,7 @@ async function handleServerMessage(msg) {
         state.voiceChannels = srv.voice_channels || [];
       }
       renderGuildRail();
+      if (state.activeView === "home" && !state.activeDmId) renderFriendsView();
       syncActiveServerHeaderAndControls();
       renderTextChannels();
       renderVoiceChannels();
@@ -1534,7 +1337,7 @@ async function handleServerMessage(msg) {
       for (const channel of server.text_channels || []) {
         if (channel.effective_permissions?.read_history !== false && !Object.hasOwn(state.chatHistory, channel.id)) {
           const hs = getHistoryState(channel.id);
-          if (!hs.loading && sendWs("LoadMessages", { channel_id: channel.id, limit: 50 })) hs.loading = true;
+          if (!hs.loading) requestHistoryPage(channel.id);
         }
       }
       if (restored && state.activeView === "server" && state.activeServerId === server.id) renderChatMessages();
@@ -1560,6 +1363,7 @@ async function handleServerMessage(msg) {
         }
       } else {
         renderGuildRail();
+        if (state.activeView === "home" && !state.activeDmId) renderFriendsView();
       }
       if (reason) showUiToast(reason);
       break;
@@ -1625,6 +1429,7 @@ async function handleServerMessage(msg) {
 
     case "UserJoined": {
       state.users.set(payload.user.id, payload.user);
+      cacheMemberRosterUser(payload.user);
       if (state.selfUser && payload.user.id === state.selfUser.id) {
         state.selfUser = payload.user;
         updateSelfProfileUI();
@@ -1635,6 +1440,8 @@ async function handleServerMessage(msg) {
     }
 
     case "UserLeft": {
+      const leaving = state.users.get(payload.user_id);
+      if (leaving) cacheMemberRosterUser(leaving);
       state.users.delete(payload.user_id);
       closePeerConnection(payload.user_id);
       renderVoiceChannels();
@@ -1645,7 +1452,7 @@ async function handleServerMessage(msg) {
 
     case "NewChatMessage": {
       const { message } = payload;
-      if (message.nonce) resolvePendingSend(message.nonce);
+      if (message.nonce && isOwnMessage(message)) SancordOutbox.acknowledge(message.nonce);
       if (!state.chatHistory[message.channel_id]) {
         state.chatHistory[message.channel_id] = [];
       }
@@ -1664,7 +1471,7 @@ async function handleServerMessage(msg) {
       const viewingThisChannel = message.channel_id === getActiveTextChannelId() &&
         !(state.activeView === "home" && !state.activeDmId);
       if (viewingThisChannel && appendable) {
-        if (trimmed) renderChatMessages();
+        if (trimmed) appendChatMessageAtCapacity(message);
         else appendChatMessageUI(message);
         updatePinnedBadge();
         maybeAckActiveChannel();
@@ -1844,6 +1651,8 @@ async function handleServerMessage(msg) {
     }
 
     case "FriendsSync": {
+      const resync = state.awaitingReconnectSocial;
+      state.awaitingReconnectSocial = false;
       state.friends = payload.friends || [];
       state.incomingRequests = payload.incoming_requests || [];
       state.outgoingRequests = payload.outgoing_requests || [];
@@ -1852,7 +1661,7 @@ async function handleServerMessage(msg) {
 
       if (payload.dm_history) {
         for (const [dmId, msgs] of Object.entries(payload.dm_history)) {
-          state.chatHistory[dmId] = msgs;
+          if (resync || !state.chatHistory[dmId]?.length) state.chatHistory[dmId] = msgs;
         }
       }
 
@@ -1860,7 +1669,16 @@ async function handleServerMessage(msg) {
       renderDmList();
       if (state.activeView === "home") {
         if (state.activeDmId) {
+          const dmId = state.activeDmId;
+          if (!findPrivateConv(dmId) && !findGroupDm(dmId)) {
+            delete state.chatHistory[dmId];
+            switchToHomeFriendsView();
+            break;
+          }
           updateActiveDmHeaderAndSidebar();
+          if (resync && payload.dm_history && !state.pendingHistoryRestore && !getHistoryState(dmId).hasNewer) {
+            renderChatMessages({ preserveScroll: true });
+          }
         } else if (state.homeSection === "starred") {
           renderHomeStarredView();
         } else {
@@ -1934,13 +1752,15 @@ async function handleServerMessage(msg) {
       // Perfil P1 (tempo real): mudou a aparência de alguém? Redesenha o chat aberto.
       const looks = (u) => JSON.stringify([u.avatar_url, u.avatar_decoration, u.name_style, u.name_color,
         u.name_color_secondary, u.name_gradient_direction, u.nameplate_style, u.display_name, u.bio, u.banner_url,
-        u.profile_frame, u.profile_effect, u.theme_primary, u.theme_accent, u.theme_highlight, u.theme_mode, u.theme_direction]);
+        u.profile_frame, u.profile_effect, u.theme_primary, u.theme_accent, u.theme_highlight, u.theme_mode, u.theme_direction,
+        u.badges]);
       const before = new Map([...state.users.values()].map((u) => [u.id, looks(u)]));
       state.users.clear();
       let looksChanged = false;
       let selfLookChanged = false;
       for (const u of payload.users) {
         state.users.set(u.id, u);
+        cacheMemberRosterUser(u);
         const changed = before.has(u.id) && before.get(u.id) !== looks(u);
         if (changed) {
           looksChanged = true;
@@ -1956,6 +1776,7 @@ async function handleServerMessage(msg) {
       }
       if (looksChanged) renderChatMessages({ preserveScroll: true });
       if (selfLookChanged) renderCollectionInventory();
+      confirmVoiceRecovery();
       updateSelfProfileUI();
       applyLocalMuteState();
       updateServerModerationUI();
@@ -2053,9 +1874,36 @@ async function handleServerMessage(msg) {
       break;
     }
 
+    case "UserActivityUpdated": {
+      const targetLower = String(payload.username || "").toLowerCase();
+      const act = payload.activity || null;
+      if (state.selfUser && state.selfUser.username?.toLowerCase() === targetLower) {
+        state.selfUser.activity = act;
+      }
+      for (const u of state.users.values()) {
+        if (u.username?.toLowerCase() === targetLower) u.activity = act;
+      }
+      for (const f of state.friends || []) {
+        if (f.username?.toLowerCase() === targetLower) f.activity = act;
+      }
+      renderMembersSidebar();
+      if (state.activeView === "home" && !state.activeDmId) renderActiveNowPanel();
+      if (visitedProfileBase && visitedProfileBase.username?.toLowerCase() === targetLower && !profilePopoverModal?.classList.contains("hidden")) {
+        visitedProfileBase = { ...visitedProfileBase, activity: act };
+        const sk = visitedProfileBase.status_kind || (visitedProfileBase.online ? "online" : "offline");
+        populateProfileActivity(visitedProfileBase, payload.user_id, sk);
+      }
+      break;
+    }
+
     case "SearchResults": {
       if (typeof onInboxResults === "function" && onInboxResults(payload)) break;
       onSearchResults(payload);
+      break;
+    }
+
+    case "MessageContext": {
+      if (typeof onMessageContext === "function") onMessageContext(payload);
       break;
     }
 
@@ -2392,6 +2240,7 @@ async function createLocalAudioStream(forceRebuild = false) {
 }
 
 async function joinVoiceChannel(channelId, friendlyLabel = null) {
+  if (SancordConnection.isInterrupted()) { SancordConnection.markBlocked(); return; }
   const requestId = (state.voiceJoinRequestId || 0) + 1;
   state.voiceJoinRequestId = requestId;
   if (state.currentVoiceChannel === channelId) return;
@@ -2484,13 +2333,14 @@ function getFriendlyVoiceName(channelId) {
   return ch ? ch.name : "Canal de voz";
 }
 
-function leaveVoiceChannel() {
+function leaveVoiceChannel({ silent = false } = {}) {
+  cancelVoiceRecovery();
   // Cancela também uma entrada que ainda está aguardando o microfone.
   state.voiceJoinRequestId = (state.voiceJoinRequestId || 0) + 1;
   if (!state.micTestActive) releaseLocalAudioStream();
   if (!state.currentVoiceChannel) return;
 
-  playUiSound("leave");
+  if (!silent) playUiSound("leave");
   clearUnansweredCallTimer();
   stopVoicePingMonitor();
   stopVoiceCallTimer();
@@ -3043,7 +2893,7 @@ async function applySenderEncodingParameters(sender, profile) {
 
 function canPublishVideo(channelId, kind, requestId) {
   return Boolean(channelId && state.currentVoiceChannel === channelId &&
-    voicePermissions().stream_video && (state[`${kind}RequestId`] || 0) === requestId);
+    !state.voiceRecovery && voicePermissions().stream_video && (state[`${kind}RequestId`] || 0) === requestId);
 }
 
 function stopMediaTracks(stream) {
@@ -3457,6 +3307,7 @@ cancelScreenPickerBtn?.addEventListener("click", () => {
 startStreamConfirmBtn?.addEventListener("click", confirmNativeScreenShare);
 
 async function toggleScreenShare() {
+  if (state.voiceRecovery) { SancordConnection.markBlocked(); return; }
   if (!state.currentVoiceChannel) return;
   if (!state.screenSharing && !voicePermissions().stream_video) { showErrorToast("Você não tem permissão para transmitir neste canal."); return; }
 
@@ -3531,6 +3382,7 @@ function cameraCaptureConstraints() {
 }
 
 async function toggleCamera() {
+  if (state.voiceRecovery) { SancordConnection.markBlocked(); return; }
   if (!state.currentVoiceChannel) return;
   if (!state.cameraOn && !voicePermissions().stream_video) { showErrorToast("Você não tem permissão para usar câmera neste canal."); return; }
 
@@ -3682,7 +3534,7 @@ function setupVoiceActivityDetection(stream, getUserIdFn) {
 function applyLocalMuteState() {
   if (state.localAudioStream) {
     for (const track of state.localAudioStream.getAudioTracks()) {
-      track.enabled = !state.muted && !state.deafened && !selfServerMuted();
+      track.enabled = !state.voiceRecovery && !state.muted && !state.deafened && !selfServerMuted();
     }
   }
   for (const entry of state.audioGainNodes.values()) {
@@ -3852,6 +3704,19 @@ const NAMEPLATES = [
 const CLASSIC_NAME_STYLES = ["gta", "neon", "chrome", "gradient", "fire", "ice", "sakura", "retro", "gothic", "toxic", "royal"];
 const NEW_NAME_STYLES = ["modern", "rounded", "mono", "outline", "glow", "prism", "holographic", "custom-gradient"];
 const NAME_STYLE_IDS = new Set([...CLASSIC_NAME_STYLES, ...NEW_NAME_STYLES]);
+const PROFILE_NAME_FONTS = new Set(["gta", "retro", "gothic", "modern", "rounded", "mono"]);
+
+function profileNameParts(id = "default") {
+  const [font, effect] = (id || "default").split("+");
+  if (PROFILE_NAME_FONTS.has(font)) {
+    return { font, effect: NAME_STYLE_IDS.has(effect) && !PROFILE_NAME_FONTS.has(effect) ? effect : "default" };
+  }
+  return { font: "default", effect: NAME_STYLE_IDS.has(font) ? font : "default" };
+}
+
+function composeProfileNameStyle(font, effect) {
+  return font === "default" ? effect : effect === "default" ? font : `${font}+${effect}`;
+}
 
 function wrapSvgDeco(inner) {
   return `<span class="deco-svg-layer" aria-hidden="true"><svg viewBox="0 0 100 100">${inner}</svg></span>`;
@@ -3859,7 +3724,7 @@ function wrapSvgDeco(inner) {
 
 function getDecoSvgHtml(decoId) {
   const depthArt = profileAvatarArtLayer(decoId, "front");
-  if (depthArt) return depthArt;
+  if (depthArt) return profileAvatarArtLayer(decoId, "back") + depthArt;
   if (!decoId || decoId === "none") return "";
   // Perfil P2: decorações novas do Sancord (arte em static/js/profile.js).
   const art = typeof sancordDecorationArt === "function" ? sancordDecorationArt(decoId) : null;
@@ -4099,9 +3964,12 @@ function applyNameStyleToEl(el, userObj, fallbackColor) {
     .forEach((c) => el.classList.remove(c));
   el.classList.add("styled-name");
   const enabled = state.audioSettings.showProfileNameStyles !== false || el.closest("#settings-tab-profile");
-  const st = enabled ? userObj?.name_style : "default";
+  const parts = profileNameParts(enabled ? userObj?.name_style : "default");
+  const st = parts.effect === "default" ? parts.font : parts.effect;
   const cls = getNameStyleClass(st);
   if (cls) el.classList.add(cls);
+  if (parts.font !== "default" && parts.effect !== "default") el.dataset.nameFont = parts.font;
+  else delete el.dataset.nameFont;
   const roleMode = state.audioSettings.roleColorsMode || "name";
   const rawRoleColor = themedNameColor(fallbackColor);
   const baseColor = roleMode === "name" ? rawRoleColor : "";
@@ -4164,6 +4032,7 @@ function updateSelfProfileUI() {
   selfAvatar.innerHTML = avatarHtml;
   selfAvatar.style.background = state.selfUser.avatar_color;
   selfUsername.textContent = state.selfUser.username;
+  selfUsername.title = state.selfUser.username;
   applyNameStyleToEl(selfUsername, state.selfUser, "#f2f3f5");
   applyDecoToElement(document.getElementById("self-avatar-deco"), state.selfUser.avatar_decoration);
 
@@ -4566,7 +4435,7 @@ function renderVoiceStage() {
     return;
   }
 
-  const memberIds = state.voiceMembers[state.currentVoiceChannel] || [];
+  const memberIds = state.voiceRecovery ? [] : state.voiceMembers[state.currentVoiceChannel] || [];
   if (typeof syncPrivateStageControls === "function") syncPrivateStageControls();
   const activeDomIds = new Set();
   let anyScreenActive = false;
@@ -4786,9 +4655,17 @@ function renderVoiceStage() {
   // Remove apenas os cards de quem saiu ou parou de transmitir
   Array.from(stageGrid.children).forEach((child) => {
     if (!activeDomIds.has(child.id)) {
+      if (child.id === "voice-stage-waiting" && !activeDomIds.size && child.dataset.recovering === String(Boolean(state.voiceRecovery))) return;
       child.remove();
     }
   });
+  if (!stageGrid.firstElementChild) {
+    const waiting = document.createElement("div");
+    waiting.id = "voice-stage-waiting";
+    waiting.dataset.recovering = String(Boolean(state.voiceRecovery));
+    waiting.innerHTML = SancordUI.emptyHTML({ icon: "voice", title: state.voiceRecovery ? "Reconectando a voz…" : "Aguardando participantes", description: state.voiceRecovery ? "Câmera e compartilhamento de tela foram interrompidos." : "Os participantes aparecem aqui quando entram na chamada." });
+    stageGrid.appendChild(waiting);
+  }
 
   voiceStage.classList.toggle("has-screen", anyScreenActive);
   voiceStage.classList.toggle("theater-mode", anyScreenActive && Boolean(state.spotlightCardId));
@@ -4921,8 +4798,24 @@ imageLightboxModal?.addEventListener("click", (e) => {
   }
 });
 
-// Usa somente o cadastro de membros já recebido do servidor. Ausência de conexão
-// não inventa perfil/atividade: mostra iniciais e consulta o perfil real ao clicar.
+function cacheMemberRosterUser(user) {
+  if (!user || !user.username || typeof state === "undefined") return;
+  if (!state.memberRosterCache) state.memberRosterCache = new Map();
+  const key = user.username.toLowerCase();
+  const prev = state.memberRosterCache.get(key) || {};
+  state.memberRosterCache.set(key, {
+    ...prev,
+    ...user,
+    id: null,
+    online: false,
+    status_kind: "offline",
+    voice_channel_id: null,
+    activity: null,
+  });
+}
+
+// Usa somente o cadastro de membros e o roster filtrado por privacidade recebidos do servidor.
+// Membros offline preservam avatar, nome exibido, decoração, placa e estilo do nome na lista.
 function sidebarMemberRows(server, users) {
   const known = new Set([...(server?.members || []), server?.owner_username].filter(Boolean).map(n => n.toLowerCase()));
   const rows = new Map();
@@ -4931,7 +4824,30 @@ function sidebarMemberRows(server, users) {
     if ((!server || server.id === "sancord" || known.has(name)) && !rows.has(name)) rows.set(name, user);
   }
   if (server && server.id !== "sancord") {
-    for (const name of known) if (!rows.has(name)) rows.set(name, {id:null, username:name, status_kind:"offline", avatar_color:"var(--bg-active)", avatar_url:null});
+    const roster = server.member_roster || null;
+    const cache = typeof state !== "undefined" ? state.memberRosterCache : null;
+    const friends = typeof state !== "undefined" && Array.isArray(state.friends) ? state.friends : null;
+    for (const name of known) {
+      if (rows.has(name)) continue;
+      const fromRoster = roster && roster[name];
+      const fromCache = cache && cache.get(name);
+      const fromFriend = friends && friends.find(f => f && f.username && f.username.toLowerCase() === name);
+      const base = fromRoster || fromCache || fromFriend;
+      if (base) {
+        rows.set(name, {
+          ...base,
+          id: null,
+          username: base.username || name,
+          online: false,
+          status_kind: "offline",
+          voice_channel_id: null,
+          activity: null,
+          avatar_color: base.avatar_color || "var(--bg-active)",
+        });
+      } else {
+        rows.set(name, { id: null, username: name, status_kind: "offline", avatar_color: "var(--bg-active)", avatar_url: null });
+      }
+    }
   }
   return [...rows.values()];
 }
@@ -5053,12 +4969,11 @@ createChannelForm?.addEventListener("submit", (e) => {
   e.preventDefault();
   const name = newChannelNameInput.value.trim();
   if (!name) return;
-  sendWs("CreateChannel", {
+  if (sendWs("CreateChannel", {
     name,
     kind: state.creatingChannelKind,
     server_id: state.activeServerId,
-  });
-  createChannelModal.classList.add("hidden");
+  })) createChannelModal.classList.add("hidden");
 });
 
 // Compressão inteligente de imagem via <canvas> para envio instantâneo no chat
@@ -5124,135 +5039,13 @@ window.addEventListener("paste", (e) => {
   addComposerFiles(files);
 });
 
-function setAuthMode(mode) {
-  authMode = mode;
-  authErrorEl.classList.add("hidden");
-  if (mode === "register") {
-    tabRegister.classList.add("active");
-    tabLogin.classList.remove("active");
-    authSubmitBtn.textContent = t("auth.submit.register");
-  } else {
-    tabLogin.classList.add("active");
-    tabRegister.classList.remove("active");
-    authSubmitBtn.textContent = t("auth.submit.login");
-  }
-}
-
-tabRegister.addEventListener("click", () => setAuthMode("register"));
-tabLogin.addEventListener("click", () => setAuthMode("login"));
-
-function showAuthError(msg) {
-  authErrorEl.textContent = msg;
-  authErrorEl.classList.remove("hidden");
-}
-
-loginForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  authErrorEl.classList.add("hidden");
-
-  const username = usernameInput.value.trim();
-  // A senha não é mais "aparada": espaços nas pontas fazem parte dela.
-  const password = passwordInput.value;
-  if (!username || !password) return;
-  if (authMode === "register" && password.length < 8) {
-    showAuthError("A senha deve ter pelo menos 8 caracteres.");
-    return;
-  }
-  const remember = document.getElementById("remember-me-input")?.checked ?? true;
-
-  const endpoint = authMode === "register" ? "/api/register" : "/api/login";
-  authSubmitBtn.disabled = true;
-  authSubmitBtn.classList.add("is-loading");
-
-  try {
-    const res = await SancordNet.fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, remember }),
-    });
-    let data = null;
-    try {
-      data = await res.json();
-    } catch (_) {}
-
-    if (!res.ok || !data?.ok) {
-      showAuthError(data?.message || `Não foi possível autenticar (erro ${res.status}).`);
-      return;
-    }
-
-    storeSession(data.token, data.username, remember);
-    passwordInput.value = "";
-    loginModal.classList.add("hidden");
-    connectWebSocket(data.token);
-  } catch (err) {
-    console.error("[Sancord] Falha no login:", err);
-    showAuthError("Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.");
-  } finally {
-    authSubmitBtn.disabled = false;
-    authSubmitBtn.classList.remove("is-loading");
-  }
-});
-
-async function openRecoverPasswordDialog() {
-  const values = await SancordUI.formDialog({
-    title: "🔑 Recuperar senha com código único",
-    description: "Informe o nome de usuário da sua conta, o código de recuperação gerado anteriormente (formato SANC-XXXX-XXXX-XXXX) e escolha uma nova senha.",
-    fields: [
-      { name: "username", label: "NOME DE USUÁRIO", value: usernameInput?.value.trim() || "", required: true, maxlength: 24, placeholder: "Ex: Gabriel" },
-      { name: "recovery_code", label: "CÓDIGO DE RECUPERAÇÃO", value: "", required: true, maxlength: 32, placeholder: "SANC-XXXX-XXXX-XXXX" },
-      { name: "new_password", label: "NOVA SENHA (MÍN. 8 CARACTERES)", type: "password", value: "", required: true, maxlength: 128 },
-      { name: "confirm_password", label: "CONFIRMAR NOVA SENHA", type: "password", value: "", required: true, maxlength: 128 },
-    ],
-    submitLabel: "Redefinir senha e entrar",
-  });
-  if (!values) return;
-  const username = (values.username || "").trim();
-  const recovery_code = (values.recovery_code || "").trim();
-  const new_password = values.new_password || "";
-  const confirm_password = values.confirm_password || "";
-  if (!username || !recovery_code || !new_password) return;
-  if (new_password.length < 8) {
-    showAuthError("A nova senha deve ter pelo menos 8 caracteres.");
-    return;
-  }
-  if (new_password !== confirm_password) {
-    showAuthError("A confirmação da nova senha não confere.");
-    return;
-  }
-  const remember = document.getElementById("remember-me-input")?.checked ?? true;
-  try {
-    const res = await SancordNet.fetch("/api/recover-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, recovery_code, new_password, remember }),
-    });
-    let data = null;
-    try {
-      data = await res.json();
-    } catch (_) {}
-    if (!res.ok || !data?.ok) {
-      showAuthError(data?.message || `Não foi possível redefinir a senha (erro ${res.status}).`);
-      return;
-    }
-    storeSession(data.token, data.username, remember);
-    if (passwordInput) passwordInput.value = "";
-    loginModal.classList.add("hidden");
-    connectWebSocket(data.token);
-    showUiToast("Senha redefinida com sucesso!");
-  } catch (err) {
-    console.error("[Sancord] Falha na recuperação de senha:", err);
-    showAuthError("Não foi possível conectar ao servidor para redefinir a senha.");
-  }
-}
-
-document.getElementById("open-recover-password-btn")?.addEventListener("click", openRecoverPasswordDialog);
-
 function logoutAccount() {
   if (typeof closeSelfProfileMenu === "function") closeSelfProfileMenu();
   if (state.selfUser?.username && typeof SancordSelfProfileMenu !== "undefined") {
     SancordSelfProfileMenu.removeSavedAccount(state.selfUser.username);
   }
   leaveVoiceChannel();
+  settingsModal?.classList.add("hidden");
   closeSettingsModal();
   const token = getStoredToken();
   if (token) {
@@ -5264,58 +5057,17 @@ function logoutAccount() {
     }).catch(() => {});
   }
   clearStoredSession();
-  reconnect.stopped = true;
-  clearTimeout(reconnect.timer);
-  clearInterval(reconnect.countdownTimer);
-  setConnectionBanner("hidden");
-  if (state.ws) {
-    state.ws.onclose = null;
-    state.ws.close();
-    state.ws = null;
-  }
-  loginModal.classList.remove("hidden");
-  usernameInput.focus();
+  SancordOutbox.bind(null);
+  SancordOfflineCache.clear();
+  SancordConnection.stop();
+  showAuthScreen({ username: state.selfUser?.username || usernameInput.value });
 }
 
-settingsLogoutBtn?.addEventListener("click", logoutAccount);
-
-async function tryAutoLogin() {
-  const savedToken = getStoredToken();
-  if (!savedToken) {
-    loginModal.classList.remove("hidden");
-    return;
-  }
-
-  try {
-    const res = await SancordNet.fetch("/api/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: savedToken }),
-    });
-    if (res.status === 401) {
-      // Sessão revogada/expirada: volta ao login (sem entrar como convidado).
-      clearStoredSession();
-      loginModal.classList.remove("hidden");
-      showAuthError("Sua sessão expirou. Entre novamente.");
-      return;
-    }
-    const data = await res.json();
-    if (data.ok && data.token) {
-      loginModal.classList.add("hidden");
-      connectWebSocket(data.token);
-      return;
-    }
-  } catch (err) {
-    console.warn("[Sancord] Servidor indisponível na verificação de sessão:", err);
-  }
-
-  // Servidor inacessível agora: tenta conectar e deixa a reconexão automática agir.
-  // O próprio WebSocket valida o token; se for inválido, volta ao login.
-  loginModal.classList.add("hidden");
-  connectWebSocket(savedToken);
-}
-
-tryAutoLogin();
+settingsLogoutBtn?.addEventListener("click", async () => {
+  await closeSettingsModal();
+  if (settingsModal && !settingsModal.classList.contains("hidden")) return;
+  logoutAccount();
+});
 
 chatForm.addEventListener("submit", (e) => {
   e.preventDefault();
@@ -5630,12 +5382,18 @@ toggleMembersBtn?.addEventListener("click", () => {
   toggleMembersBtn.classList.toggle("active", !hiddenNow);
 });
 
-chatSearchInput?.addEventListener("input", (e) => {
-  state.searchQuery = e.target.value || "";
-  renderChatMessages();
+chatSearchInput?.addEventListener("focus", () => {
+  if (typeof SancordSearch !== "undefined") SancordSearch.onFocus();
 });
-// Enter: busca no histórico completo do servidor (static/js/advanced.js).
+chatSearchInput?.addEventListener("input", (e) => {
+  cancelMessageJump();
+  state.searchQuery = e.target.value || "";
+  if (typeof SancordSearch !== "undefined") SancordSearch.onInput(state.searchQuery);
+  else renderChatMessages();
+});
+// Enter: busca no histórico completo do servidor (static/js/search.js).
 chatSearchInput?.addEventListener("keydown", (e) => {
+  if (typeof SancordSearch !== "undefined" && SancordSearch.onKeyDown(e)) return;
   if (e.key === "Enter") {
     e.preventDefault();
     runServerSearch(chatSearchInput.value);
@@ -5705,6 +5463,7 @@ function switchProfileModalTab(tabKey) {
   });
   document.getElementById("profile-tab-activity")?.classList.toggle("hidden", tabKey !== "activity");
   document.getElementById("profile-tab-board")?.classList.toggle("hidden", tabKey !== "board");
+  document.getElementById("profile-tab-wishlist")?.classList.toggle("hidden", tabKey !== "wishlist");
   document.getElementById("profile-tab-mutual-friends")?.classList.toggle("hidden", tabKey !== "mutual-friends");
   document.getElementById("profile-tab-mutual-servers")?.classList.toggle("hidden", tabKey !== "mutual-servers");
 }
@@ -5712,7 +5471,7 @@ function switchProfileModalTab(tabKey) {
 document.querySelectorAll(".profile-tab-btn[data-profile-tab]").forEach((btn) => {
   btn.addEventListener("click", () => {
     switchProfileModalTab(btn.dataset.profileTab);
-    if (btn.dataset.profileTab === "board" && currentPopoverUsername) requestFullProfile(currentPopoverUsername);
+    if (["board", "wishlist"].includes(btn.dataset.profileTab) && currentPopoverUsername) requestFullProfile(currentPopoverUsername);
   });
 });
 
@@ -5770,7 +5529,13 @@ function populateProfileActivity(user, userId, sk) {
     }
 
     profileActivityCardList.innerHTML = "";
+    const richAct = sk !== "offline" && user?.activity && typeof user.activity === "object" && user.activity.name ? user.activity : null;
+    if (richAct && typeof SancordActivity !== "undefined" && typeof SancordActivity.createRichActivityCard === "function") {
+      const richEl = SancordActivity.createRichActivityCard(richAct);
+      if (richEl) profileActivityCardList.appendChild(richEl);
+    }
     for (const c of cards) {
+      if (richAct && c.sub === "Ativo agora no servidor Sancord") continue;
       const row = document.createElement("div");
       row.className = "profile-activity-card";
       row.innerHTML = `
@@ -5814,8 +5579,10 @@ function renderVisitedProfile(globalProfile, name, userId) {
     avatar: profileCardAvatar, banner: profileCardBanner, name: profileCardName, handle: profileCardHandle,
     avatarWrap: document.getElementById("profile-card-deco-wrap"), dot: profileCardStatusDot,
     status: profileCardCustomStatus, bio: profileCardBio, badges: document.getElementById("profile-card-badges"),
+    pronouns: document.getElementById("profile-card-pronouns"),
     effect: document.getElementById("profile-card-effect-layer"),
   }, { ...appearance, username: name, id: userId }, "full", serverNick || user.display_name || name, handle);
+  document.getElementById("profile-card-bio-wrap")?.classList.toggle("hidden", !appearance.bio?.trim());
 }
 
 function refreshVisitedServerProfile(serverId) {
@@ -5833,11 +5600,13 @@ function playVisitedProfileEffectOnce() {
   }
 }
 
-function openMemberProfilePopover(userId, fallbackMsg = null) {
+function openMemberProfilePopover(userId, fallbackMsg = null, { global = false } = {}) {
   if (!profilePopoverModal) return;
   closeCompactProfile(false);
   currentPopoverPrivacy = null;
   renderVisitedProfileLinks([]);
+  renderVisitedBoard(null);
+  renderProfileWishlist(null, document.getElementById("profile-wishlist-widgets"));
   stopProfileEffect(document.getElementById("profile-card-effect-layer"));
   visitedProfileEffectPlayed = false;
   const fallbackLower = fallbackMsg?.author_name?.toLowerCase();
@@ -5862,7 +5631,7 @@ function openMemberProfilePopover(userId, fallbackMsg = null) {
 
   currentPopoverUserId = resolvedUserId;
   currentPopoverUsername = name;
-  const activeSrv = fallbackMsg?.channel_id
+  const activeSrv = global ? null : fallbackMsg?.channel_id
     ? serverForChannel(fallbackMsg.channel_id)
     : state.activeView === "server" ? getActiveServer() : null;
   currentPopoverServerId = activeSrv?.id && activeSrv.id !== "sancord" ? activeSrv.id : null;
@@ -5891,20 +5660,11 @@ function openMemberProfilePopover(userId, fallbackMsg = null) {
     if (profileCardFriendsSince) profileCardFriendsSince.textContent = "Amigos no Sancord ✓";
   }
 
-  const rolesWrap = document.getElementById("profile-card-roles-wrap");
-  const rolesListEl = document.getElementById("profile-card-roles-list");
-  const memberRoles = getUserServerRoles(activeSrv, name);
-  if (rolesWrap && rolesListEl) {
-    rolesWrap.classList.toggle("hidden", memberRoles.length === 0);
-    rolesListEl.innerHTML = memberRoles
-      .map(
-        (r) =>
-          `<span class="role-chip-pill" style="border-color: ${r.color}; color: ${r.color};">${r.badge_emoji ? `${escapeHtml(r.badge_emoji)} ` : ""}${escapeHtml(r.name)}</span>`
-      )
-      .join("");
-  }
+  renderProfileRoles(document.getElementById("profile-card-roles-list"), getUserServerRoles(activeSrv, name));
 
   if (profileCardNoteInput) {
+    profileCardNoteInput.closest(".profile-info-block")?.classList.toggle("hidden",
+      name === "Sancord Bot" || nameLower === state.selfUser?.username?.toLowerCase());
     profileCardNoteInput.value = getUserProfileNote(name);
   }
 
@@ -6233,6 +5993,8 @@ const profileDraft = {
   theme_mode: "gradient",
   theme_direction: "vertical",
   profile_frame: "none",
+  badge_order: [],
+  hidden_badges: [],
   media: {},
 };
 
@@ -6263,7 +6025,12 @@ function syncNameStyleOptions() {
     option.disabled = !ownsCosmetic("name_style", id);
     settingsNameStyleSelect.appendChild(option);
   }
-  settingsNameStyleSelect.value = profileDraft.name_style;
+  settingsNameStyleSelect.value = profileNameParts(profileDraft.name_style).effect;
+}
+
+function previewProfileNameOption(style, part, option) {
+  const parts = profileNameParts(style);
+  return composeProfileNameStyle(part === "font" ? option : parts.font, part === "effect" ? option : parts.effect);
 }
 
 function renderNameStyleSamples(user) {
@@ -6272,30 +6039,32 @@ function renderNameStyleSamples(user) {
   const name = user.display_name || user.username;
   const options = [...settingsNameStyleSelect.options];
   const catalog = JSON.stringify(options.map(opt => [opt.value, opt.textContent, opt.disabled]));
-  const appearance = JSON.stringify([catalog, name, user.name_color, user.name_color_secondary, user.name_gradient_direction]);
+  const current = profileNameParts(user.name_style);
+  const appearance = JSON.stringify([catalog, name, user.name_style, user.name_color, user.name_color_secondary, user.name_gradient_direction]);
   if (host.dataset.catalog !== catalog) {
     host.dataset.catalog = catalog;
     host.replaceChildren();
-    const groups = [["Fontes", ["default", "gta", "retro", "gothic"]], ["Efeitos", null]];
-    for (const [label, fonts] of groups) {
+    for (const [label, part] of [["Fontes", "font"], ["Efeitos", "effect"]]) {
       const group = document.createElement("fieldset");
       const legend = document.createElement("legend");
       legend.textContent = label;
       group.append(legend);
       for (const opt of options) {
-        if (fonts ? !fonts.includes(opt.value) : groups[0][1].includes(opt.value)) continue;
+        if (opt.value !== "default" && PROFILE_NAME_FONTS.has(opt.value) !== (part === "font")) continue;
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "btn-secondary";
         btn.dataset.styleSample = opt.value;
+        btn.dataset.stylePart = part;
         btn.disabled = opt.disabled;
         const sample = document.createElement("span");
         const title = document.createElement("small");
-        title.textContent = opt.textContent;
+        title.textContent = opt.value === "default" ? (part === "font" ? "Padrão" : "Sólido") : opt.textContent;
         btn.append(sample, title);
         btn.addEventListener("click", () => {
-          settingsNameStyleSelect.value = opt.value;
-          settingsNameStyleSelect.dispatchEvent(new Event("change"));
+          profileDraft.name_style = previewProfileNameOption(profileDraft.name_style, part, opt.value);
+          settingsNameStyleSelect.value = profileNameParts(profileDraft.name_style).effect;
+          refreshLiveProfilePreview();
         });
         group.append(btn);
       }
@@ -6304,10 +6073,11 @@ function renderNameStyleSamples(user) {
   }
   for (const btn of host.querySelectorAll("[data-style-sample]")) {
     const style = btn.dataset.styleSample;
-    btn.setAttribute("aria-pressed", String(style === profileDraft.name_style));
+    const part = btn.dataset.stylePart;
+    btn.setAttribute("aria-pressed", String(style === current[part]));
     if (host.dataset.appearance !== appearance) {
       btn.firstElementChild.textContent = name;
-      applyNameStyleToEl(btn.firstElementChild, { ...user, name_style: style }, "");
+      applyNameStyleToEl(btn.firstElementChild, { ...user, name_style: previewProfileNameOption(user.name_style, part, style) }, "");
     }
   }
   host.dataset.appearance = appearance;
@@ -6382,7 +6152,7 @@ function refreshLiveProfilePreview() {
     applyNameStyleToEl(settingsNameShowcase, profileDraft, "#ffffff");
   }
   renderNameStyleSamples(draftUser);
-  document.getElementById("settings-name-gradient-controls")?.classList.toggle("hidden", profileDraft.name_style !== "custom-gradient");
+  document.getElementById("settings-name-gradient-controls")?.classList.toggle("hidden", profileNameParts(profileDraft.name_style).effect !== "custom-gradient");
 
   if (custThemePreviewBox) {
     custThemePreviewBox.style.background = profileThemeBackground(profileDraft) || "var(--bg-floating)";
@@ -6410,6 +6180,7 @@ function refreshLiveProfilePreview() {
   renderProfileCardIdentity(liveProfilePreviewCard, {
     avatar: previewCardAvatar, avatarWrap: previewDecoWrap, dot: previewCardStatusDot, name: previewCardName,
     handle: document.getElementById("preview-card-handle"), status: previewCardCustomStatus,
+    pronouns: document.getElementById("preview-card-pronouns"),
     banner: previewCardBanner, effect: previewEffectLayer, bio: previewCardBio,
     badges: document.getElementById("preview-card-badges"),
   }, draftUser, "editor-full");
@@ -6447,6 +6218,8 @@ function getNormalizedSavedProfile() {
     custom_status: u.custom_status || "",
     bio: u.bio || "",
     banner_url: u.banner_url || "",
+    badge_order: [...(state.cosmetics?.badgeOrder || [])],
+    hidden_badges: [...(state.cosmetics?.hiddenBadges || [])],
   };
 }
 
@@ -6482,7 +6255,9 @@ function isProfileFieldsDirty() {
     profileDraft.name_color_secondary !== saved.name_color_secondary ||
     profileDraft.name_gradient_direction !== saved.name_gradient_direction ||
     (profileDraft.nameplate_style || "none") !== saved.nameplate_style ||
-    (profileDraft.profile_effect || "none") !== saved.profile_effect
+    (profileDraft.profile_effect || "none") !== saved.profile_effect ||
+    JSON.stringify(profileDraft.badge_order || []) !== JSON.stringify(saved.badge_order || []) ||
+    JSON.stringify(profileDraft.hidden_badges || []) !== JSON.stringify(saved.hidden_badges || [])
   );
 }
 
@@ -6490,7 +6265,8 @@ function updateProfileDirtyState() {
   if (!unsavedProfileBar) return;
   const profileTabEl = document.getElementById("settings-tab-profile");
   const isProfileVisible = Boolean(profileTabEl && !profileTabEl.classList.contains("hidden"));
-  unsavedProfileBar.classList.toggle("hidden", !(isProfileVisible && isProfileDraftDirty()));
+  const choosingCosmetic = typeof peCosmeticBefore !== "undefined" && Boolean(peCosmeticBefore);
+  unsavedProfileBar.classList.toggle("hidden", choosingCosmetic || !(isProfileVisible && isProfileDraftDirty()));
 }
 
 function loadAppearanceDraft(u) {
@@ -6501,7 +6277,7 @@ function loadAppearanceDraft(u) {
   const dir = document.getElementById("settings-theme-direction");
   if (dir) dir.value = profileDraft.theme_direction;
 
-  if (settingsNameStyleSelect) settingsNameStyleSelect.value = profileDraft.name_style;
+  if (settingsNameStyleSelect) settingsNameStyleSelect.value = profileNameParts(profileDraft.name_style).effect;
   if (settingsNameColorInput) settingsNameColorInput.value = profileDraft.name_color || "#ffffff";
   if (settingsNameColorSecondary) settingsNameColorSecondary.value = profileDraft.name_color_secondary || "#42beae";
   if (settingsNameGradientDirection) settingsNameGradientDirection.value = profileDraft.name_gradient_direction;
@@ -6515,6 +6291,8 @@ function loadDraftFromSelfUser() {
   profileDraft.custom_status = u.custom_status || "";
   profileDraft.bio = u.bio || "";
   profileDraft.banner_url = u.banner_url || "";
+  profileDraft.badge_order = [...(state.cosmetics?.badgeOrder || [])];
+  profileDraft.hidden_badges = [...(state.cosmetics?.hiddenBadges || [])];
   discardPendingProfileMedia();
   loadAppearanceDraft(u);
   if (settingsStatusSelect) settingsStatusSelect.value = profileDraft.status_kind;
@@ -6653,6 +6431,7 @@ function openSettingsModal(tab = "account") {
 
 let confirmingProfileDiscard = false;
 async function closeSettingsModal() {
+  if (typeof peCosmeticBefore !== "undefined" && peCosmeticBefore) closePeSubeditor();
   if (settingsModal && !settingsModal.classList.contains("hidden") && isProfileDraftDirty()) {
     if (confirmingProfileDiscard) return;
     confirmingProfileDiscard = true;
@@ -6692,8 +6471,10 @@ for (const id of ["settings-display-name", "settings-pronouns", "settings-status
 }
 
 function switchSettingsTab(tabName) {
+  if (tabName !== "profile" && typeof peCosmeticBefore !== "undefined" && peCosmeticBefore) closePeSubeditor();
   if (tabName !== "voice" && typeof stopSettingsCameraTest === "function") stopSettingsCameraTest();
   if (tabName === "privacy" || tabName === "connections" || tabName === "activity") requestProfileSharing();
+  if (tabName === "activity" && typeof SancordActivity !== "undefined") SancordActivity.onSettingsOpened();
   if (tabName === "devices" || tabName === "security") sendWs("ListSessions");
   document.querySelectorAll(".settings-nav-item[data-settings-tab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.settingsTab === tabName);
@@ -6761,7 +6542,8 @@ settingsBioInput?.addEventListener("input", (e) => {
   refreshLiveProfilePreview();
 });
 settingsNameStyleSelect?.addEventListener("change", (e) => {
-  profileDraft.name_style = e.target.value;
+  const option = e.target.value;
+  profileDraft.name_style = previewProfileNameOption(profileDraft.name_style, PROFILE_NAME_FONTS.has(option) ? "font" : "effect", option);
   refreshLiveProfilePreview();
 });
 settingsNameColorInput?.addEventListener("input", (e) => {
@@ -6858,8 +6640,8 @@ document.querySelectorAll(".deco-filter-tab").forEach((btn) => {
 // Perfil P2: decoração (avatar) e moldura (cartão) têm seletores separados, ambos do catálogo.
 // Editor de perfil: decoração, moldura, efeito e placa abrem subeditores na lateral
 // (static/js/profile-editor.js), com o perfil completo visível ao lado.
-openDecorationPickerBtn?.addEventListener("click", () => openPeView("decoration"));
-openDecoQuickBtn?.addEventListener("click", () => openPeView("frame"));
+openDecorationPickerBtn?.addEventListener("click", e => openPeView("decoration", e.currentTarget));
+openDecoQuickBtn?.addEventListener("click", e => openPeView("frame", e.currentTarget));
 closeDecoPickerBtn?.addEventListener("click", () => decorationPickerModal?.classList.add("hidden"));
 cancelDecoPickerBtn?.addEventListener("click", () => decorationPickerModal?.classList.add("hidden"));
 decorationPickerModal?.addEventListener("click", (e) => {
@@ -6949,8 +6731,8 @@ function openEffectOrNameplatePicker(mode) {
   effectPickerModal.classList.remove("hidden");
 }
 
-openEffectPickerBtn?.addEventListener("click", () => openPeView("effect"));
-openNameplatePickerBtn?.addEventListener("click", () => openPeView("nameplate"));
+openEffectPickerBtn?.addEventListener("click", e => openPeView("effect", e.currentTarget));
+openNameplatePickerBtn?.addEventListener("click", e => openPeView("nameplate", e.currentTarget));
 closeEffectPickerBtn?.addEventListener("click", () => effectPickerModal?.classList.add("hidden"));
 closeEffectDoneBtn?.addEventListener("click", () => {
   effectPickerModal?.classList.add("hidden");
@@ -7007,6 +6789,8 @@ saveProfileBtn?.addEventListener("click", async () => {
     name_gradient_direction: profileDraft.name_gradient_direction,
     nameplate_style: profileDraft.nameplate_style || "none",
     profile_effect: profileDraft.profile_effect || "none",
+    badge_order: [...(profileDraft.badge_order || [])],
+    hidden_badges: [...(profileDraft.hidden_badges || [])],
     ...socialFields,
   });
   if (!sent) {
@@ -7041,6 +6825,18 @@ saveProfileBtn?.addEventListener("click", async () => {
       profileDraft.nameplate_style === "none" ? null : profileDraft.nameplate_style;
     state.selfUser.profile_effect =
       profileDraft.profile_effect === "none" ? null : profileDraft.profile_effect;
+    if (state.cosmetics) {
+      state.cosmetics.badgeOrder = [...(profileDraft.badge_order || [])];
+      state.cosmetics.hiddenBadges = [...(profileDraft.hidden_badges || [])];
+    }
+    if (typeof computeVisibleBadges === "function") {
+      state.selfUser.badges = computeVisibleBadges(
+        getOwnedBadgesList(),
+        profileDraft.badge_order,
+        profileDraft.hidden_badges,
+        getMaxVisibleBadges()
+      );
+    }
     fillSocialProfileFields(state.selfUser);
     updateSelfProfileUI();
     renderChatMessages();
@@ -7483,6 +7279,11 @@ function renderHomeStarredView() {
   if (!starredList) return;
   starredList.innerHTML = "";
 
+  const favDmIds = Array.isArray(state.prefs?.favorite_dms) ? state.prefs.favorite_dms : [];
+  const favConvs = favDmIds
+    .map((id) => (state.dmConversations || []).find((c) => c.dm_id === id))
+    .filter(Boolean);
+
   const matches = [];
   for (const [chId, list] of Object.entries(state.chatHistory || {})) {
     for (const msg of list || []) {
@@ -7491,11 +7292,37 @@ function renderHomeStarredView() {
       }
     }
   }
-  if (starredCountEl) starredCountEl.textContent = `MENSAGENS FAVORITAS — ${matches.length}`;
+  if (starredCountEl) {
+    const total = favConvs.length + matches.length;
+    starredCountEl.textContent = `FAVORITOS — ${total}`;
+  }
 
-  if (matches.length === 0) {
-    starredList.innerHTML = SancordUI.emptyHTML({icon:"star",title:"Nenhuma mensagem favorita",description:"Use o menu de uma mensagem para guardar uma favorita."});
+  if (favConvs.length === 0 && matches.length === 0) {
+    starredList.innerHTML = SancordUI.emptyHTML({icon:"star",title:"Nenhum favorito ainda",description:"Favorite conversas pelo menu de botão direito ou marque mensagens com estrela."});
     return;
+  }
+
+  for (const conv of favConvs) {
+    const p = conv.peer;
+    const li = document.createElement("li");
+    li.className = "starred-home-card is-favorite-dm";
+    li.innerHTML = `
+      <div class="starred-home-meta">
+        <div class="starred-home-author">${escapeHtml(p.display_name || p.username)} • <span style="opacity:0.65;font-weight:500;">Conversa direta</span></div>
+        <div class="starred-home-text">${escapeHtml(conv.last_message || (p.online ? "Online" : "Offline"))}</div>
+      </div>
+      <div class="starred-home-actions">
+        <button type="button" class="btn-primary small-btn" data-fav-open="1">Abrir</button>
+        <button type="button" class="btn-secondary small-btn" data-fav-remove="1">Remover</button>
+      </div>
+    `;
+    li.querySelector("[data-fav-open]")?.addEventListener("click", () => {
+      sendWs("OpenDm", { target_username: p.username });
+    });
+    li.querySelector("[data-fav-remove]")?.addEventListener("click", () => {
+      if (typeof DmContextMenu !== "undefined") DmContextMenu.toggleFavoriteDm(conv.dm_id, p.display_name || p.username);
+    });
+    starredList.appendChild(li);
   }
 
   for (const { chId, msg } of matches) {
@@ -7647,6 +7474,7 @@ function renderDmPeerPanel(peerParam = null) {
 
   applyNameStyleToEl(dmPeerPanel.querySelector(".dm-peer-name"), peer);
   applyNameplateChip(dmPeerPanel.querySelector(".profile-nameplate-wrap"), peer.nameplate_style);
+  applyDecoToElement(dmPeerPanel.querySelector(".profile-card-avatar-wrap"), peer.avatar_decoration);
   setProfileBanner(dmPeerPanel.querySelector(".profile-card-banner"), peer);
 
   dmPeerPanel.querySelector("#dm-panel-add-friend")?.addEventListener("click", () => {
@@ -7773,26 +7601,41 @@ function renderDmList() {
   const requestsEntry = buildMessageRequestsEntry();
   if (requestsEntry) dmListEl.appendChild(requestsEntry);
   if (list.length === 0 && groups.length === 0) {
-    dmListEl.insertAdjacentHTML("beforeend", `<li>${SancordUI.emptyHTML({icon:"chat",title:"Suas conversas",description:"Escolha um amigo para começar."})}</li>`);
+    dmListEl.insertAdjacentHTML("beforeend", `<li class="ui-empty-compact">${SancordUI.emptyHTML({icon:q ? "search" : "chat",title:q ? "Nenhuma conversa encontrada" : "Suas conversas",description:q ? "Tente outro nome." : "Escolha um amigo para começar."})}</li>`);
     return;
   }
 
   for (const g of groups) dmListEl.appendChild(buildGroupDmItem(g));
 
+  const pinnedOrder = Array.isArray(state.prefs?.pinned_dms) ? state.prefs.pinned_dms : [];
+  const pinnedSet = new Set(pinnedOrder);
+  const pinnedConvs = [];
+  const regularConvs = [];
   for (const conv of list) {
+    if (pinnedSet.has(conv.dm_id)) pinnedConvs.push(conv);
+    else regularConvs.push(conv);
+  }
+  pinnedConvs.sort((a, b) => pinnedOrder.indexOf(a.dm_id) - pinnedOrder.indexOf(b.dm_id));
+
+  const renderDmRow = (conv, isPinnedRow) => {
     const p = conv.peer;
     const sk = p.online ? p.status_kind || "online" : "invisible";
     const unread = state.unreadDms.get(conv.dm_id) || 0;
     const isActive = state.activeView === "home" && state.activeDmId === conv.dm_id;
+    const isFav = Array.isArray(state.prefs?.favorite_dms) && state.prefs.favorite_dms.includes(conv.dm_id);
 
     const li = document.createElement("li");
     const dmMuted = typeof isMutedId === "function" && isMutedId(conv.dm_id);
-    li.className = `dm-item ${isActive ? "active" : ""}${dmMuted ? " is-muted" : ""} ${getNameplateClass(p.nameplate_style)}`;
+    li.className = `dm-item ${isActive ? "active" : ""}${dmMuted ? " is-muted" : ""}${isPinnedRow ? " is-pinned" : ""} ${getNameplateClass(p.nameplate_style)}`;
+    const markers = [
+      isPinnedRow && typeof SancordIcons !== "undefined" ? `<span class="dm-marker-icon" title="Fixada">${SancordIcons.html("pin")}</span>` : "",
+      isFav && typeof SancordIcons !== "undefined" ? `<span class="dm-marker-icon is-fav" title="Favorita">${SancordIcons.html("star")}</span>` : "",
+    ].join("");
     li.innerHTML = `
       <div class="dm-item-left">
         <div class="user-avatar-wrap">
           <div class="avatar" style="background: ${p.avatar_color}; width: 32px; height: 32px; font-size: 12px;">
-            ${renderAvatarInner(p.username, p.avatar_url)}
+            ${renderAvatarInner(p.username, p.avatar_url, p.avatar_animated)}
           </div>
           <span class="status-badge ${sk}" style="width: 10px; height: 10px; border-width: 2px;"></span>
         </div>
@@ -7801,34 +7644,41 @@ function renderDmList() {
           <div class="dm-item-sub">${escapeHtml(conv.last_message || (p.online ? customStatusText(p) || STATUS_LABELS[sk] || "Online" : "Offline"))}</div>
         </div>
       </div>
-      ${unread > 0 ? `<span class="dm-count-badge">${unread}</span>` : ""}
+      <div class="dm-item-trailing">
+        ${markers}
+        ${unread > 0 ? `<span class="dm-count-badge">${unread}</span>` : ""}
+      </div>
     `;
     applyNameStyleToEl(li.querySelector(".dm-item-name"), p);
+    applyDecoToElement(li.querySelector(".user-avatar-wrap"), p.avatar_decoration);
     li.addEventListener("click", () => {
       sendWs("OpenDm", { target_username: p.username });
     });
     li.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const name = p.display_name || p.username;
-      SancordUI.contextMenu(e.clientX, e.clientY, [
-        { header: name },
-        { label: "Abrir conversa", icon: "💬", onSelect: () => sendWs("OpenDm", { target_username: p.username }) },
-        {
-          label: "Marcar como lida",
-          icon: "✔️",
-          disabled: !unread,
-          onSelect: () => {
-            const hist = state.chatHistory?.[conv.dm_id] || [];
-            const last = hist[hist.length - 1];
-            if (last) sendWs("AckChannel", { channel_id: conv.dm_id, message_id: last.id });
-          },
-        },
-        ...(typeof muteMenuItems === "function" ? [{ separator: true }, ...muteMenuItems(conv.dm_id, "conversa", name, { x: e.clientX, y: e.clientY })] : []),
-        ...(typeof notifyMenuItems === "function" ? notifyMenuItems(conv.dm_id) : []),
-      ]);
+      if (typeof DmContextMenu !== "undefined") {
+        DmContextMenu.open(e.clientX, e.clientY, { conv, peer: p });
+      }
     });
     dmListEl.appendChild(li);
+  };
+
+  if (pinnedConvs.length > 0) {
+    const hdr = document.createElement("li");
+    hdr.className = "dm-section-label";
+    hdr.setAttribute("role", "presentation");
+    hdr.textContent = `FIXADAS — ${pinnedConvs.length}`;
+    dmListEl.appendChild(hdr);
+    for (const conv of pinnedConvs) renderDmRow(conv, true);
+    if (regularConvs.length > 0) {
+      const hdr2 = document.createElement("li");
+      hdr2.className = "dm-section-label";
+      hdr2.setAttribute("role", "presentation");
+      hdr2.textContent = "MENSAGENS DIRETAS";
+      dmListEl.appendChild(hdr2);
+    }
   }
+  for (const conv of regularConvs) renderDmRow(conv, false);
 }
 
 function renderActiveNowPanel() {
@@ -7884,13 +7734,16 @@ function renderActiveNowPanel() {
     cards.push(card);
   }
 
-  // 2. Amigos online com status personalizado / jogando
+  // 2. Amigos online jogando ou com status personalizado
   const activeFriends = (state.friends || []).filter(
-    (f) => f.online && !f.voice_channel_id && f.custom_status
+    (f) => f.online && !f.voice_channel_id && (f.activity?.name || f.custom_status)
   );
   for (const f of activeFriends) {
     const card = document.createElement("div");
     card.className = "active-now-card";
+    const activitySub = f.activity?.name
+      ? `${typeof SancordActivity !== "undefined" ? SancordActivity.formatSummarySentence(f.activity) : `Jogando ${f.activity.name}`}${f.activity.started_at && typeof SancordActivity !== "undefined" ? ` · ${SancordActivity.formatElapsed(f.activity.started_at)}` : ""}`
+      : f.custom_status;
     card.innerHTML = `
       <div class="active-now-card-head">
         <div class="avatar" style="background:${f.avatar_color};width:34px;height:34px;">
@@ -7898,7 +7751,7 @@ function renderActiveNowPanel() {
         </div>
         <div class="active-now-card-meta">
           <div class="active-now-card-title">${escapeHtml(f.username)}</div>
-          <div class="active-now-card-sub">${escapeHtml(f.custom_status)}</div>
+          <div class="active-now-card-sub">${escapeHtml(activitySub)}</div>
         </div>
       </div>
     `;
@@ -7914,9 +7767,18 @@ function renderActiveNowPanel() {
   cards.forEach((c) => listEl.appendChild(c));
 }
 
+function renderHomeFirstSteps() {
+  const visible = Boolean(state.selfUser && state.servers.length === 0 &&
+    state.homeSection === "friends" && ["online", "all"].includes(state.friendsTab) &&
+    !(state.friendsSearchQuery || "").trim());
+  document.getElementById("home-first-steps")?.classList.toggle("hidden", !visible);
+  return visible;
+}
+
 function renderFriendsView() {
   if (!friendsMainView) return;
   renderActiveNowPanel();
+  const showFirstSteps = renderHomeFirstSteps();
   if (state.homeSection === "starred") {
     renderHomeStarredView();
     return;
@@ -7970,12 +7832,15 @@ function renderFriendsView() {
     ? baseList.filter((f) => f.username.toLowerCase().includes(q) || (f.display_name || "").toLowerCase().includes(q))
     : baseList;
 
+  const showList = !showFirstSteps || filtered.length > 0;
+  friendsListPane?.classList.toggle("hidden", !showList);
   if (friendsListCount) {
     friendsListCount.textContent = `${state.friendsTab === "online" ? "ONLINE" : "TODOS OS AMIGOS"} — ${filtered.length}`;
   }
 
   if (filtered.length === 0) {
-    friendsItemsList.innerHTML = SancordUI.emptyHTML({icon:q ? "search" : "users",title:q ? "Nenhum amigo encontrado" : state.friendsTab === "online" ? "Seus amigos estão offline" : "Comece uma amizade",description:q ? "Tente outro nome." : state.friendsTab === "online" ? "Quando alguém se conectar, aparecerá aqui." : "Use Adicionar amigo para enviar uma solicitação."});
+    const offline = state.friends.length && state.friendsTab === "online";
+    friendsItemsList.innerHTML = `<li>${SancordUI.emptyHTML({icon:q ? "search" : "users",title:q ? "Nenhum amigo encontrado" : offline ? "Nenhum amigo disponível" : "Comece uma amizade",description:q ? "Tente outro nome." : offline ? "Veja seus contatos na aba Todos." : "Use Adicionar amigo para enviar uma solicitação."})}</li>`;
     return;
   }
 
@@ -8012,15 +7877,22 @@ function buildFriendRow(f) {
     </div>
   `;
   applyNameStyleToEl(li.querySelector(".friend-display-name"), f);
+  const openFriendMenu = (x, y, anchor = null) => {
+    const existingConv = (state.dmConversations || []).find(
+      (c) => c?.peer?.username?.toLowerCase() === f.username.toLowerCase()
+    ) || null;
+    if (typeof DmContextMenu !== "undefined") {
+      DmContextMenu.open(x, y, { conv: existingConv, peer: f }, anchor ? { anchor } : {});
+    }
+  };
+  li.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    openFriendMenu(e.clientX, e.clientY);
+  });
   li.querySelector('[data-act="more"]')?.addEventListener("click", (e) => {
+    e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
-    SancordUI.contextMenu(r.left, r.bottom + 4, [
-      { label: "Ver perfil", icon: "👤", onSelect: () => openMemberProfilePopover(f.live_id || null, { author_name: f.username, author_color: f.avatar_color, author_avatar: f.avatar_url }) },
-      { label: "Criar grupo com…", icon: "👥", onSelect: () => openCreateGroupDialog([f.username.toLowerCase()]) },
-      { separator: true },
-      { label: "Remover amizade", icon: "🗑️", danger: true, onSelect: async () => { if (await SancordUI.confirm({title:"Remover amizade?",message:`Remover ${f.username} da sua lista de amigos?`,confirmLabel:"Remover",danger:true})) sendWs("RemoveFriend", { target_username: f.username }); } },
-      { label: "Bloquear", icon: "🚫", danger: true, onSelect: () => confirmBlockUser(f.username) },
-    ]);
+    openFriendMenu(r.left, r.bottom + 4, e.currentTarget);
   });
 
   li.querySelector('[data-act="dm"]')?.addEventListener("click", () => {
@@ -8097,7 +7969,7 @@ function renderQuickAddMembers() {
   }
 
   if (others.length === 0) {
-    quickAddMembersList.innerHTML = `<div class="friends-empty-state" style="padding: 16px;">Nenhum outro usuário online no servidor no momento.</div>`;
+    quickAddMembersList.innerHTML = `<li class="ui-empty-compact">${SancordUI.emptyHTML({icon:"users",title:"Nenhum usuário disponível",description:"Você ainda pode enviar um pedido pelo nome de usuário."})}</li>`;
     return;
   }
 
@@ -8523,6 +8395,7 @@ const joinSrvPreviewCard = document.getElementById("join-srv-preview-card");
 
 let wizardSelectedTemplate = "blank";
 let wizardUploadedIcon = "";
+let serverWizardTrigger = null;
 
 function setAddServerWizardMode(mode) {
   const isCreate = mode === "create";
@@ -8534,6 +8407,7 @@ function setAddServerWizardMode(mode) {
 
 function openAddServerWizard(mode = "create", prefillCode = "") {
   if (!addServerWizardModal) return;
+  if (addServerWizardModal.classList.contains("hidden")) serverWizardTrigger = document.activeElement;
   wizardSelectedTemplate = "blank";
   wizardUploadedIcon = "";
   if (createSrvIconPreview) createSrvIconPreview.innerHTML = `📷<small>ÍCONE</small>`;
@@ -8550,17 +8424,31 @@ function openAddServerWizard(mode = "create", prefillCode = "") {
   });
   setAddServerWizardMode(mode);
   addServerWizardModal.classList.remove("hidden");
+  (mode === "join" ? joinSrvCodeInput : createSrvNameInput)?.focus({ preventScroll: true });
   if (mode === "join" && prefillCode) {
     fetchInvitePreview(prefillCode);
   }
 }
 
+function closeAddServerWizard() {
+  if (!addServerWizardModal || addServerWizardModal.classList.contains("hidden")) return;
+  addServerWizardModal.classList.add("hidden");
+  serverWizardTrigger?.focus({ preventScroll: true });
+  serverWizardTrigger = null;
+}
+
 openAddServerBtn?.addEventListener("click", () => openAddServerWizard("create"));
-document.getElementById("close-server-wizard-btn")?.addEventListener("click", () => addServerWizardModal?.classList.add("hidden"));
-document.getElementById("create-srv-cancel-btn")?.addEventListener("click", () => addServerWizardModal?.classList.add("hidden"));
-document.getElementById("join-srv-cancel-btn")?.addEventListener("click", () => addServerWizardModal?.classList.add("hidden"));
+document.getElementById("first-create-server")?.addEventListener("click", () => openAddServerWizard("create"));
+document.getElementById("first-join-server")?.addEventListener("click", () => openAddServerWizard("join"));
+document.getElementById("first-add-friend")?.addEventListener("click", () => {
+  switchToHomeFriendsView("add");
+  document.getElementById("add-friend-input")?.focus();
+});
+document.getElementById("close-server-wizard-btn")?.addEventListener("click", closeAddServerWizard);
+document.getElementById("create-srv-cancel-btn")?.addEventListener("click", closeAddServerWizard);
+document.getElementById("join-srv-cancel-btn")?.addEventListener("click", closeAddServerWizard);
 addServerWizardModal?.addEventListener("click", (e) => {
-  if (e.target === addServerWizardModal) addServerWizardModal.classList.add("hidden");
+  if (e.target === addServerWizardModal) closeAddServerWizard();
 });
 srvModeCreateBtn?.addEventListener("click", () => setAddServerWizardMode("create"));
 srvModeJoinBtn?.addEventListener("click", () => setAddServerWizardMode("join"));
@@ -9217,8 +9105,7 @@ document.getElementById("srv-settings-delete-btn")?.addEventListener("click", ()
   if (!srv || srv.id === "sancord") return;
   const typed = prompt(`Para EXCLUIR definitivamente "${srv.name}", digite o nome exato do servidor abaixo:`);
   if (typed === srv.name) {
-    sendWs("DeleteServer", { server_id: srv.id });
-    serverSettingsModal?.classList.add("hidden");
+    if (sendWs("DeleteServer", { server_id: srv.id })) serverSettingsModal?.classList.add("hidden");
   }
 });
 
@@ -9295,7 +9182,7 @@ function saveCurrentRoleEdits(posDelta = 0) {
   document.querySelectorAll("[data-role-perm]").forEach((cb) => {
     perms[cb.dataset.rolePerm] = Boolean(cb.checked);
   });
-  sendWs("UpdateRole", {
+  if (sendWs("UpdateRole", {
     server_id: srv.id,
     role_id: role.id,
     name: document.getElementById("role-edit-name")?.value.trim() || role.name,
@@ -9305,8 +9192,7 @@ function saveCurrentRoleEdits(posDelta = 0) {
     mentionable: Boolean(document.getElementById("role-edit-mentionable")?.checked),
     badge_emoji: document.getElementById("role-edit-badge-emoji")?.value.trim() || null,
     permissions: perms,
-  });
-  showUiToast(`Cargo "${role.name}" salvo!`);
+  })) showUiToast(`Salvando cargo "${role.name}"…`);
 }
 
 document.getElementById("role-edit-save-btn")?.addEventListener("click", () => saveCurrentRoleEdits(0));
@@ -9343,7 +9229,7 @@ document.getElementById("srv-copy-invite-btn2")?.addEventListener("click", () =>
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    addServerWizardModal?.classList.add("hidden");
+    closeAddServerWizard();
     inviteServerModal?.classList.add("hidden");
     serverSettingsModal?.classList.add("hidden");
   }
