@@ -27,7 +27,7 @@ async function setup(t) {
 test('coleção filtra por tipo e conjunto, marca vistos e sincroniza favoritos', async t => {
   const h = await setup(t), d = h.document;
   const list = d.getElementById('collection-items');
-  assert.match(list.textContent, /Sancord Core/);
+  assert.match(list.textContent, /Sanvo Core/);
   assert.match(list.textContent, /Clássicos/);
   assert.doesNotMatch(list.textContent, /Fundação/);
   const pick = (kind, id, action) => list.querySelector(`[data-key="${kind}:${id}"][data-action="${action}"]`);

@@ -351,6 +351,9 @@
     } else if (nameEl && entry.roleColor && !entry.offline) {
       nameEl.style.color = entry.roleColor;
     }
+    if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.renderNameplateArt === "function") {
+      SancordCosmetics.renderNameplateArt(li, appearance.nameplate_style);
+    }
 
     const statusLabel = entry.offline
       ? "Offline"
@@ -477,7 +480,8 @@
     module.exports = api;
   }
   if (global) {
-    global.SancordMemberList = api;
+    global.SanvoMemberList = api;
+    global.SancordMemberList = api; // LEGACY COMPATIBILITY
     global.buildMemberGroups = buildMemberGroups;
   }
 })(typeof globalThis !== "undefined" ? globalThis : window);

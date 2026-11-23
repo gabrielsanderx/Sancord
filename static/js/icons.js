@@ -127,3 +127,8 @@ if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'fun
     }
   }).observe(document.body, {childList:true, subtree:true});
 }
+const SanvoIcons = SancordIcons;
+if (typeof globalThis !== "undefined") {
+  globalThis.SanvoIcons = SancordIcons;
+  globalThis.SancordIcons = SancordIcons; // LEGACY COMPATIBILITY
+}

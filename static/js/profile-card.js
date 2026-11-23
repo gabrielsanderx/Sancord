@@ -25,12 +25,20 @@ const profileCardArt = {
 };
 
 function profileAvatarArtLayer(id, depth) {
+  if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.avatarArtLayerHtml === "function") {
+    const v3 = SancordCosmetics.avatarArtLayerHtml(id, depth);
+    if (v3) return v3;
+  }
   const art = profileCardArt.avatar[id];
   if (!Object.hasOwn(profileCardArt.avatar, id)) return "";
   return `<span class="deco-svg-layer avatar-art-${depth} profile-art-${art.theme}" data-art-version="${PROFILE_ART_VERSION}" data-animation-mode="${art.mode}" style="--avatar-art-bleed:${art.safeArea}%" aria-hidden="true"><svg viewBox="0 0 100 100">${art[depth]}</svg></span>`;
 }
 
 function profileFrameArt(id) {
+  if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.profileFrameArtHtml === "function") {
+    const v3 = SancordCosmetics.profileFrameArtHtml(id);
+    if (v3) return v3;
+  }
   const art = profileCardArt.frame[id];
   if (!Object.hasOwn(profileCardArt.frame, id)) return "";
   const designs = {
@@ -50,6 +58,10 @@ function profileFrameArt(id) {
 }
 
 function profileEffectArt(id) {
+  if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.profileEffectArtHtml === "function") {
+    const v3 = SancordCosmetics.profileEffectArtHtml(id);
+    if (v3) return v3;
+  }
   const art = Object.hasOwn(profileCardArt.effect, id) && profileCardArt.effect[id];
   return art ? `<svg class="profile-effect-art profile-art-${art.theme}" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g>${art.paths}</g></svg>` : "";
 }

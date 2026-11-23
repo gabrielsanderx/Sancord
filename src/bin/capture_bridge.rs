@@ -343,7 +343,8 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
     if trimmed.is_empty()
         || trimmed == "Program Manager"
         || trimmed == "Windows Input Experience"
-        || trimmed == "Sancord"
+        || trimmed == "Sanvo"
+        || trimmed == "Sancord" // LEGACY COMPATIBILITY
     {
         return BOOL(1);
     }

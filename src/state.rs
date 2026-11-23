@@ -89,8 +89,18 @@ pub struct ServerState {
     pub group_dms: HashMap<String, GroupDm>,
     /// Direitos de mídia da última entrada na voz, para encerrar conexões ao revogar.
     pub voice_grants: HashMap<String, (bool, bool)>,
-    /// Chamadas privadas em andamento (canal dmvoice:/gdmvoice: -> início e quem ligou).
+    /// Chamadas privadas em andamento (canal dmvoice:/gdmvoice: -> máquina de estados autoritativa).
     pub active_calls: HashMap<String, crate::voice::ActiveCall>,
+    /// Configuração centralizada de timeouts/cooldowns de chamadas privadas.
+    pub call_timing: crate::voice::CallTimingConfig,
+    /// Cooldown anti-spam de toque em chamadas privadas: (caller_lower, channel_id) -> último toque (ms).
+    pub call_ring_rates: HashMap<(String, String), i64>,
+    /// Janela deslizante anti-spam para criação de chamadas/toques: (caller_lower, channel_id) -> timestamps (ms).
+    pub call_ring_windows: HashMap<(String, String), Vec<i64>>,
+    /// Timers pendentes de chamadas privadas a serem disparados fora do write lock.
+    pub pending_call_timers: Vec<crate::voice::CallTimerAction>,
+    /// Anti-spam de eventos sonoros compartilhados de voz: (actor_uid, categoria) -> último envio (ms).
+    pub voice_cue_rates: HashMap<(String, String), i64>,
     /// AutoMod: mensagens recentes por autor (instante, hash) para detectar repetição.
     pub automod_recent: HashMap<String, Vec<(i64, u64)>>,
     /// Modo lento: (canal, username_lower) -> última mensagem aceita (ms). Só em memória.
@@ -98,6 +108,7 @@ pub struct ServerState {
     /// Eventos agendados: server_id -> eventos (ordenados por início)
     pub events: HashMap<String, Vec<crate::models::ServerEvent>>,
     pub integrations: HashMap<String, crate::integrations::Integration>,
+    pub game_catalog: Arc<RwLock<crate::games::GameCatalogCache>>,
     account_key_by_id: HashMap<String, String>,
     persisted_servers: HashMap<String, u64>,
     persisted_accounts: HashMap<String, u64>,
@@ -114,9 +125,9 @@ fn content_hash<T: serde::Serialize>(v: &T) -> (u64, String) {
 
 fn default_hub(text_channels: Vec<Channel>, voice_channels: Vec<Channel>) -> GuildServer {
     GuildServer {
-        id: "sancord".to_string(),
-        name: "Sancord".to_string(),
-        description: Some("Servidor principal do Sancord — Hub de voz HD e texto".to_string()),
+        id: "sancord".to_string(), // LEGACY COMPATIBILITY: ID técnico do hub legado mantido
+        name: "Sanvo".to_string(),
+        description: Some("Servidor principal do Sanvo — Hub de voz HD e texto".to_string()),
         icon_url: Some("/logo.png".to_string()),
         icon_color: "#5865F2".to_string(),
         banner_url: None,
@@ -297,6 +308,7 @@ impl ServerState {
             .max()
             .unwrap_or(0);
 
+        let game_catalog = crate::games::GameCatalogCache::load(&config.data_dir, config.game_api_enabled);
         let mut st = Self {
             config: Arc::new(config),
             scheduled_messages: db.load_scheduled()?.into_iter().map(|job| (job.id.clone(), job)).collect(),
@@ -327,10 +339,16 @@ impl ServerState {
             group_dms: group_dms_vec.into_iter().map(|g| (g.id.clone(), g)).collect(),
             voice_grants: HashMap::new(),
             active_calls: HashMap::new(),
+            call_timing: crate::voice::CallTimingConfig::default(),
+            call_ring_rates: HashMap::new(),
+            call_ring_windows: HashMap::new(),
+            pending_call_timers: Vec::new(),
+            voice_cue_rates: HashMap::new(),
             automod_recent: HashMap::new(),
             slowmode_last: HashMap::new(),
             events: events_by_server,
             integrations,
+            game_catalog,
             account_key_by_id: HashMap::new(),
             persisted_servers: HashMap::new(),
             persisted_accounts: HashMap::new(),
@@ -402,7 +420,7 @@ impl ServerState {
                 author_name: "Sancord Bot".to_string(),
                 author_color: "#5865F2".to_string(),
                 author_avatar: Some("/logo.png".to_string()),
-                content: "Bem-vindo ao Sancord! Sua conta fica salva automaticamente para você entrar direto nas próximas vezes.".to_string(),
+                content: "Bem-vindo ao Sanvo! Sua conta fica salva automaticamente para você entrar direto nas próximas vezes.".to_string(),
                 image_url: None,
                 reply_to: None,
                 reactions: HashMap::new(),
@@ -763,15 +781,15 @@ impl ServerState {
             .collect()
     }
 
-    /// Soma uma menção para cada destinatário da mensagem (exceto o autor).
-    /// Em DM, toda mensagem conta como menção para o outro participante.
-    pub fn bump_mentions(&mut self, channel_id: &str, author_lower: &str, mentions: &MessageMentions) {
+    fn mention_targets(&self, channel_id: &str, author_lower: &str, mentions: &MessageMentions) -> HashSet<String> {
         let mut targets: HashSet<String> = HashSet::new();
         if Self::is_private_text(channel_id) {
             // DM e grupo: toda mensagem notifica os outros participantes,
-            // exceto solicitações de mensagem (não notificam até serem aceitas).
+            // exceto solicitações de mensagem e remetentes bloqueados pelo destinatário.
             for p in self.private_participants(channel_id) {
-                if !self.friends_store.is_silenced(&p, channel_id) {
+                if !self.friends_store.is_silenced(&p, channel_id)
+                    && !self.friends_store.has_blocked(&p, author_lower)
+                {
                     targets.insert(p);
                 }
             }
@@ -814,11 +832,40 @@ impl ServerState {
         }
         targets.remove(author_lower);
         targets.retain(|user| self.can_view_channel(user, channel_id));
+        targets
+    }
+
+    /// Soma uma menção para cada destinatário da mensagem (exceto o autor).
+    /// Em DM, toda mensagem conta como menção para o outro participante.
+    pub fn bump_mentions(&mut self, channel_id: &str, author_lower: &str, mentions: &MessageMentions) {
+        let targets = self.mention_targets(channel_id, author_lower, mentions);
         for lower in targets {
             if let Some(acc) = self.account_id_for(&lower) {
                 let mut s = self.read_state(&acc, channel_id);
                 s.mention_count = s.mention_count.saturating_add(1);
                 self.put_read_state(&acc, channel_id, s);
+            }
+        }
+    }
+
+    /// Quando uma mensagem ainda não lida que gerou notificação é apagada, reduz o contador
+    /// de menções pendentes e sincroniza `ReadStateUpdated` com as sessões ativas (#54).
+    pub fn decrement_mentions_on_delete(&mut self, msg: &ChatMessage) {
+        let author_lower = msg.author_name.to_lowercase();
+        let targets = self.mention_targets(&msg.channel_id, &author_lower, &msg.mentions);
+        for lower in targets {
+            if let Some(acc) = self.account_id_for(&lower) {
+                let mut s = self.read_state(&acc, &msg.channel_id);
+                if msg.created_at > s.last_read_at && s.mention_count > 0 {
+                    s.mention_count = s.mention_count.saturating_sub(1);
+                    self.put_read_state(&acc, &msg.channel_id, s);
+                    let info = ReadStateInfo {
+                        channel_id: msg.channel_id.clone(),
+                        last_read_at: s.last_read_at,
+                        mention_count: s.mention_count,
+                    };
+                    self.send_read_state(&lower, info);
+                }
             }
         }
     }
@@ -1223,19 +1270,20 @@ impl ServerState {
             return Err("O link personalizado não pode começar, terminar ou repetir hífen.");
         }
         const RESERVED: &[&str] = &[
-            "api", "invite", "invites", "login", "register", "admin", "sancord", "system",
+            "api", "invite", "invites", "login", "register", "admin", "sanvo", "sancord", "system",
             "open", "ws", "health", "attachments", "settings", "help", "support", "channel",
             "channels", "server", "servers", "user", "users", "dm", "voice", "auth",
             "logout", "session", "public-url",
         ];
-        if RESERVED.contains(&slug.as_str()) || slug.starts_with("sanc-") {
+        if RESERVED.contains(&slug.as_str()) || slug.starts_with("sanv-") || slug.starts_with("sanc-") {
             return Err("Este endereço é reservado. Escolha outro nome.");
         }
         Ok(slug)
     }
 
     /// Extrai o código de convite de uma entrada crua (código puro, `?invite=`,
-    /// `sancord://invite/CODIGO`, `https://.../invite/CODIGO` ou `sancord.gg/CODIGO`).
+    /// `sanvo://invite/CODIGO`, `sancord://invite/CODIGO`, `https://.../invite/CODIGO`,
+    /// `sanvo.gg/CODIGO` ou `sancord.gg/CODIGO`).
     pub fn extract_invite_code(raw: &str) -> String {
         let trimmed = raw.trim();
         let candidate = if let Some((_, after)) = trimmed.split_once("invite=") {
@@ -1244,7 +1292,10 @@ impl ServerState {
             after.split(['?', '#', '/', ' ']).next().unwrap_or(after)
         } else if let Some((_, after)) = trimmed.split_once("/invite/") {
             after.split(['?', '#', '/', ' ']).next().unwrap_or(after)
+        } else if let Some((_, after)) = trimmed.split_once("sanvo.gg/") {
+            after.split(['?', '#', '/', ' ']).next().unwrap_or(after)
         } else if let Some((_, after)) = trimmed.split_once("sancord.gg/") {
+            // LEGACY COMPATIBILITY: aceita links curtos legados sancord.gg/
             after.split(['?', '#', '/', ' ']).next().unwrap_or(after)
         } else {
             trimmed

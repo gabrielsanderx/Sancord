@@ -187,8 +187,12 @@ fn validate(
                 name,
                 description,
                 cover_id,
+                game_id,
+                cover_url,
+                release_year,
+                platforms,
             } => {
-                normalize(name, 60, false)?;
+                normalize(name, 80, false)?;
                 normalize(description, 160, true)?;
                 if let Some(id) = cover_id {
                     let attachment = crate::profile::validate_owned_image(
@@ -202,9 +206,30 @@ fn validate(
                         return Err("Use PNG, JPG ou WebP para a capa.");
                     }
                 }
+                normalize_game_meta(game_id, cover_url, release_year, platforms, &mut None)?;
             }
-            ProfileWidgetContent::Playing { name } | ProfileWidgetContent::WantToPlay { name } => {
-                normalize(name, 60, false)?;
+            ProfileWidgetContent::Playing {
+                name,
+                game_id,
+                cover_url,
+                release_year,
+                platforms,
+                note,
+                auto_activity,
+            } => {
+                normalize(name, 80, *auto_activity)?;
+                normalize_game_meta(game_id, cover_url, release_year, platforms, note)?;
+            }
+            ProfileWidgetContent::WantToPlay {
+                name,
+                game_id,
+                cover_url,
+                release_year,
+                platforms,
+                note,
+            } => {
+                normalize(name, 80, false)?;
+                normalize_game_meta(game_id, cover_url, release_year, platforms, note)?;
             }
             ProfileWidgetContent::About { text } => normalize(text, 400, false)?,
             ProfileWidgetContent::Link { label, url } => {
@@ -257,6 +282,51 @@ fn validate(
                     }
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+fn normalize_game_meta(
+    game_id: &mut Option<String>,
+    cover_url: &mut Option<String>,
+    release_year: &mut Option<u16>,
+    platforms: &mut Vec<String>,
+    note: &mut Option<String>,
+) -> Result<(), &'static str> {
+    if let Some(raw) = game_id.take() {
+        let clean = raw.trim();
+        if !clean.is_empty() {
+            if !crate::games::is_valid_game_id(clean) {
+                return Err("Identificador de jogo inválido.");
+            }
+            *game_id = Some(clean.to_string());
+        }
+    }
+    if let Some(raw) = cover_url.take() {
+        let clean = raw.trim();
+        if !clean.is_empty() {
+            if !crate::games::is_safe_game_cover_url(clean) {
+                return Err("URL de capa do jogo não permitida.");
+            }
+            *cover_url = Some(clean.to_string());
+        }
+    }
+    if let Some(year) = *release_year {
+        if !(1970..=2100).contains(&year) {
+            *release_year = None;
+        }
+    }
+    platforms.retain(|p| !p.trim().is_empty());
+    for p in platforms.iter_mut() {
+        *p = p.trim().chars().take(24).collect();
+    }
+    platforms.truncate(6);
+    if let Some(raw) = note.take() {
+        let mut s = raw;
+        normalize(&mut s, 160, true)?;
+        if !s.is_empty() {
+            *note = Some(s);
         }
     }
     Ok(())

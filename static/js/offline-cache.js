@@ -89,3 +89,8 @@ const SancordOfflineCache = (() => {
 
   return { clear, updated, restore };
 })();
+const SanvoOfflineCache = SancordOfflineCache;
+if (typeof globalThis !== "undefined") {
+  globalThis.SanvoOfflineCache = SancordOfflineCache;
+  globalThis.SancordOfflineCache = SancordOfflineCache; // LEGACY COMPATIBILITY
+}

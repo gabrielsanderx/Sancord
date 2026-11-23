@@ -304,3 +304,99 @@ test('Editar perfil -> Insígnias: mostra apenas badges possuídas, permite ocul
   `);
   assert.ok(d.querySelector('#pe-badges-editor .pe-badges-empty'), 'Deve mostrar estado vazio limpo quando a conta não possui insígnias');
 });
+
+test('Cabeçalho do perfil nos 4 contextos: sem tarja atrás do Display Name, hierarquia @username + badges e variações de nome/badges', async t => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const h = await setup(t);
+  const d = h.document;
+
+  // Cenário 1: Usuário com Nameplate equipada ('core-stripe'), Display Name Style ('gta'), 1 badge e nome curto.
+  h.run(`
+    state.selfUser.display_name = 'Swag';
+    state.selfUser.username = 'swag';
+    state.selfUser.name_style = 'gta';
+    state.selfUser.name_color = '#ef4444';
+    state.selfUser.nameplate_style = 'core-stripe';
+    state.selfUser.badges = ['founder'];
+    state.selfUser.pronouns = 'ele/dele';
+    updateSelfProfileUI();
+    SancordSelfProfileMenu.open();
+    openMemberProfilePopover('user-swag-001');
+    onUserProfile({ user: state.selfUser, server_id: 'srv-1', bio_visible: true, banner_visible: true });
+    openSettingsModal('profile');
+  `);
+
+  const spmWrap = d.querySelector('#self-profile-menu .profile-nameplate-wrap');
+  const fullWrap = d.querySelector('#profile-popover-card .profile-nameplate-wrap');
+  const previewWrap = d.querySelector('#live-profile-preview-card .profile-nameplate-wrap');
+  assert.ok(spmWrap && fullWrap && previewWrap);
+
+  // Mesmo com nameplate equipada, o cabeçalho de perfil preserva a classe no DOM.
+  for (const wrap of [spmWrap, fullWrap, previewWrap]) {
+    assert.equal(wrap.classList.contains('nameplate-core-stripe'), true);
+    assert.equal(wrap.classList.contains('profile-nameplate-chip'), true);
+  }
+
+  // Verifica contrato CSS nos 4 contextos: .profile-card .profile-nameplate-wrap não renderiza tarja/fundo artificial.
+  const uiCss = fs.readFileSync(path.resolve(__dirname, '../static/ui.css'), 'utf8');
+  const cosCss = fs.readFileSync(path.resolve(__dirname, '../static/cosmetics/cosmetics.css'), 'utf8');
+  assert.match(uiCss, /\.profile-card\s+\.profile-nameplate-wrap[\s\S]*?background:\s*transparent\s*!important/);
+  assert.match(uiCss, /\.profile-card\s+\.profile-nameplate-wrap\s*>\s*\.np-art-layer\s*\{\s*display:\s*none\s*!important/);
+  assert.match(cosCss, /\.profile-card\s+\.profile-nameplate-wrap\s*>\s*\.np-art-layer\s*\{\s*display:\s*none\s*!important/);
+  assert.match(uiCss, /\.profile-card\s+:is\(\.profile-card-handle-row,\s*\.compact-profile-byline,\s*\.spm-subline\)\s+\.profile-badges\s+\.profile-badge\s*\{[\s\S]*?width:\s*16px/);
+  assert.match(uiCss, /\.self-profile-menu\s+\.spm-subline\s+\.spm-badges\.profile-badges\s+\.profile-badge\s*\{[\s\S]*?width:\s*15\.5px/);
+
+  // O efeito de Display Name Style ocorre no próprio texto (.styled-name) nos 4 contextos.
+  const spmName = d.querySelector('#self-profile-menu .spm-display-name');
+  const fullName = d.getElementById('profile-card-name');
+  const previewName = d.getElementById('preview-card-name');
+  assert.equal(spmName.classList.contains('name-style-gta'), true);
+  assert.equal(fullName.classList.contains('name-style-gta'), true);
+  assert.equal(previewName.classList.contains('name-style-gta'), true);
+
+  // @username secundário e 1 badge visível na mesma sublinha com tooltip.
+  const spmHandle = d.querySelector('#self-profile-menu .spm-handle');
+  const spmBadge = d.querySelector('#self-profile-menu .spm-badges .profile-badge');
+  const fullBadge = d.querySelector('#profile-card-badges .profile-badge');
+  assert.equal(spmHandle.textContent, '@swag • ele/dele');
+  assert.equal(d.getElementById('profile-card-handle').textContent, '@swag');
+  assert.equal(spmBadge.dataset.badge, 'founder');
+  assert.equal(fullBadge.dataset.badge, 'founder');
+  assert.equal(d.getElementById('profile-card-pronouns').textContent, 'ele/dele');
+  assert.equal(d.getElementById('profile-card-pronouns').hidden, false);
+
+  // Cenário 2: Profile Popout (Cartão Rápido) + múltiplas badges + Display Name longo + username longo + sem Display Name Style.
+  h.run(`
+    state.selfUser.display_name = 'Gabriel Sander Fundador Sancord';
+    state.selfUser.username = 'gabrielsander_official_br';
+    state.selfUser.name_style = 'default';
+    state.selfUser.nameplate_style = null;
+    state.selfUser.badges = ['founder', 'developer'];
+    renderCompactProfile(document.getElementById('compact-profile-content'), state.selfUser, state.selfUser.display_name, state.selfUser.username);
+    SancordSelfProfileMenu.refreshIfOpen();
+  `);
+  const compactCard = d.querySelector('#compact-profile-modal .compact-profile-dialog');
+  const compactName = compactCard.querySelector('[data-profile-slot="name"]');
+  const compactHandle = compactCard.querySelector('[data-profile-slot="handle"]');
+  const compactBadges = compactCard.querySelector('[data-profile-slot="badges"]');
+  const compactWrap = compactCard.querySelector('.profile-nameplate-wrap');
+  assert.equal(compactName.textContent, 'Gabriel Sander Fundador Sancord');
+  assert.equal(compactName.classList.contains('name-style-gta'), false);
+  assert.equal(compactWrap.classList.contains('profile-nameplate-chip'), false);
+  assert.equal(compactHandle.textContent, '@gabrielsander_official_br');
+  assert.equal(compactBadges.classList.contains('hidden'), false);
+  assert.equal(compactBadges.querySelectorAll('.profile-badge').length, 2);
+
+  // Cenário 3: Usuário sem badges (0 badges) -> container oculto em todos os contextos.
+  h.run(`
+    state.selfUser.badges = [];
+    renderCompactProfile(document.getElementById('compact-profile-content'), state.selfUser, state.selfUser.display_name, state.selfUser.username);
+    openMemberProfilePopover('user-swag-001');
+    onUserProfile({ user: state.selfUser, server_id: 'srv-1', bio_visible: true, banner_visible: true });
+    SancordSelfProfileMenu.refreshIfOpen();
+  `);
+  assert.equal(compactBadges.classList.contains('hidden'), true);
+  assert.equal(d.getElementById('profile-card-badges').classList.contains('hidden'), true);
+  assert.equal(d.querySelector('#self-profile-menu .spm-badges').classList.contains('hidden'), true);
+});

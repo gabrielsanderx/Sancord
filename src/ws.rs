@@ -652,6 +652,11 @@ async fn join_authenticated(user_id: &str, mut acc: Account, state: &SharedState
             let current_hash = st.conn_sessions.get(user_id).cloned();
             let sessions = st.sessions_for_account(&account_id, current_hash.as_deref());
             st.send_to(user_id, ServerMessage::SessionsList { sessions });
+            let active_calls = crate::voice::active_calls_for_user(&mut st, &final_lower);
+            if !active_calls.is_empty() {
+                st.send_to(user_id, ServerMessage::ActiveCallsSync { calls: active_calls });
+            }
+            let welcome_timers = std::mem::take(&mut st.pending_call_timers);
 
             st.broadcast_except(
                 user_id,
@@ -662,6 +667,10 @@ async fn join_authenticated(user_id: &str, mut acc: Account, state: &SharedState
             for id in retired { st.broadcast(ServerMessage::UserLeft { user_id: id }); }
 
             st.broadcast_friends_sync_all();
+            drop(st);
+            if !welcome_timers.is_empty() {
+                crate::voice::spawn_call_timers(state.clone(), welcome_timers);
+            }
         }
     }
 }
@@ -1064,7 +1073,11 @@ async fn send_chat_message(
     // Menções pendentes para os destinatários; o autor já leu a própria mensagem.
     st.bump_mentions(&channel_id, &me_lower, &chat_msg.mentions);
     if let Some(acc) = st.account_id_for(&me_lower) {
-        st.mark_read(&acc, &channel_id, chat_msg.created_at);
+        let before = st.read_state(&acc, &channel_id);
+        let info = st.mark_read(&acc, &channel_id, chat_msg.created_at);
+        if before.mention_count > 0 && info.mention_count == 0 {
+            st.send_read_state(&me_lower, info);
+        }
     }
 
     // Prévias de links: em segundo plano, chegam como atualização da mensagem.
@@ -1707,6 +1720,9 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                         let preview: String = m.content.chars().take(80).collect();
                         crate::moderation::audit(&st, sid, &me_lower, "message_delete", Some(&m.author_name.to_lowercase()), Some(format!("canal: {channel_id}; texto: {preview}")));
                     }
+                }
+                if let Some(m) = &fallback {
+                    st.decrement_mentions_on_delete(m);
                 }
                 st.remove_message(&channel_id, &message_id);
                 if !is_dm {
@@ -2549,7 +2565,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                     ServerMessage::FriendFeedback {
                         ok: false,
                         message: format!(
-                            "Não encontramos '{}' no Sancord. Confira o nome exato (ele precisa já ter criado conta ou estar online).",
+                            "Não encontramos '{}' no Sanvo. Confira o nome exato (ele precisa já ter criado conta ou estar online).",
                             trimmed
                         ),
                     },
@@ -2822,88 +2838,88 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         | ClientMessage::ReportUser { .. }) => crate::social::handle(user_id, m, state).await,
 
         ClientMessage::JoinVoice { channel_id, resume } => {
-            let mut st = state.write().await;
-            let Some(me) = st.users.get(user_id).cloned() else {
-                return;
-            };
-            let me_lower = me.username.to_lowercase();
+            let timers = {
+                let mut st = state.write().await;
+                let Some(me) = st.users.get(user_id).cloned() else {
+                    return;
+                };
+                let me_lower = me.username.to_lowercase();
 
-            let is_public_voice = st.has_public_voice_channel(&channel_id);
-            let is_dm_voice = (channel_id.starts_with("dmvoice:") || channel_id.starts_with("gdmvoice:"))
-                && st.can_join_voice(&me_lower, &channel_id);
-            if !is_public_voice && !is_dm_voice {
-                st.feedback(user_id, false, "join_voice", "Não é possível entrar nesta chamada.");
-                return;
-            }
-            if resume && is_dm_voice && !st.users.values().any(|u| u.voice_channel_id.as_deref() == Some(&channel_id)) {
-                st.feedback(user_id, false, "join_voice", "A chamada privada já terminou.");
-                return;
-            }
-            if is_public_voice {
-                let allowed = st
-                    .servers
-                    .iter()
-                    .find(|s| s.voice_channels.iter().any(|c| c.id == channel_id))
-                    .map(|s| s.channel_permissions(&me_lower, &channel_id).view_channel && s.channel_permissions(&me_lower, &channel_id).connect_voice)
-                    .unwrap_or(false);
-                if !allowed {
-                    st.send_to(
-                        user_id,
-                        ServerMessage::ServerFeedback {
-                            ok: false,
-                            message: "Você não tem permissão para entrar neste canal de voz.".to_string(),
-                            action: Some("join_voice".to_string()),
-                        },
-                    );
+                let is_public_voice = st.has_public_voice_channel(&channel_id);
+                let is_dm_voice = (channel_id.starts_with("dmvoice:") || channel_id.starts_with("gdmvoice:"))
+                    && st.can_join_voice(&me_lower, &channel_id);
+                if !is_public_voice && !is_dm_voice {
+                    st.feedback(user_id, false, "join_voice", "Não é possível entrar nesta chamada.");
                     return;
                 }
-            }
-
-            if let Err(msg) = crate::voice::check_user_limit(&st, user_id, &me_lower, &channel_id)
-                .and_then(|_| crate::voice::check_private_call(&st, &me_lower, &channel_id))
-            {
-                st.feedback(user_id, false, "join_voice", msg);
-                return;
-            }
-
-            let Some(peer_info) = crate::voice::place_in_voice(&mut st, user_id, &channel_id) else {
-                return;
-            };
-            info!("Usuário {} entrou no canal de voz {}", peer_info.username, channel_id);
-
-            if is_dm_voice && !resume {
-                // Toca para os outros participantes (DM 1:1 ou grupo) que ainda não estão na chamada.
-                let conversation_id = crate::voice::conversation_of(&channel_id).unwrap_or_default();
-                let others: Vec<String> = st
-                    .private_participants(&channel_id)
-                    .into_iter()
-                    .filter(|p| *p != me_lower)
-                    .collect();
-                let ring = ServerMessage::DmCallIncoming {
-                    dm_id: conversation_id,
-                    voice_channel_id: channel_id.clone(),
-                    from_username: peer_info.username.clone(),
-                    from_color: peer_info.avatar_color.clone(),
-                    from_avatar: peer_info.avatar_url.clone(),
-                };
-                for (uid, u) in &st.users {
-                    let lower = u.username.to_lowercase();
-                    if others.contains(&lower)
-                        && u.voice_channel_id.as_deref() != Some(&channel_id)
-                        && !st.friends_store.blocked_either(&lower, &me_lower)
-                    {
-                        st.send_to(uid, ring.clone());
+                if resume
+                    && is_dm_voice
+                    && !st.active_calls.contains_key(&channel_id)
+                    && !st.users.values().any(|u| u.voice_channel_id.as_deref() == Some(&channel_id))
+                {
+                    st.feedback(user_id, false, "join_voice", "A chamada privada já terminou.");
+                    return;
+                }
+                if is_public_voice {
+                    let allowed = st
+                        .servers
+                        .iter()
+                        .find(|s| s.voice_channels.iter().any(|c| c.id == channel_id))
+                        .map(|s| s.channel_permissions(&me_lower, &channel_id).view_channel && s.channel_permissions(&me_lower, &channel_id).connect_voice)
+                        .unwrap_or(false);
+                    if !allowed {
+                        st.send_to(
+                            user_id,
+                            ServerMessage::ServerFeedback {
+                                ok: false,
+                                message: "Você não tem permissão para entrar neste canal de voz.".to_string(),
+                                action: Some("join_voice".to_string()),
+                            },
+                        );
+                        return;
                     }
                 }
-                st.broadcast_friends_sync_all();
+
+                if let Err(msg) = crate::voice::check_user_limit(&st, user_id, &me_lower, &channel_id)
+                    .and_then(|_| crate::voice::check_private_call(&st, &me_lower, &channel_id))
+                    .and_then(|_| {
+                        if is_dm_voice && !resume {
+                            crate::voice::check_call_ring_spam(&st, &me_lower, &channel_id)
+                        } else {
+                            Ok(())
+                        }
+                    })
+                {
+                    st.feedback(user_id, false, "join_voice", msg);
+                    return;
+                }
+
+                let Some(peer_info) = crate::voice::place_in_voice_with_options(&mut st, user_id, &channel_id, resume) else {
+                    return;
+                };
+                info!("Usuário {} entrou no canal de voz {}", peer_info.username, channel_id);
+
+                if is_dm_voice && !resume {
+                    st.broadcast_friends_sync_all();
+                }
+                std::mem::take(&mut st.pending_call_timers)
+            };
+            if !timers.is_empty() {
+                crate::voice::spawn_call_timers(state.clone(), timers);
             }
         }
         ClientMessage::LeaveVoice => {
-            let mut st = state.write().await;
-            if let Some(channel_id) = crate::voice::remove_from_voice(&mut st, user_id) {
-                if crate::voice::is_private_voice(&channel_id) {
-                    st.broadcast_friends_sync_all();
+            let timers = {
+                let mut st = state.write().await;
+                if let Some(channel_id) = crate::voice::remove_from_voice(&mut st, user_id) {
+                    if crate::voice::is_private_voice(&channel_id) {
+                        st.broadcast_friends_sync_all();
+                    }
                 }
+                std::mem::take(&mut st.pending_call_timers)
+            };
+            if !timers.is_empty() {
+                crate::voice::spawn_call_timers(state.clone(), timers);
             }
         }
 
@@ -2978,8 +2994,30 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
         }
 
         ClientMessage::DeclineCall { channel_id } => {
-            let st = state.read().await;
-            crate::voice::decline_call(&st, user_id, &channel_id);
+            let mut st = state.write().await;
+            crate::voice::decline_call(&mut st, user_id, &channel_id);
+        }
+        ClientMessage::CancelCall { channel_id } => {
+            let mut st = state.write().await;
+            match crate::voice::cancel_call_ringing(&mut st, user_id, &channel_id) {
+                Ok(()) => {}
+                Err(msg) => st.feedback(user_id, false, "cancel_call", msg),
+            }
+        }
+        ClientMessage::RingCall { channel_id, target_username } => {
+            let timers = {
+                let mut st = state.write().await;
+                match crate::voice::re_ring_call(&mut st, user_id, &channel_id, target_username.as_deref()) {
+                    Ok(()) => std::mem::take(&mut st.pending_call_timers),
+                    Err(msg) => {
+                        st.feedback(user_id, false, "ring_call", msg);
+                        Vec::new()
+                    }
+                }
+            };
+            if !timers.is_empty() {
+                crate::voice::spawn_call_timers(state.clone(), timers);
+            }
         }
         ClientMessage::UpdateActivity { activity } => {
             crate::activity::update_activity(state, user_id, activity).await;
@@ -3000,6 +3038,11 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 st.feedback(user_id, false, "voice_state", "Você não tem permissão para transmitir neste canal.");
                 return;
             }
+            let (prev_channel, prev_screen, prev_camera) = st
+                .users
+                .get(user_id)
+                .map(|u| (u.voice_channel_id.clone(), u.screen_sharing, u.camera_on))
+                .unwrap_or((None, false, false));
             if let Some(user) = st.users.get_mut(user_id) {
                 // Ensurdecer implica silenciar o próprio microfone.
                 user.muted = muted || deafened || !can_speak;
@@ -3016,6 +3059,21 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 users: st.users_list(),
             };
             st.broadcast(sync_msg);
+
+            // Eventos sonoros compartilhados só disparam em transições reais confirmadas
+            // de estado dentro de uma call ativa (nunca por troca de qualidade/resolução).
+            if let Some(ch) = prev_channel {
+                if !prev_screen && screen_sharing {
+                    crate::voice::emit_voice_cue(&mut st, &ch, user_id, "stream_start", true);
+                } else if prev_screen && !screen_sharing {
+                    crate::voice::emit_voice_cue(&mut st, &ch, user_id, "stream_stop", true);
+                }
+                if !prev_camera && camera_on {
+                    crate::voice::emit_voice_cue(&mut st, &ch, user_id, "camera_on", true);
+                } else if prev_camera && !camera_on {
+                    crate::voice::emit_voice_cue(&mut st, &ch, user_id, "camera_off", true);
+                }
+            }
         }
 
         ClientMessage::WebRtcOffer { target_id, sdp } => {
@@ -4935,8 +4993,12 @@ async fn cleanup_disconnected_user(user_id: &str, state: &SharedState) {
     st.peers.remove(user_id);
     let session_exists = st.conn_sessions.remove(user_id).is_some_and(|hash| st.sessions.contains_key(&hash));
     st.rates.remove(user_id);
-    // Sai da voz pelo caminho comum (avisa os pares e encerra chamada privada vazia).
+    // Sai da voz pelo caminho comum (avisa os pares, para toque ativo e agenda grace period quando aplicável).
     crate::voice::remove_from_voice(&mut st, user_id);
+    let disconnect_timers = std::mem::take(&mut st.pending_call_timers);
+    if !disconnect_timers.is_empty() {
+        crate::voice::spawn_call_timers(state.clone(), disconnect_timers);
+    }
 
     if let Some(removed_user) = st.users.remove(user_id) {
         info!(

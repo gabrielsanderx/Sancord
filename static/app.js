@@ -24,16 +24,20 @@ const DEFAULT_AUDIO_SETTINGS = {
   pttKey: "Space",
   pttReleaseDelayMs: 120,
   gateThreshold: -52,
-  noiseGate: true,
+  noiseSuppressionMode: "auto", // "auto" | "light" | "standard" | "strong" | "off"
+  lastActiveNsMode: "auto",
+  noiseGate: false,
   highpass: true,
   compressor: true,
   aec: true,
+  agc: true,
   opusHd: true,
   screenDefaultQuality: "1080",
   screenDefaultFps: 30,
   screenDefaultAudio: true,
   soundMessages: true,
   soundVoice: true,
+  notifDmBadges: true,
   soundEvents: {
     message: true,
     mention: true,
@@ -73,6 +77,9 @@ const DEFAULT_AUDIO_SETTINGS = {
   notifShowPreview: true,
   notifWhenFocused: false,
   notifTitleBadge: true,
+  notifTaskbarBadge: true,
+  notifDmBadges: true,
+  notifFlashTaskbar: true,
   showTyping: true,
   autoEmbeds: true,
   familyFocus: false,
@@ -106,7 +113,20 @@ function loadAudioSettings() {
   try {
     const raw = localStorage.getItem("sancord_audio_settings");
     if (!raw) return { ...DEFAULT_AUDIO_SETTINGS };
-    return { ...DEFAULT_AUDIO_SETTINGS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    const merged = { ...DEFAULT_AUDIO_SETTINGS, ...parsed };
+    // Migração segura de versões antigas e recuperação de valores inválidos.
+    if (typeof SancordVoiceDspCore !== "undefined") {
+      merged.noiseSuppressionMode = SancordVoiceDspCore.migrateNoiseSuppressionSetting(parsed);
+      merged.lastActiveNsMode = SancordVoiceDspCore.sanitizeMode(parsed.lastActiveNsMode, "auto");
+      if (merged.lastActiveNsMode === "off") merged.lastActiveNsMode = "auto";
+    } else if (!["auto", "light", "standard", "strong", "off"].includes(merged.noiseSuppressionMode)) {
+      merged.noiseSuppressionMode = "auto";
+    }
+    if (parsed && typeof parsed.agc !== "boolean") {
+      merged.agc = Boolean(parsed.aec !== false);
+    }
+    return merged;
   } catch (_) {
     return { ...DEFAULT_AUDIO_SETTINGS };
   }
@@ -246,6 +266,7 @@ const state = {
   dmFilterQuery: "",
   friendsSearchQuery: "",
   pendingIncomingCall: null,
+  activeCalls: new Map(), // voice_channel_id -> CallSnapshot (autoritativo do servidor)
   starredMsgIds: (() => {
     try {
       return new Set(JSON.parse(localStorage.getItem("sancord_starred_msgs") || "[]"));
@@ -408,10 +429,13 @@ function playUiSound(kind, opts = {}) {
   const forcePreview = Boolean(opts?.forcePreview);
   if (!forcePreview) {
     if ((state.deafened || state.selfUser?.status_kind === "dnd") && kind !== "deafen") return;
-    if ((kind === "message" || kind === "mention" || kind === "friend-request") && (state.audioSettings?.soundMessages === false || state.audioSettings?.streamerMode)) return;
+    if ((kind === "message" || kind === "dm-message" || kind === "message_received" || kind === "mention" || kind === "friend-request") && (state.audioSettings?.soundMessages === false || state.audioSettings?.streamerMode)) return;
     if ((kind === "join" || kind === "leave" || kind === "mute" || kind === "unmute" || kind === "deafen" || kind === "stream-start" || kind === "stream-stop" || kind === "ring") && state.audioSettings?.soundVoice === false) return;
-    const evKey = kind === "unmute" ? "mute" : kind;
+    const evKey = kind === "unmute" ? "mute" : ((kind === "dm-message" || kind === "message_received") ? "message" : kind);
     if (state.audioSettings?.soundEvents && state.audioSettings.soundEvents[evKey] === false) return;
+  }
+  if (opts?.viaNotificationManager && typeof SancordSoundManager !== "undefined") {
+    return;
   }
   try {
     if (!uiAudioCtx) {
@@ -422,9 +446,23 @@ function playUiSound(kind, opts = {}) {
     }
     const now = uiAudioCtx.currentTime;
 
-    const volMult = Math.max(0, Math.min(1.5, (state.audioSettings?.uiVolume ?? 100) / 100));
+    const rawVol = state.audioSettings?.uiVolume ?? 100;
+    const volMult = Math.max(0, Math.min(1.5, rawVol / 100));
     if (volMult === 0 && !forcePreview) return;
     const effectiveVol = volMult || 0.7;
+
+    if ((kind === "dm-message" || kind === "message" || kind === "message_received") && typeof SancordSoundManager !== "undefined" && typeof SancordSoundManager.play === "function") {
+      SancordSoundManager.play("message_received", {
+        volume: forcePreview ? Math.max(rawVol, 70) : rawVol,
+        ignoreCooldown: forcePreview,
+        fallbackFn: () => {
+          if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.synthesizeSancordDmChime === "function") {
+            SancordNotifications.synthesizeSancordDmChime(uiAudioCtx, effectiveVol);
+          }
+        },
+      });
+      return;
+    }
 
     const tone = (freq, startOffset, duration, vol = 0.08, type = "sine") => {
       const scaled = Math.max(0.002, vol * effectiveVol);
@@ -479,12 +517,24 @@ function playUiSound(kind, opts = {}) {
         tone(587.33, 0, 0.08, 0.07, "triangle");
         tone(880, 0.09, 0.14, 0.08, "triangle");
         break;
+      case "dm-message":
+        if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.synthesizeSancordDmChime === "function") {
+          SancordNotifications.synthesizeSancordDmChime(uiAudioCtx, effectiveVol);
+        } else {
+          tone(659.25, 0, 0.11, 0.065, "sine");
+          tone(880.0, 0.07, 0.15, 0.07, "sine");
+        }
+        break;
       case "mention":
-        tone(880, 0, 0.08, 0.08, "sine");
-        tone(1174.66, 0.08, 0.12, 0.08, "sine");
+        tone(880, 0, 0.08, 0.075, "sine");
+        tone(1174.66, 0.08, 0.12, 0.075, "sine");
         break;
       case "message":
-        tone(740, 0, 0.06, 0.035, "sine");
+        if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.synthesizeSancordDmChime === "function") {
+          SancordNotifications.synthesizeSancordDmChime(uiAudioCtx, effectiveVol * 0.85);
+        } else {
+          tone(740, 0, 0.06, 0.035, "sine");
+        }
         break;
     }
   } catch (_) {}
@@ -852,7 +902,7 @@ function syncActiveServerHeaderAndControls() {
   const srv = getActiveServer();
   const me = state.selfUser?.username;
   if (serverTitleEl && srv) {
-    serverTitleEl.textContent = srv.name || "Sancord";
+    serverTitleEl.textContent = srv.name || "Sanvo";
   }
   const canEdit = canUserEditServer(srv, me) && Boolean(srv?.owner_username || srv?.id !== "sancord");
   const isCustomNonOwner = Boolean(srv && srv.id !== "sancord" && !isServerOwner(srv, me));
@@ -1390,7 +1440,12 @@ async function handleServerMessage(msg) {
         break;
       }
       showUiToast(fbMsg);
-      if (action === "join_voice" && !ok) onJoinVoiceRejected();
+      if (action === "join_voice" && !ok) {
+        onJoinVoiceRejected();
+        if (typeof SancordVoiceSounds !== "undefined") SancordVoiceSounds.playLocal("voice_error");
+      } else if (action === "voice_state" && !ok && typeof SancordVoiceSounds !== "undefined") {
+        SancordVoiceSounds.playLocal("voice_error");
+      }
       if (action === "change_password") {
         const pwFb = document.getElementById("account-pw-feedback");
         if (ok) {
@@ -1436,6 +1491,7 @@ async function handleServerMessage(msg) {
       }
       renderVoiceChannels();
       renderMembersSidebar();
+      if (typeof SancordNotifications !== "undefined") SancordNotifications.renderRailUnreadDms();
       break;
     }
 
@@ -1457,6 +1513,7 @@ async function handleServerMessage(msg) {
         state.chatHistory[message.channel_id] = [];
       }
       if (state.chatHistory[message.channel_id].some((m) => m.id === message.id)) break;
+      if (typeof SancordNotifications !== "undefined" && message.id && typeof SancordNotifications.hasProcessedMessage === "function" && SancordNotifications.hasProcessedMessage(message.id)) break;
       if (message.author_id === state.selfUser?.id) noteOwnMessageForSlowmode(message.channel_id);
       clearUserTyping(message.channel_id, message.author_id);
       // Não lidas/menções/notificação; numa janela de histórico antiga não emenda a mensagem.
@@ -1480,10 +1537,13 @@ async function handleServerMessage(msg) {
       }
 
       if (!isOwnMessage(message)) {
-        // Fase 9: o nível de notificação do canal/servidor decide o som (static/js/polish.js).
-        const policy = notificationPolicy(message);
-        if (policy.sound) {
-          playUiSound(policy.mention ? "mention" : "message");
+        if (typeof SancordNotifications !== "undefined") {
+          SancordNotifications.handleIncomingSound(message);
+        } else {
+          const policy = notificationPolicy(message);
+          if (policy.sound) {
+            playUiSound(policy.mention ? "mention" : "message");
+          }
         }
       }
       break;
@@ -1508,10 +1568,15 @@ async function handleServerMessage(msg) {
 
     case "MessageDeleted": {
       const { channel_id, message_id } = payload;
+      let deletedMsg = null;
       if (state.chatHistory[channel_id]) {
+        deletedMsg = state.chatHistory[channel_id].find((m) => m.id === message_id) || null;
         state.chatHistory[channel_id] = state.chatHistory[channel_id].filter(
           (m) => m.id !== message_id
         );
+      }
+      if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.onMessageDeleted === "function") {
+        SancordNotifications.onMessageDeleted(channel_id, message_id, deletedMsg);
       }
       if (channel_id === getActiveTextChannelId()) {
         chatMessagesEl.querySelector(`[data-msg-id="${message_id}"]`)?.remove();
@@ -1526,10 +1591,19 @@ async function handleServerMessage(msg) {
     case "MessagesBulkDeleted": {
       const { channel_id, message_ids = [] } = payload;
       const idSet = new Set(message_ids);
+      const deletedById = new Map();
       if (state.chatHistory[channel_id]) {
+        for (const m of state.chatHistory[channel_id]) {
+          if (idSet.has(m.id)) deletedById.set(m.id, m);
+        }
         state.chatHistory[channel_id] = state.chatHistory[channel_id].filter(
           (m) => !idSet.has(m.id)
         );
+      }
+      if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.onMessageDeleted === "function") {
+        for (const id of message_ids) {
+          SancordNotifications.onMessageDeleted(channel_id, id, deletedById.get(id) || null);
+        }
       }
       if (channel_id === getActiveTextChannelId()) {
         renderChatMessages({ preserveScroll: true });
@@ -1717,18 +1791,47 @@ async function handleServerMessage(msg) {
     }
 
     case "DmCallIncoming": {
-      const { dm_id, voice_channel_id, from_username, from_color, from_avatar } = payload;
-      state.pendingIncomingCall = { dm_id, voice_channel_id, from_username };
-      if (dmCallToastAvatar) {
-        dmCallToastAvatar.style.background = from_color || "#5865f2";
-        dmCallToastAvatar.innerHTML = renderAvatarInner(from_username, from_avatar);
+      if (typeof showIncomingCallToast === "function") {
+        showIncomingCallToast(payload);
+      } else {
+        const { dm_id, voice_channel_id, from_username, from_color, from_avatar } = payload;
+        state.pendingIncomingCall = { dm_id, voice_channel_id, from_username };
+        if (dmCallToastAvatar) {
+          dmCallToastAvatar.style.background = from_color || "#5865f2";
+          dmCallToastAvatar.innerHTML = renderAvatarInner(from_username, from_avatar);
+        }
+        const callGroup = dm_id?.startsWith("gdm:") ? findGroupDm(dm_id) : null;
+        if (dmCallToastName) {
+          dmCallToastName.textContent = callGroup ? `${from_username} • ${groupDisplayName(callGroup)}` : from_username;
+        }
+        dmCallToast?.classList.remove("hidden");
+        startIncomingRing(voice_channel_id);
       }
-      const callGroup = dm_id?.startsWith("gdm:") ? findGroupDm(dm_id) : null;
-      if (dmCallToastName) {
-        dmCallToastName.textContent = callGroup ? `${from_username} • ${groupDisplayName(callGroup)}` : from_username;
-      }
-      dmCallToast?.classList.remove("hidden");
-      startIncomingRing(voice_channel_id);
+      break;
+    }
+
+    case "CallStateUpdated": {
+      if (typeof onCallStateUpdated === "function") onCallStateUpdated(payload);
+      break;
+    }
+
+    case "ActiveCallsSync": {
+      if (typeof onActiveCallsSync === "function") onActiveCallsSync(payload);
+      break;
+    }
+
+    case "CallAnswered": {
+      if (typeof onCallAnswered === "function") onCallAnswered(payload);
+      break;
+    }
+
+    case "CallRingTimeout": {
+      if (typeof onCallRingTimeout === "function") onCallRingTimeout(payload);
+      break;
+    }
+
+    case "CallCanceled": {
+      if (typeof onCallCanceled === "function") onCallCanceled(payload);
       break;
     }
 
@@ -1798,16 +1901,22 @@ async function handleServerMessage(msg) {
       const { peer } = payload;
       if (peer.id !== state.selfUser?.id && state.currentVoiceChannel === payload.channel_id) {
         clearUnansweredCallTimer();
-        playUiSound("join");
+        if (typeof SancordVoiceSounds !== "undefined") SancordVoiceSounds.stopOutgoingRing();
         await initiateOfferToPeer(peer.id);
       }
       break;
     }
 
     case "PeerLeftVoice": {
-      playUiSound("leave");
       closePeerConnection(payload.peer_id);
       renderVoiceStage();
+      break;
+    }
+
+    case "VoiceCueEvent": {
+      if (typeof SancordVoiceSounds !== "undefined") {
+        SancordVoiceSounds.handleSharedEvent(payload);
+      }
       break;
     }
 
@@ -1879,6 +1988,7 @@ async function handleServerMessage(msg) {
       const act = payload.activity || null;
       if (state.selfUser && state.selfUser.username?.toLowerCase() === targetLower) {
         state.selfUser.activity = act;
+        if (typeof onBoardEditorChanged === "function" && boardEditor?.draft) onBoardEditorChanged();
       }
       for (const u of state.users.values()) {
         if (u.username?.toLowerCase() === targetLower) u.activity = act;
@@ -1892,6 +2002,7 @@ async function handleServerMessage(msg) {
         visitedProfileBase = { ...visitedProfileBase, activity: act };
         const sk = visitedProfileBase.status_kind || (visitedProfileBase.online ? "online" : "offline");
         populateProfileActivity(visitedProfileBase, payload.user_id, sk);
+        if (typeof refreshVisitedBoardActivity === "function") refreshVisitedBoardActivity(act);
       }
       break;
     }
@@ -1993,15 +2104,98 @@ async function refreshAudioDeviceLists() {
   } catch (_) {}
 }
 
+const NS_MODE_LABELS = {
+  auto: "Automático",
+  light: "Leve",
+  standard: "Padrão",
+  strong: "Forte",
+  off: "Desligado",
+};
+const NS_MODE_DESCS = {
+  auto: "Ajusta a intensidade automaticamente de acordo com seu ambiente.",
+  light: "Preserva ao máximo a naturalidade da voz em ambientes mais silenciosos.",
+  standard: "Equilíbrio entre voz natural e redução eficiente de ruído.",
+  strong: "Maior redução para ambientes barulhentos (ventilador, teclado, rua).",
+  off: "Bypass verdadeiro: não aplica supressão de ruído.",
+};
+
+function currentNoiseSuppressionMode() {
+  const raw = state.audioSettings?.noiseSuppressionMode;
+  if (typeof SancordVoiceDspCore !== "undefined") return SancordVoiceDspCore.sanitizeMode(raw, "auto");
+  return NS_MODE_LABELS[raw] ? raw : "auto";
+}
+
+function updateNoiseSuppressionUi() {
+  const mode = currentNoiseSuppressionMode();
+  const sel = document.getElementById("dsp-ns-mode");
+  const desc = document.getElementById("dsp-ns-mode-desc");
+  const note = document.getElementById("dsp-ns-strong-note");
+  const nsPill = document.getElementById("mic-ns-pill");
+  const abBtn = document.getElementById("mic-test-ab-btn");
+  if (sel) sel.value = mode;
+  if (desc) desc.textContent = NS_MODE_DESCS[mode] || NS_MODE_DESCS.auto;
+  if (note) note.classList.toggle("hidden", mode !== "strong");
+  if (nsPill) {
+    const abRaw = Boolean(state.micTestActive && state.micTestAbRaw);
+    const active = mode !== "off" && !abRaw;
+    nsPill.textContent = abRaw
+      ? "A/B: Sem supressão (bruto)"
+      : active
+        ? `Supressão ativa · ${NS_MODE_LABELS[mode]}`
+        : "Supressão desligada";
+    nsPill.classList.toggle("is-active", active);
+  }
+  if (abBtn) {
+    abBtn.classList.toggle("hidden", !state.micTestActive);
+    const raw = Boolean(state.micTestAbRaw);
+    abBtn.setAttribute("aria-pressed", String(raw));
+    abBtn.textContent = raw ? "Comparar A/B: Sem supressão (bruto)" : "Comparar A/B: Com supressão";
+  }
+}
+
+function renderDspDiagnostics(diag) {
+  const vadPill = document.getElementById("mic-vad-pill");
+  const clipPill = document.getElementById("mic-clip-pill");
+  const devBox = document.getElementById("dsp-dev-diagnostics");
+  if (vadPill && diag) {
+    vadPill.textContent = diag.voiceDetected ? "Voz detectada" : "Silêncio";
+    vadPill.classList.toggle("is-voice", Boolean(diag.voiceDetected));
+  }
+  if (clipPill && diag) {
+    clipPill.classList.toggle("hidden", !diag.clipping);
+  }
+  if (devBox) {
+    const showDev = Boolean(state.audioSettings?.developerMode && diag);
+    devBox.classList.toggle("hidden", !showDev);
+    if (showDev) {
+      const autoPct = diag.effectiveIntensity != null ? ` (auto ${Math.round(diag.effectiveIntensity * 100)}%)` : "";
+      devBox.textContent =
+        `DSP · ${diag.sampleRate} Hz · frame ${diag.frameSize} (hop ${diag.hopSize}, ${diag.latencyMs} ms) · modo ${diag.mode}${autoPct}` +
+        ` · noise floor ${diag.noiseFloorDb} dB · VAD ${Math.round(diag.vadProb * 100)}%` +
+        ` · proc ${diag.processMs} ms · overruns ${diag.overruns}`;
+    }
+  }
+}
+
 function applyDspParametersRealtime() {
+  updateNoiseSuppressionUi();
   if (!state.dsp) return;
-  const { ctx, highpassNode, micGainNode, compressorNode, loopGainNode } = state.dsp;
+  const { ctx, highpassNode, micGainNode, compressorNode, loopGainNode, nsNode } = state.dsp;
   const now = ctx.currentTime;
-  highpassNode.frequency.setTargetAtTime(state.audioSettings.highpass ? 85 : 10, now, 0.02);
+  const mode = currentNoiseSuppressionMode();
+  const abRaw = Boolean(state.micTestActive && state.micTestAbRaw);
+  // 70 Hz preserva graves naturais da voz masculina enquanto remove batidas/hum.
+  highpassNode.frequency.setTargetAtTime(state.audioSettings.highpass && !abRaw ? 70 : 10, now, 0.02);
   micGainNode.gain.setTargetAtTime((state.audioSettings.micGain || 100) / 100, now, 0.02);
-  compressorNode.threshold.setTargetAtTime(state.audioSettings.compressor ? -24 : 0, now, 0.02);
-  compressorNode.ratio.setTargetAtTime(state.audioSettings.compressor ? 6 : 1, now, 0.02);
+  compressorNode.threshold.setTargetAtTime(state.audioSettings.compressor && !abRaw ? -18 : 0, now, 0.02);
+  compressorNode.ratio.setTargetAtTime(state.audioSettings.compressor && !abRaw ? 3.5 : 1, now, 0.02);
   loopGainNode.gain.setTargetAtTime(state.micTestActive ? 1.0 : 0.0, now, 0.02);
+  if (nsNode?.port) {
+    try {
+      nsNode.port.postMessage({ type: "setMode", mode });
+      nsNode.port.postMessage({ type: "setAbBypassRaw", value: abRaw });
+    } catch (_) {}
+  }
 }
 
 function teardownAudioDsp() {
@@ -2049,10 +2243,19 @@ async function createLocalAudioStream(forceRebuild = false) {
   }
   const generation = state.audioCaptureGeneration || 0;
 
+  const nsMode = typeof currentNoiseSuppressionMode === "function"
+    ? currentNoiseSuppressionMode()
+    : (state.audioSettings?.noiseSuppressionMode || "auto");
+  const supportsWorklet = typeof AudioWorkletNode !== "undefined" &&
+    typeof (window.AudioContext || window.webkitAudioContext) !== "undefined" &&
+    Boolean((window.AudioContext || window.webkitAudioContext).prototype?.audioWorklet);
+
+  // Evita supressão dupla: quando o AudioWorklet do Sancord está ativo, desliga o NS do browser
+  // e mantém AEC e AGC independentes conforme configuração do usuário.
   const baseConstraints = {
     echoCancellation: Boolean(state.audioSettings.aec),
-    noiseSuppression: Boolean(state.audioSettings.aec),
-    autoGainControl: Boolean(state.audioSettings.aec),
+    noiseSuppression: !supportsWorklet && nsMode !== "off",
+    autoGainControl: Boolean(state.audioSettings.agc),
     channelCount: 1,
   };
   if (state.audioSettings.micDeviceId) {
@@ -2069,8 +2272,8 @@ async function createLocalAudioStream(forceRebuild = false) {
       rawStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: Boolean(state.audioSettings.aec),
-          noiseSuppression: Boolean(state.audioSettings.aec),
-          autoGainControl: Boolean(state.audioSettings.aec),
+          noiseSuppression: !supportsWorklet && nsMode !== "off",
+          autoGainControl: Boolean(state.audioSettings.agc),
         },
         video: false,
       });
@@ -2104,8 +2307,34 @@ async function createLocalAudioStream(forceRebuild = false) {
   const sourceNode = ctx.createMediaStreamSource(rawStream);
   const highpassNode = ctx.createBiquadFilter();
   highpassNode.type = "highpass";
-  highpassNode.frequency.value = state.audioSettings.highpass ? 85 : 10;
-  highpassNode.Q.value = 0.7;
+  highpassNode.frequency.value = state.audioSettings.highpass ? 70 : 10;
+  highpassNode.Q.value = 0.707;
+
+  // Supressor adaptativo de ruído em thread de áudio dedicada (AudioWorklet),
+  // com fallback seguro para passthrough se o Worklet falhar ou não existir.
+  let nsNode = ctx.createGain();
+  let nsWorkletActive = false;
+  if (ctx.audioWorklet && typeof AudioWorkletNode !== "undefined") {
+    try {
+      await ctx.audioWorklet.addModule("/js/voice-dsp-core.js");
+      await ctx.audioWorklet.addModule("/js/voice-dsp-worklet.js");
+      if ((state.audioCaptureGeneration || 0) !== generation) {
+        rawStream.getTracks().forEach((t) => t.stop());
+        ctx.close().catch(() => {});
+        return null;
+      }
+      nsNode = new AudioWorkletNode(ctx, "sancord-noise-suppressor", {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: { mode: nsMode },
+      });
+      nsWorkletActive = true;
+    } catch (err) {
+      console.warn("[SancordDSP] AudioWorklet indisponível, fallback para passthrough seguro:", err);
+      nsNode = ctx.createGain();
+    }
+  }
 
   const micGainNode = ctx.createGain();
   micGainNode.gain.value = (state.audioSettings.micGain || 100) / 100;
@@ -2114,12 +2343,13 @@ async function createLocalAudioStream(forceRebuild = false) {
   analyserNode.fftSize = 512;
   analyserNode.smoothingTimeConstant = 0.3;
 
+  // Compressor suave pós-supressão (não amplifica ruído nem bombeia).
   const compressorNode = ctx.createDynamicsCompressor();
-  compressorNode.threshold.value = state.audioSettings.compressor ? -24 : 0;
-  compressorNode.knee.value = 12;
-  compressorNode.ratio.value = state.audioSettings.compressor ? 6 : 1;
-  compressorNode.attack.value = 0.003;
-  compressorNode.release.value = 0.15;
+  compressorNode.threshold.value = state.audioSettings.compressor ? -18 : 0;
+  compressorNode.knee.value = 16;
+  compressorNode.ratio.value = state.audioSettings.compressor ? 3.5 : 1;
+  compressorNode.attack.value = 0.005;
+  compressorNode.release.value = 0.14;
 
   const gateGainNode = ctx.createGain();
   gateGainNode.gain.value = 1.0;
@@ -2128,8 +2358,10 @@ async function createLocalAudioStream(forceRebuild = false) {
   const loopGainNode = ctx.createGain();
   loopGainNode.gain.value = state.micTestActive ? 1.0 : 0.0;
 
+  // Ordem do pipeline: Captura (AEC/AGC) -> Passa-alta 70Hz -> Supressor Adaptativo -> Ganho -> Medidor -> Compressor -> Gate auxiliar -> Opus
   sourceNode.connect(highpassNode);
-  highpassNode.connect(micGainNode);
+  highpassNode.connect(nsNode);
+  nsNode.connect(micGainNode);
   micGainNode.connect(analyserNode);
   analyserNode.connect(compressorNode);
   compressorNode.connect(gateGainNode);
@@ -2143,6 +2375,10 @@ async function createLocalAudioStream(forceRebuild = false) {
     rawStream,
     sourceNode,
     highpassNode,
+    nsNode,
+    nsWorkletActive,
+    nsFallback: !nsWorkletActive,
+    lastDiagnostics: null,
     micGainNode,
     analyserNode,
     compressorNode,
@@ -2153,6 +2389,21 @@ async function createLocalAudioStream(forceRebuild = false) {
     lastOpenAt: performance.now(),
     meterTimer: null,
   };
+
+  if (nsWorkletActive && nsNode.port) {
+    nsNode.port.onmessage = (event) => {
+      if (state.dsp !== dspObj) return;
+      const msg = event?.data;
+      if (!msg) return;
+      if (msg.type === "diagnostics") {
+        dspObj.lastDiagnostics = msg.data;
+        renderDspDiagnostics(msg.data);
+      } else if (msg.type === "fallback") {
+        dspObj.nsFallback = true;
+        console.warn("[SancordDSP] Fallback ativado durante processamento:", msg.error);
+      }
+    };
+  }
 
   dspObj.meterTimer = setInterval(() => {
     if (!state.dsp || state.dsp !== dspObj) return;
@@ -2289,12 +2540,22 @@ async function joinVoiceChannel(channelId, friendlyLabel = null) {
   // O servidor começa cada entrada como "não silenciado": reenvia o estado local.
   if (state.muted || state.deafened) syncVoiceStateWithServer();
   startUnansweredCallTimer(channelId);
-  playUiSound("join");
+  if (typeof SancordVoiceSounds !== "undefined") {
+    const existingCall = state.activeCalls?.get?.(channelId);
+    const outgoingPrivate =
+      isPrivateVoiceId(channelId) &&
+      !existingCall &&
+      (typeof aloneInCall === "function" ? aloneInCall(channelId) : true);
+    SancordVoiceSounds.onEnteredVoiceSession(channelId, { isOutgoingPrivateCall: outgoingPrivate });
+  } else {
+    playUiSound("join");
+  }
   updateSelfProfileUI();
   updateQuickKrispBtnUI();
   renderVoiceChannels();
   renderVoiceStage();
   updateDmCallButtonUI();
+  if (typeof renderPrivateCallBanner === "function") renderPrivateCallBanner();
 }
 
 /** O palco da call só aparece onde ela acontece: no servidor do canal de voz, ou na
@@ -2340,7 +2601,12 @@ function leaveVoiceChannel({ silent = false } = {}) {
   if (!state.micTestActive) releaseLocalAudioStream();
   if (!state.currentVoiceChannel) return;
 
-  if (!silent) playUiSound("leave");
+  const wasPrivateCall = isPrivateVoiceId(state.currentVoiceChannel);
+  if (typeof SancordVoiceSounds !== "undefined") {
+    SancordVoiceSounds.onLeftVoiceSession({ wasPrivateCall, silent });
+  } else if (!silent) {
+    playUiSound("leave");
+  }
   clearUnansweredCallTimer();
   stopVoicePingMonitor();
   stopVoiceCallTimer();
@@ -2387,7 +2653,20 @@ function formatCallDuration(ms) {
 }
 
 function updateVoiceCallTimer() {
-  if (!voiceCallTimerEl || !state.voiceCallStartedAt) return;
+  if (!voiceCallTimerEl) return;
+  const ch = state.currentVoiceChannel;
+  if (ch && isPrivateVoiceId(ch)) {
+    const call = state.activeCalls?.get?.(ch);
+    if (call && call.state === "RINGING") {
+      voiceCallTimerEl.textContent = "Chamando...";
+      return;
+    }
+    if (call && call.state === "WAITING_ACTIVE") {
+      voiceCallTimerEl.textContent = "Aguardando...";
+      return;
+    }
+  }
+  if (!state.voiceCallStartedAt) return;
   voiceCallTimerEl.textContent = formatCallDuration(Date.now() - state.voiceCallStartedAt);
 }
 
@@ -2912,7 +3191,6 @@ async function publishScreenStream(screenStream, profile, channelId = state.curr
   state.screenSharing = true;
   shareScreenBtn?.classList.add("sharing");
   if (screenBtnLabel) screenBtnLabel.textContent = "Parar Tela";
-  playUiSound("stream-start");
 
   const videoTrack = screenStream.getVideoTracks()[0];
   if (videoTrack) {
@@ -3350,9 +3628,6 @@ async function stopScreenSharing(notifyServer = true) {
   state.screenSharing = false;
   shareScreenBtn?.classList.remove("sharing");
   if (screenBtnLabel) screenBtnLabel.textContent = "Tela";
-  if (notifyServer) {
-    playUiSound("stream-stop");
-  }
 
   const peerIds = [];
   for (const [peerId, peerEntry] of state.peers.entries()) {
@@ -3407,7 +3682,6 @@ async function toggleCamera() {
     refreshAudioDeviceLists();
     toggleCameraBtn?.classList.add("sharing");
     if (cameraBtnLabel) cameraBtnLabel.textContent = "Parar Câm";
-    playUiSound("stream-start");
 
     const camTrack = camStream.getVideoTracks()[0];
     if (camTrack) {
@@ -3433,7 +3707,7 @@ async function toggleCamera() {
     console.warn("Não foi possível acessar a câmera:", err);
     if (canPublishVideo(channelId, "camera", requestId)) {
       await stopCamera(true);
-      showErrorToast("Não foi possível acessar sua câmera. Confira o dispositivo e a permissão no Sancord.");
+      showErrorToast("Não foi possível acessar sua câmera. Confira o dispositivo e a permissão no Sanvo.");
     }
   } finally {
     if ((state.cameraRequestId || 0) === requestId) state.cameraStarting = false;
@@ -3452,9 +3726,6 @@ async function stopCamera(notifyServer = true) {
   state.cameraOn = false;
   toggleCameraBtn?.classList.remove("sharing");
   if (cameraBtnLabel) cameraBtnLabel.textContent = "Vídeo";
-  if (notifyServer) {
-    playUiSound("stream-stop");
-  }
 
   const peerIds = [];
   for (const [peerId, peerEntry] of state.peers.entries()) {
@@ -3578,7 +3849,11 @@ function updateAudioControlButtonsUI() {
 toggleMuteBtn.addEventListener("click", () => {
   state.muted = !state.muted;
   updateAudioControlButtonsUI();
-  playUiSound(state.muted ? "mute" : "unmute");
+  if (typeof SancordVoiceSounds !== "undefined") {
+    SancordVoiceSounds.playLocal(state.muted ? "mute_on" : "mute_off", { ignoreCooldown: true });
+  } else {
+    playUiSound(state.muted ? "mute" : "unmute");
+  }
   applyLocalMuteState();
   syncVoiceStateWithServer();
 });
@@ -3587,7 +3862,11 @@ toggleDeafenBtn.addEventListener("click", () => {
   state.deafened = !state.deafened;
   if (state.deafened) state.muted = true;
   updateAudioControlButtonsUI();
-  playUiSound(state.deafened ? "mute" : "unmute");
+  if (typeof SancordVoiceSounds !== "undefined") {
+    SancordVoiceSounds.playLocal(state.deafened ? "deafen_on" : "deafen_off", { ignoreCooldown: true });
+  } else {
+    playUiSound(state.deafened ? "deafen" : "unmute");
+  }
   applyLocalMuteState();
   syncVoiceStateWithServer();
 });
@@ -3649,62 +3928,62 @@ const AVATAR_DECORATIONS = [
   { id: "static-cyber-hud", name: "Mira Tática HUD", kind: "static" },
   { id: "static-crimson", name: "Rubi Gótico", kind: "static" },
   { id: "static-diamond", name: "Diamante Glacial", kind: "static" },
-  { id: "static-blurple", name: "Brasão Sancord", kind: "static" },
+  { id: "static-blurple", name: "Brasão Sanvo", kind: "static" },
   { id: "static-emerald", name: "Vinha Esmeralda", kind: "static" },
   { id: "static-angel", name: "Pérola Celestial", kind: "static" },
 ];
 
 const PROFILE_EFFECTS = [
   { id: "none", name: "Nenhum", desc: "Cartão limpo sem efeito sobreposto" },
-  { id: "embers", name: "🔥 Brasas Carmesim", desc: "Faíscas ardentes subindo" },
-  { id: "sparkles", name: "✨ Poeira Estelar", desc: "Estrelas mágicas cintilantes" },
-  { id: "sakura", name: "🌸 Chuva de Sakura", desc: "Pétalas de cerejeira caindo" },
-  { id: "matrix", name: "💚 Código Matrix", desc: "Grade digital em movimento" },
-  { id: "lightning", name: "⚡ Tempestade Arcana", desc: "Relâmpagos pulsantes no cartão" },
-  { id: "snow", name: "❄️ Neve Ártica", desc: "Flocos suaves flutuando" },
-  { id: "confetti", name: "🎉 Festa Confete", desc: "Chuva colorida comemorativa" },
-  { id: "cyber", name: "🌐 Scan Cyberpunk", desc: "Linhas holográficas futuristas" },
-  { id: "hellfire", name: "🌋 Inferno Rubro", desc: "Brilho incandescente na base" },
-  { id: "galaxy", name: "🌌 Nebulosa Rotativa", desc: "Luz cósmica girando suave" },
-  { id: "glitch", name: "📺 Sinal Glitch VHS", desc: "Distorção elétrica retrô" },
-  { id: "aurora", name: "🌈 Aurora Boreal", desc: "Ondas luminosas suaves" },
-  { id: "core-signal", name: "Sinal Core", desc: "Dois traços de luz percorrem as bordas", requiresCatalog: true },
-  { id: "star-trail", name: "Rastro Celeste", desc: "Um rastro cruzando o alto do cartão", requiresCatalog: true },
-  { id: "circuit-boot", name: "Circuito de Entrada", desc: "Linhas de circuito ganham forma nos cantos", requiresCatalog: true },
-  { id: "petal-drift", name: "Brisa de Pétalas", desc: "Pétalas passam suavemente pela borda", requiresCatalog: true },
-  { id: "polar-ribbon", name: "Fita Polar", desc: "Luz fria desliza como uma fita", requiresCatalog: true },
+  { id: "embers", name: "Brasas da Forja", desc: "Calor ascendente e faíscas incandescentes em dois planos" },
+  { id: "sparkles", name: "Poeira Estelar", desc: "Estrelas cintilantes suaves" },
+  { id: "sakura", name: "Chuva de Sakura", desc: "Pétalas de cerejeira caindo" },
+  { id: "matrix", name: "Código Digital", desc: "Grade digital em movimento" },
+  { id: "lightning", name: "Tempestade Arcana", desc: "Relâmpagos pulsantes no cartão" },
+  { id: "snow", name: "Neve Ártica", desc: "Flocos suaves flutuando" },
+  { id: "confetti", name: "Festa Confete", desc: "Chuva colorida comemorativa" },
+  { id: "cyber", name: "Scan Holográfico", desc: "Linhas holográficas futuristas" },
+  { id: "hellfire", name: "Inferno Rubro", desc: "Brilho incandescente na base" },
+  { id: "galaxy", name: "Nebulosa Rotativa", desc: "Luz cósmica girando suave" },
+  { id: "glitch", name: "Sinal VHS", desc: "Distorção elétrica retrô" },
+  { id: "aurora", name: "Aurora Boreal", desc: "Ondas luminosas suaves" },
+  { id: "core-signal", name: "Inicialização Sanvo", desc: "Varredura laser, traços geométricos e pulso central em camadas", requiresCatalog: true },
+  { id: "star-trail", name: "Travessia Cósmica", desc: "Constelações, cometas duplos e supernova suave", requiresCatalog: true },
+  { id: "circuit-boot", name: "Varredura Digital HUD", desc: "Grade tática, rotas de circuito e travamento nos cantos", requiresCatalog: true },
+  { id: "petal-drift", name: "Vento de Cerejeira", desc: "Pétalas em dois planos de profundidade trazidas pelo vento", requiresCatalog: true },
+  { id: "polar-ribbon", name: "Véu da Aurora", desc: "Cortinas de aurora polar e estrelas de gelo", requiresCatalog: true },
   { id: "pixel-assembly", name: "Montagem de Pixels", desc: "Pixels se agrupam e desaparecem", requiresCatalog: true },
   { id: "gravity-well", name: "Poço de Luz", desc: "Pontos de luz se recolhem em uma órbita", requiresCatalog: true },
 ];
 
 const NAMEPLATES = [
   { id: "none", name: "Sem placa", desc: "Fundo padrão da lista" },
-  { id: "crimson", name: "🩸 Carmesim Sombrio", desc: "Gradiente vermelho escuro" },
-  { id: "nebula", name: "🌌 Nebulosa Roxa", desc: "Brilho espacial roxo e azul" },
-  { id: "aurora", name: "🌿 Aurora Ciano", desc: "Faixa verde e azul suave" },
-  { id: "sakura", name: "🌸 Sakura Suave", desc: "Tons rosados vibrantes" },
-  { id: "gold", name: "👑 Ouro Real", desc: "Faixa dourada elegante" },
-  { id: "cyber", name: "⚡ Grade Cyber", desc: "Ciano elétrico com azul neon" },
-  { id: "hellfire", name: "🔥 Chamas Rubras", desc: "Laranja e vermelho intenso" },
-  { id: "frost", name: "❄️ Gelo Ártico", desc: "Brilho azul cristalino" },
-  { id: "void", name: "🕳️ Vazio Cósmico", desc: "Índigo noturno profundo" },
-  { id: "toxic", name: "☢️ Tóxico Neon", desc: "Lima e esmeralda vibrante" },
-  { id: "synthwave", name: "🌆 Synthwave Retrô", desc: "Magenta e pôr do sol" },
-  { id: "core-stripe", desc: "Faixa violeta com um brilho que cruza a borda", requiresCatalog: true },
-  { id: "circuit-weave", desc: "Trama de linhas ciano", requiresCatalog: true },
-  { id: "starlit-silt", desc: "Pontos de luz em um fundo violeta", requiresCatalog: true },
-  { id: "twilight-garden", desc: "Pétalas em degradê rosado", requiresCatalog: true },
-  { id: "gold-leaf", desc: "Faixa dourada discreta", requiresCatalog: true },
+  { id: "crimson", name: "Carmesim Sombrio", desc: "Gradiente vermelho escuro" },
+  { id: "nebula", name: "Nebulosa Roxa", desc: "Brilho espacial roxo e azul" },
+  { id: "aurora", name: "Aurora Ciano", desc: "Faixa verde e azul suave" },
+  { id: "sakura", name: "Sakura Suave", desc: "Tons rosados vibrantes" },
+  { id: "gold", name: "Ouro Real", desc: "Faixa dourada elegante" },
+  { id: "cyber", name: "Grade Cyber", desc: "Ciano elétrico com azul neon" },
+  { id: "hellfire", name: "Chamas Rubras", desc: "Laranja e vermelho intenso" },
+  { id: "frost", name: "Gelo Ártico", desc: "Brilho azul cristalino" },
+  { id: "void", name: "Vazio Cósmico", desc: "Índigo noturno profundo" },
+  { id: "toxic", name: "Tóxico Neon", desc: "Lima e esmeralda vibrante" },
+  { id: "synthwave", name: "Synthwave Retrô", desc: "Magenta e pôr do sol" },
+  { id: "core-stripe", desc: "Facetas cristalinas Sanvo Core e telemetria lateral", requiresCatalog: true },
+  { id: "circuit-weave", desc: "Trilhas de circuito PCB e núcleo ciano à direita", requiresCatalog: true },
+  { id: "starlit-silt", desc: "Crescente astral e constelação cintilante", requiresCatalog: true },
+  { id: "twilight-garden", desc: "Ramo ilustrado de cerejeira com flores em balanço suave", requiresCatalog: true },
+  { id: "gold-leaf", desc: "Brasão real em ouro gravado com diamante lapidado", requiresCatalog: true },
   { id: "retro-horizon", desc: "Linhas de horizonte em cobre e rosa", requiresCatalog: true },
-  { id: "frost-vein", desc: "Veios de gelo em azul claro", requiresCatalog: true },
-  { id: "ember-line", desc: "Reflexo âmbar em movimento", requiresCatalog: true },
-  { id: "tide-glass", desc: "Reflexo turquesa como vidro sobre a água", requiresCatalog: true },
+  { id: "frost-vein", desc: "Cristais polares facetados com brilho glacial", requiresCatalog: true },
+  { id: "ember-line", desc: "Veios de obsidiana e brasas ascendentes", requiresCatalog: true },
+  { id: "tide-glass", desc: "Ondas abissais em vidro marinho e bolhas nacaradas", requiresCatalog: true },
 ];
 
 const CLASSIC_NAME_STYLES = ["gta", "neon", "chrome", "gradient", "fire", "ice", "sakura", "retro", "gothic", "toxic", "royal"];
-const NEW_NAME_STYLES = ["modern", "rounded", "mono", "outline", "glow", "prism", "holographic", "custom-gradient"];
+const NEW_NAME_STYLES = ["modern", "rounded", "mono", "editorial", "bubble", "cyber", "fantasy", "outline", "glow", "prism", "holographic", "gummy", "ink", "cosmic", "custom-gradient"];
 const NAME_STYLE_IDS = new Set([...CLASSIC_NAME_STYLES, ...NEW_NAME_STYLES]);
-const PROFILE_NAME_FONTS = new Set(["gta", "retro", "gothic", "modern", "rounded", "mono"]);
+const PROFILE_NAME_FONTS = new Set(["gta", "retro", "gothic", "modern", "rounded", "mono", "editorial", "bubble", "cyber", "fantasy"]);
 
 function profileNameParts(id = "default") {
   const [font, effect] = (id || "default").split("+");
@@ -3885,17 +4164,27 @@ function getDecoSvgHtml(decoId) {
       `);
     case "static-crimson":
       return wrapSvgDeco(`
-        <circle cx="50" cy="50" r="42.5" fill="none" stroke="#dc2626" stroke-width="3.5"/>
-        <circle cx="50" cy="50" r="46" fill="none" stroke="#7f1d1d" stroke-width="1.5"/>
+        <circle cx="50" cy="50" r="42.5" fill="none" stroke="#991b1b" stroke-width="3.6"/>
+        <circle cx="50" cy="50" r="46.2" fill="none" stroke="#dc2626" stroke-width="1.3" stroke-dasharray="10 4"/>
+        <path d="M36 9l14-6 14 6-14 6Z" fill="#dc2626" stroke="#fecaca" stroke-width=".9"/>
+        <polygon points="50,86 55,92 50,98 45,92" fill="#ef4444" stroke="#fecaca" stroke-width=".9"/>
       `);
     case "static-diamond":
       return wrapSvgDeco(`
-        <circle cx="50" cy="50" r="42.5" fill="none" stroke="#67e8f9" stroke-width="3.2"/>
-        <polygon points="50,3 54,8 50,13 46,8" fill="#e0f2fe"/>
-        <polygon points="50,87 54,92 50,97 46,92" fill="#e0f2fe"/>
+        <circle cx="50" cy="50" r="42.5" fill="none" stroke="#38bdf8" stroke-width="2.6"/>
+        <circle cx="50" cy="50" r="46" fill="none" stroke="#bae6fd" stroke-width="1.1" stroke-dasharray="6 4"/>
+        <polygon points="50,1 55,8 50,15 45,8" fill="#e0f2fe" stroke="#0284c7" stroke-width=".9"/>
+        <polygon points="50,85 55,92 50,99 45,92" fill="#e0f2fe" stroke="#0284c7" stroke-width=".9"/>
+        <polygon points="1,50 8,45 15,50 8,55" fill="#7dd3fc" stroke="#e0f2fe" stroke-width=".8"/>
+        <polygon points="85,50 92,45 99,50 92,55" fill="#7dd3fc" stroke="#e0f2fe" stroke-width=".8"/>
       `);
     case "static-blurple":
-      return wrapSvgDeco(`<circle cx="50" cy="50" r="42.5" fill="none" stroke="#5865f2" stroke-width="3.6"/>`);
+      return wrapSvgDeco(`
+        <circle cx="50" cy="50" r="43" fill="none" stroke="#6366f1" stroke-width="3"/>
+        <path d="M16 74c9 14 22 20 34 20s25-6 34-20" fill="none" stroke="#a5b4fc" stroke-width="1.6" stroke-linecap="round"/>
+        <polygon points="50,2 56,9 50,16 44,9" fill="#818cf8" stroke="#e0e7ff" stroke-width=".9"/>
+        <polygon points="50,86 55,92 50,98 45,92" fill="#57dbcf" stroke="#e0e7ff" stroke-width=".8"/>
+      `);
     case "static-emerald":
       return wrapSvgDeco(`
         <circle cx="50" cy="50" r="42.5" fill="none" stroke="#10b981" stroke-width="3.2"/>
@@ -3903,7 +4192,12 @@ function getDecoSvgHtml(decoId) {
         <circle cx="86" cy="72" r="3" fill="#6ee7b7"/>
       `);
     case "static-angel":
-      return wrapSvgDeco(`<circle cx="50" cy="50" r="42.5" fill="none" stroke="#f8fafc" stroke-width="3.2"/>`);
+      return wrapSvgDeco(`
+        <circle cx="50" cy="50" r="42.5" fill="none" stroke="#e2e8f0" stroke-width="2.4"/>
+        <ellipse cx="50" cy="8" rx="18" ry="4" fill="none" stroke="#fef08a" stroke-width="2.2"/>
+        <path d="M12 58c-6-6-6-16 1-22m75 22c6-6 6-16-1-22" fill="none" stroke="#f8fafc" stroke-width="2.2" stroke-linecap="round"/>
+        <circle cx="50" cy="93" r="3.2" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+      `);
     default:
       return `<span class="deco-svg-layer" aria-hidden="true"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42.5" fill="none" stroke="#5865f2" stroke-width="3"/></svg></span>`;
   }
@@ -3928,6 +4222,9 @@ function applyNameplateChip(el, id) {
   el.classList.toggle("profile-nameplate-chip", Boolean(cls));
   el.dataset.plateClass = cls;
   if (cls) el.classList.add(cls);
+  if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.renderNameplateArt === "function") {
+    SancordCosmetics.renderNameplateArt(el, cls ? id : null);
+  }
 }
 
 function applyDecoToElement(el, decoId) {
@@ -3943,6 +4240,11 @@ function applyDecoToElement(el, decoId) {
     if (back) el.insertAdjacentHTML("afterbegin", back);
     const markup = profileAvatarArtLayer(decoId, "front") || getDecoSvgHtml(decoId);
     if (markup) el.insertAdjacentHTML("beforeend", markup);
+    if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.attachAvatarIdle === "function") {
+      SancordCosmetics.attachAvatarIdle(el, decoId);
+    }
+  } else if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.attachAvatarIdle === "function") {
+    SancordCosmetics.attachAvatarIdle(el, null);
   }
 }
 
@@ -4043,6 +4345,7 @@ function updateSelfProfileUI() {
       .forEach((c) => bar.classList.remove(c));
     const npCls = getNameplateClass(state.selfUser.nameplate_style);
     if (npCls) bar.classList.add(npCls);
+    if (typeof SancordCosmetics !== "undefined") SancordCosmetics.renderNameplateArt(bar, npCls ? state.selfUser.nameplate_style : null);
   }
 
   const sk = state.selfUser.status_kind || "online";
@@ -5057,10 +5360,14 @@ function logoutAccount() {
     }).catch(() => {});
   }
   clearStoredSession();
+  state.selfUser = null;
+  if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.clearSessionState === "function") {
+    SancordNotifications.clearSessionState();
+  }
   SancordOutbox.bind(null);
   SancordOfflineCache.clear();
   SancordConnection.stop();
-  showAuthScreen({ username: state.selfUser?.username || usernameInput.value });
+  showAuthScreen({ username: usernameInput.value });
 }
 
 settingsLogoutBtn?.addEventListener("click", async () => {
@@ -5524,7 +5831,7 @@ function populateProfileActivity(user, userId, sk) {
       cards.push({
         icon: sk === "online" || sk === "idle" || sk === "dnd" ? "🎮" : "🌙",
         title: STATUS_LABELS[sk] || "Offline",
-        sub: user ? "Ativo agora no servidor Sancord" : "Nenhuma atividade recente em jogo ou transmissão.",
+        sub: user ? "Ativo agora no servidor Sanvo" : "Nenhuma atividade recente em jogo ou transmissão.",
       });
     }
 
@@ -5535,7 +5842,7 @@ function populateProfileActivity(user, userId, sk) {
       if (richEl) profileActivityCardList.appendChild(richEl);
     }
     for (const c of cards) {
-      if (richAct && c.sub === "Ativo agora no servidor Sancord") continue;
+      if (richAct && c.sub === "Ativo agora no servidor Sanvo") continue;
       const row = document.createElement("div");
       row.className = "profile-activity-card";
       row.innerHTML = `
@@ -5646,25 +5953,26 @@ function openMemberProfilePopover(userId, fallbackMsg = null, { global = false }
   if (moreBlockLabel) {
     moreBlockLabel.textContent = state.blockedUsers.has(nameLower) ? "Desbloquear" : "Bloquear";
   }
+  const isSystemBotName = (n) => n === "Sanvo Bot" || n === "Sancord Bot"; // LEGACY COMPATIBILITY: aceita nome antigo do bot
   if (profileCardMemberSince) {
     const isSelf = state.selfUser?.username?.toLowerCase() === nameLower;
     profileCardMemberSince.textContent =
-      name === "Sancord Bot"
-        ? "Sistema do Sancord"
+      isSystemBotName(name)
+        ? "Sistema do Sanvo"
         : user?.created_at || (isSelf && state.selfUser?.created_at) || "Carregando…";
   }
 
   const rel = getRelationshipWith(name);
   if (profileCardFriendsSinceRow) {
     profileCardFriendsSinceRow.classList.toggle("hidden", rel !== "friend");
-    if (profileCardFriendsSince) profileCardFriendsSince.textContent = "Amigos no Sancord ✓";
+    if (profileCardFriendsSince) profileCardFriendsSince.textContent = "Amigos no Sanvo ✓";
   }
 
   renderProfileRoles(document.getElementById("profile-card-roles-list"), getUserServerRoles(activeSrv, name));
 
   if (profileCardNoteInput) {
     profileCardNoteInput.closest(".profile-info-block")?.classList.toggle("hidden",
-      name === "Sancord Bot" || nameLower === state.selfUser?.username?.toLowerCase());
+      isSystemBotName(name) || nameLower === state.selfUser?.username?.toLowerCase());
     profileCardNoteInput.value = getUserProfileNote(name);
   }
 
@@ -5682,7 +5990,7 @@ function openMemberProfilePopover(userId, fallbackMsg = null, { global = false }
 
   const isOtherRealUser =
     Boolean(name) &&
-    name !== "Sancord Bot" &&
+    !isSystemBotName(name) &&
     name.toLowerCase() !== state.selfUser?.username?.toLowerCase();
   if (profileCardActions) {
     profileCardActions.classList.toggle("hidden", !isOtherRealUser);
@@ -5757,7 +6065,7 @@ profileCardMoreMenu?.querySelectorAll("[data-profile-more]").forEach((btn) => {
       showUiToast(`Visualizando perfil principal de ${uname}`);
     } else if (act === "share") {
       const handle = `@${unameLower.replace(/\s+/g, "")}`;
-      copyTextSafe(`${uname} (${handle}) — Perfil no Sancord`, `Perfil de ${uname} copiado para compartilhar!`);
+      copyTextSafe(`${uname} (${handle}) — Perfil no Sanvo`, `Perfil de ${uname} copiado para compartilhar!`);
     } else if (act === "ignore") {
       if (state.ignoredUsers.has(unameLower)) {
         state.ignoredUsers.delete(unameLower);
@@ -5848,19 +6156,25 @@ applyAppThemeSettings();
 
 function updateQuickKrispBtnUI() {
   if (!quickKrispBtn) return;
-  const active = Boolean(state.audioSettings.noiseGate);
+  const mode = currentNoiseSuppressionMode();
+  const active = mode !== "off";
   quickKrispBtn.classList.toggle("active-ok", active);
   quickKrispBtn.title = active
-    ? "Supressão de Ruído (Ativo - clique para desativar)"
-    : "Supressão de Ruído (Desativado - clique para ativar)";
+    ? `Supressão de Ruído: ${NS_MODE_LABELS[mode]} (clique para desativar)`
+    : "Supressão de Ruído: Desligada (clique para ativar)";
 }
 
 quickKrispBtn?.addEventListener("click", () => {
-  state.audioSettings.noiseGate = !state.audioSettings.noiseGate;
+  const mode = currentNoiseSuppressionMode();
+  if (mode !== "off") {
+    state.audioSettings.lastActiveNsMode = mode;
+    state.audioSettings.noiseSuppressionMode = "off";
+  } else {
+    state.audioSettings.noiseSuppressionMode = state.audioSettings.lastActiveNsMode || "auto";
+  }
   state.audioSettings.voiceProfile = "custom";
   saveAudioSettings();
   updateQuickKrispBtnUI();
-  if (dspNoiseGateToggle) dspNoiseGateToggle.checked = state.audioSettings.noiseGate;
   applyDspParametersRealtime();
 });
 
@@ -5970,7 +6284,7 @@ const SETTINGS_TAB_TITLES = {
   updates: "Atualizações",
   advanced: "Avançado",
   diagnostics: "Diagnóstico",
-  about: "Sobre o Sancord",
+  about: "Sobre o Sanvo",
 };
 
 // Rascunho e Editor Completo de Perfil (Molduras Animadas/Estáticas, Banner/GIF, Tema, Nome, Efeito, Placa)
@@ -6145,6 +6459,7 @@ function refreshLiveProfilePreview() {
       .forEach((c) => openNameplatePickerBtn.classList.remove(c));
     const npCls = getNameplateClass(profileDraft.nameplate_style);
     if (npCls) openNameplatePickerBtn.classList.add(npCls);
+    if (typeof SancordCosmetics !== "undefined") SancordCosmetics.renderNameplateArt(openNameplatePickerBtn, npCls ? profileDraft.nameplate_style : null);
   }
 
   if (settingsNameShowcase) {
@@ -6334,10 +6649,17 @@ function syncSettingsModalFields() {
   if (dspHighpassToggle) dspHighpassToggle.checked = Boolean(s.highpass);
   if (dspCompressorToggle) dspCompressorToggle.checked = Boolean(s.compressor);
   if (dspAecToggle) dspAecToggle.checked = Boolean(s.aec);
+  const dspAgcEl = document.getElementById("dsp-agc");
+  if (dspAgcEl) dspAgcEl.checked = s.agc !== false;
   if (dspOpusHdToggle) dspOpusHdToggle.checked = Boolean(s.opusHd);
+  updateNoiseSuppressionUi();
   if (notifSoundMessagesToggle) notifSoundMessagesToggle.checked = s.soundMessages !== false;
   if (notifSoundVoiceToggle) notifSoundVoiceToggle.checked = s.soundVoice !== false;
   if (notifDesktopToggle) notifDesktopToggle.checked = Boolean(s.desktopNotif);
+  const notifTaskbarEl = document.getElementById("notif-taskbar-badge");
+  if (notifTaskbarEl) notifTaskbarEl.checked = s.notifTaskbarBadge !== false;
+  const notifDmRailEl = document.getElementById("notif-dm-rail-badge");
+  if (notifDmRailEl) notifDmRailEl.checked = s.notifDmBadges !== false;
   if (notifUiVolumeSlider) notifUiVolumeSlider.value = s.uiVolume ?? 100;
   if (notifUiVolumeValue) notifUiVolumeValue.textContent = `${s.uiVolume ?? 100}%`;
 
@@ -6676,7 +6998,7 @@ function openEffectOrNameplatePicker(mode) {
   layer.id = "picker-effect-layer";
   function renderEffectSample(id) {
     const user = { ...draftPreviewUser(), profile_effect: id };
-    const username = user.username || state.selfUser?.username || "Sancord";
+    const username = user.username || state.selfUser?.username || "Sanvo";
     renderCompactProfile(previewCard, user, user.display_name || username, username, true);
   }
   preview?.classList.toggle("hidden", mode !== "effect");
@@ -6865,6 +7187,9 @@ cameraQualitySelect?.addEventListener("change", (e) => {
 speakerDeviceSelect?.addEventListener("change", (e) => {
   state.audioSettings.speakerDeviceId = e.target.value;
   saveAudioSettings();
+  if (typeof SancordSoundManager !== "undefined") {
+    SancordSoundManager.applyOutputDevice(state.audioSettings.speakerDeviceId || "");
+  }
   document.querySelectorAll("#remote-audio-container audio").forEach((el) => {
     if (typeof el.setSinkId === "function") {
       el.setSinkId(state.audioSettings.speakerDeviceId || "").catch(() => {});
@@ -6903,11 +7228,14 @@ document.querySelectorAll('input[name="voice-profile"]').forEach((radio) => {
     const val = e.target.value;
     state.audioSettings.voiceProfile = val;
     if (val === "isolation") {
-      state.audioSettings.noiseGate = true;
+      state.audioSettings.noiseSuppressionMode = "auto";
+      state.audioSettings.noiseGate = false;
       state.audioSettings.highpass = true;
       state.audioSettings.compressor = true;
       state.audioSettings.aec = true;
+      state.audioSettings.agc = true;
     } else if (val === "studio") {
+      state.audioSettings.noiseSuppressionMode = "off";
       state.audioSettings.noiseGate = false;
       state.audioSettings.highpass = false;
       state.audioSettings.compressor = false;
@@ -6917,6 +7245,24 @@ document.querySelectorAll('input[name="voice-profile"]').forEach((radio) => {
     updateQuickKrispBtnUI();
     applyDspParametersRealtime();
   });
+});
+
+document.getElementById("dsp-ns-mode")?.addEventListener("change", (e) => {
+  const next = typeof SancordVoiceDspCore !== "undefined"
+    ? SancordVoiceDspCore.sanitizeMode(e.target.value, "auto")
+    : e.target.value;
+  state.audioSettings.noiseSuppressionMode = next;
+  if (next !== "off") state.audioSettings.lastActiveNsMode = next;
+  state.audioSettings.voiceProfile = "custom";
+  saveAudioSettings();
+  updateQuickKrispBtnUI();
+  applyDspParametersRealtime();
+});
+
+document.getElementById("mic-test-ab-btn")?.addEventListener("click", () => {
+  if (!state.micTestActive) return;
+  state.micTestAbRaw = !state.micTestAbRaw;
+  applyDspParametersRealtime();
 });
 
 document.querySelectorAll('input[name="input-mode"]').forEach((radio) => {
@@ -6935,12 +7281,14 @@ pttRecordBtn?.addEventListener("click", () => {
 async function toggleMicrophoneTest() {
   if (state.micTestActive) {
     state.micTestActive = false;
+    state.micTestAbRaw = false;
     micTestBtn.textContent = "Teste do microfone";
     applyDspParametersRealtime();
     if (!state.currentVoiceChannel) releaseLocalAudioStream();
     return;
   }
   state.micTestActive = true;
+  state.micTestAbRaw = false;
   const stream = await ensureLocalAudioStream();
   if (!stream) state.micTestActive = false;
   if (!state.micTestActive) return;
@@ -6954,6 +7302,7 @@ micTestBtn?.addEventListener("click", toggleMicrophoneTest);
   [dspHighpassToggle, "highpass", false],
   [dspCompressorToggle, "compressor", false],
   [dspAecToggle, "aec", true],
+  [document.getElementById("dsp-agc"), "agc", true],
   [dspOpusHdToggle, "opusHd", false],
 ].forEach(([el, key, needsRebuild]) => {
   el?.addEventListener("change", () => {
@@ -7501,22 +7850,28 @@ function updateDmCallButtonUI() {
     "hidden",
     !inDmView || state.currentVoiceChannel === getDmVoiceIdFromDmId(state.activeDmId)
   );
-  if (!inDmView) return;
+  if (!inDmView) {
+    if (typeof renderPrivateCallBanner === "function") renderPrivateCallBanner();
+    return;
+  }
 
   const dmVoiceId = getDmVoiceIdFromDmId(state.activeDmId);
   const inThisCall = state.currentVoiceChannel === dmVoiceId;
   const membersInCall = state.voiceMembers[dmVoiceId] || [];
+  const activeCall = state.activeCalls?.get?.(dmVoiceId);
+  const joinableCall = membersInCall.length > 0 || Boolean(activeCall && activeCall.state !== "ENDED");
 
   dmCallBtn.classList.toggle("in-call", inThisCall);
   if (dmCallBtnLabel) {
     if (inThisCall) {
       dmCallBtnLabel.textContent = "Desligar";
-    } else if (membersInCall.length > 0) {
+    } else if (joinableCall) {
       dmCallBtnLabel.textContent = "Entrar na Call";
     } else {
       dmCallBtnLabel.textContent = "Ligar";
     }
   }
+  if (typeof renderPrivateCallBanner === "function") renderPrivateCallBanner();
 }
 
 dmCallBtn?.addEventListener("click", () => {
@@ -7544,6 +7899,10 @@ document.getElementById("dm-video-call-btn")?.addEventListener("click", async ()
 
 dmCallAcceptBtn?.addEventListener("click", () => {
   const pending = state.pendingIncomingCall;
+  if (typeof answerIncomingCall === "function") {
+    answerIncomingCall(pending);
+    return;
+  }
   dmCallToast?.classList.add("hidden");
   state.pendingIncomingCall = null;
   stopIncomingRing();
@@ -7559,10 +7918,13 @@ dmCallAcceptBtn?.addEventListener("click", () => {
 
 dmCallDismissBtn?.addEventListener("click", () => {
   const pending = state.pendingIncomingCall;
+  if (typeof declineIncomingCall === "function") {
+    declineIncomingCall(pending);
+    return;
+  }
   dmCallToast?.classList.add("hidden");
   state.pendingIncomingCall = null;
   stopIncomingRing();
-  // Recusar avisa quem está ligando (antes só escondia o aviso aqui).
   if (pending?.voice_channel_id) sendWs("DeclineCall", { channel_id: pending.voice_channel_id });
 });
 
@@ -7572,18 +7934,28 @@ function updateHomeNotificationBadges() {
   for (const cnt of state.unreadDms.values()) {
     unreadTotal += cnt;
   }
-  const totalNotif = pendingCount + unreadTotal;
+  const railBadgesOn = state.audioSettings?.notifDmBadges !== false;
+  const fmt = typeof SancordNotifications !== "undefined"
+    ? SancordNotifications.formatUnreadCount
+    : (n) => (n > 99 ? "99+" : String(n));
 
+  if (typeof SancordNotifications !== "undefined") {
+    SancordNotifications.renderRailUnreadDms();
+  }
+
+  // Quando os avatares de DM não lidas aparecem logo abaixo do botão Início,
+  // a badge do próprio botão Início exibe apenas solicitações pendentes (sem duplicar).
+  const homeCount = railBadgesOn ? pendingCount : (pendingCount + unreadTotal);
   if (homeNotifBadge) {
-    homeNotifBadge.textContent = totalNotif;
-    homeNotifBadge.classList.toggle("hidden", totalNotif === 0);
+    homeNotifBadge.textContent = fmt(homeCount);
+    homeNotifBadge.classList.toggle("hidden", homeCount === 0);
   }
   if (friendsPendingBadge) {
-    friendsPendingBadge.textContent = pendingCount;
+    friendsPendingBadge.textContent = fmt(pendingCount);
     friendsPendingBadge.classList.toggle("hidden", pendingCount === 0);
   }
   if (friendsPendingPill) {
-    friendsPendingPill.textContent = pendingCount;
+    friendsPendingPill.textContent = fmt(pendingCount);
     friendsPendingPill.classList.toggle("hidden", pendingCount === 0);
   }
 }
@@ -7617,40 +7989,50 @@ function renderDmList() {
   }
   pinnedConvs.sort((a, b) => pinnedOrder.indexOf(a.dm_id) - pinnedOrder.indexOf(b.dm_id));
 
+  const fmtUnread = typeof SancordNotifications !== "undefined"
+    ? SancordNotifications.formatUnreadCount
+    : (n) => (n > 99 ? "99+" : String(n));
+
   const renderDmRow = (conv, isPinnedRow) => {
     const p = conv.peer;
     const sk = p.online ? p.status_kind || "online" : "invisible";
     const unread = state.unreadDms.get(conv.dm_id) || 0;
     const isActive = state.activeView === "home" && state.activeDmId === conv.dm_id;
     const isFav = Array.isArray(state.prefs?.favorite_dms) && state.prefs.favorite_dms.includes(conv.dm_id);
+    const isBot = Boolean(p.is_bot || p.username === "Sanvo Bot" || p.username === "Sancord Bot" || (Array.isArray(p.badges) && p.badges.includes("verified_bot")));
 
     const li = document.createElement("li");
     const dmMuted = typeof isMutedId === "function" && isMutedId(conv.dm_id);
-    li.className = `dm-item ${isActive ? "active" : ""}${dmMuted ? " is-muted" : ""}${isPinnedRow ? " is-pinned" : ""} ${getNameplateClass(p.nameplate_style)}`;
+    li.className = `dm-item ${isActive ? "active" : ""}${unread > 0 ? " is-unread" : ""}${dmMuted ? " is-muted" : ""}${isPinnedRow ? " is-pinned" : ""} ${getNameplateClass(p.nameplate_style)}`;
     const markers = [
       isPinnedRow && typeof SancordIcons !== "undefined" ? `<span class="dm-marker-icon" title="Fixada">${SancordIcons.html("pin")}</span>` : "",
       isFav && typeof SancordIcons !== "undefined" ? `<span class="dm-marker-icon is-fav" title="Favorita">${SancordIcons.html("star")}</span>` : "",
     ].join("");
+    const subText = conv.last_message || (isBot ? "App" : (p.online ? customStatusText(p) || STATUS_LABELS[sk] || "Online" : "Offline"));
     li.innerHTML = `
       <div class="dm-item-left">
-        <div class="user-avatar-wrap">
-          <div class="avatar" style="background: ${p.avatar_color}; width: 32px; height: 32px; font-size: 12px;">
+        <div class="user-avatar-wrap dm-avatar-wrap">
+          <div class="avatar dm-avatar" style="background: ${p.avatar_color};">
             ${renderAvatarInner(p.username, p.avatar_url, p.avatar_animated)}
           </div>
-          <span class="status-badge ${sk}" style="width: 10px; height: 10px; border-width: 2px;"></span>
+          <span class="status-badge ${sk} dm-status-dot"></span>
         </div>
         <div class="dm-item-meta">
-          <div class="dm-item-name">${escapeHtml(p.display_name || p.username)}</div>
-          <div class="dm-item-sub">${escapeHtml(conv.last_message || (p.online ? customStatusText(p) || STATUS_LABELS[sk] || "Online" : "Offline"))}</div>
+          <div class="dm-item-name-row">
+            <div class="dm-item-name">${escapeHtml(p.display_name || p.username)}</div>
+            ${isBot ? `<span class="dm-role-chip">APP</span>` : ""}
+          </div>
+          <div class="dm-item-sub">${escapeHtml(subText)}</div>
         </div>
       </div>
       <div class="dm-item-trailing">
         ${markers}
-        ${unread > 0 ? `<span class="dm-count-badge">${unread}</span>` : ""}
+        ${unread > 0 ? `<span class="dm-count-badge">${fmtUnread(unread)}</span>` : ""}
       </div>
     `;
     applyNameStyleToEl(li.querySelector(".dm-item-name"), p);
     applyDecoToElement(li.querySelector(".user-avatar-wrap"), p.avatar_decoration);
+    if (typeof SancordCosmetics !== "undefined" && p.nameplate_style) SancordCosmetics.renderNameplateArt(li, p.nameplate_style);
     li.addEventListener("click", () => {
       sendWs("OpenDm", { target_username: p.username });
     });
@@ -7877,6 +8259,8 @@ function buildFriendRow(f) {
     </div>
   `;
   applyNameStyleToEl(li.querySelector(".friend-display-name"), f);
+  applyDecoToElement(li.querySelector(".user-avatar-wrap"), f.avatar_decoration);
+  if (typeof SancordCosmetics !== "undefined" && f.nameplate_style) SancordCosmetics.renderNameplateArt(li, f.nameplate_style);
   const openFriendMenu = (x, y, anchor = null) => {
     const existingConv = (state.dmConversations || []).find(
       (c) => c?.peer?.username?.toLowerCase() === f.username.toLowerCase()
@@ -8140,7 +8524,7 @@ function renderAccountSessionsUI() {
       : "";
     info.innerHTML = `
       <div>
-        <strong>💻 Sancord (${escapeHtml(s.id.slice(0, 8))})</strong>${statusBadge}
+        <strong>💻 Sanvo (${escapeHtml(s.id.slice(0, 8))})</strong>${statusBadge}
       </div>
       <div class="settings-hint-text">
         Criada em ${escapeHtml(fmt(s.created_at))} • Última atividade: ${escapeHtml(fmt(s.last_seen_at))} • ${s.remember ? "Sessão longa (30 dias)" : "Sessão temporária (24 h)"}
@@ -8312,7 +8696,7 @@ exportSettingsBtn?.addEventListener("click", () => {
   const blob = new Blob([json], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `sancord-preferencias-${state.selfUser?.username || "usuario"}.json`;
+  a.download = `sanvo-preferencias-${state.selfUser?.username || "usuario"}.json`;
   a.click();
   showUiToast("Backup JSON exportado!");
 });
@@ -8347,7 +8731,7 @@ notifUiVolumeSlider?.addEventListener("input", (e) => {
   saveAudioSettings();
 });
 notifTestSoundBtn?.addEventListener("click", () => {
-  playUiSound("join");
+  playUiSound("dm-message", { forcePreview: true });
 });
 
 appearanceGlassSlider?.addEventListener("input", (e) => {

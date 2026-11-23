@@ -1,4 +1,6 @@
-# Distribuição e atualizações do Sancord
+# Distribuição e atualizações do Sanvo (legado: Sancord)
+
+> **Transição `Sancord` → `Sanvo`:** Os scripts de build e release (`scripts/build-desktop.ps1`, `scripts/package-release.ps1` e `.github/workflows/release.yml`) geram e assinam os artefatos oficiais do **Sanvo** (`Sanvo.exe`, `SanvoServer.exe`, `Sanvo-<versão>-windows-x64.zip`, `sanvo-update.json`, `sanvo-update.sig`) **e** as cópias de transição (`Sancord.exe`, `SancordServer.exe`, `Sancord-<versão>-windows-x64.zip`, `sancord-update.json`, `sancord-update.sig`) com a mesma chave Ed25519 para que clientes antigos atualizem automaticamente para o Sanvo sem quebrar.
 
 ## Candidata local de homologação (18/11/2026)
 

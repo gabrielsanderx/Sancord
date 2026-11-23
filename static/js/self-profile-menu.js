@@ -156,6 +156,10 @@
       if (typeof closeSettingsModal === "function") closeSettingsModal();
       previousAccountBeforeAdd = null;
       if (state.selfUser?.username?.toLowerCase() !== account.username.toLowerCase()) {
+        state.selfUser = null;
+        if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.clearSessionState === "function") {
+          SancordNotifications.clearSessionState();
+        }
         SancordOutbox.bind(null);
         SancordOfflineCache.clear();
       } else SancordOutbox.suspend();
@@ -192,6 +196,10 @@
     }
     if (typeof leaveVoiceChannel === "function") leaveVoiceChannel();
     if (typeof closeSettingsModal === "function") closeSettingsModal();
+    if (typeof state !== "undefined") state.selfUser = null;
+    if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.clearSessionState === "function") {
+      SancordNotifications.clearSessionState();
+    }
     SancordOutbox.bind(null);
     SancordOfflineCache.clear();
     SancordConnection.stop();
@@ -731,12 +739,13 @@
     const vw = window.innerWidth || 1280;
     const vh = window.innerHeight || 720;
     const margin = 8;
+    const minTop = typeof SancordUI?.getTopbarSafeTop === "function" ? SancordUI.getTopbarSafeTop(margin) : (document.getElementById("sancord-native-titlebar") ? 38 : margin);
 
     menuEl.style.left = `${margin}px`;
     menuEl.style.bottom = `${Math.max(margin, vh - rect.top + 10)}px`;
     const menuRect = menuEl.getBoundingClientRect();
     const left = Math.min(Math.max(margin, rect.left), Math.max(margin, vw - menuRect.width - margin));
-    const maxBottom = Math.max(margin, vh - menuRect.height - margin);
+    const maxBottom = Math.max(margin, vh - menuRect.height - minTop);
     const bottom = Math.min(Math.max(margin, vh - rect.top + 10), maxBottom);
     menuEl.style.left = `${Math.round(left)}px`;
     menuEl.style.bottom = `${Math.round(bottom)}px`;
@@ -752,6 +761,7 @@
     const vw = window.innerWidth || 1280;
     const vh = window.innerHeight || 720;
     const margin = 8;
+    const minTop = typeof SancordUI?.getTopbarSafeTop === "function" ? SancordUI.getTopbarSafeTop(margin) : (document.getElementById("sancord-native-titlebar") ? 38 : margin);
     const menuRect = menuEl.getBoundingClientRect();
     const rowRect = anchorRow.getBoundingClientRect();
     const subRect = submenuEl.getBoundingClientRect();
@@ -762,10 +772,10 @@
     }
     let top = rowRect.top - 8;
     if (top + subRect.height + margin > vh) {
-      top = Math.max(margin, vh - subRect.height - margin);
+      top = Math.max(minTop, vh - subRect.height - margin);
     }
     submenuEl.style.left = `${Math.round(left)}px`;
-    submenuEl.style.top = `${Math.round(Math.max(margin, top))}px`;
+    submenuEl.style.top = `${Math.round(Math.max(minTop, top))}px`;
   }
 
   // ---------------------------------------------------------------------------
@@ -910,7 +920,8 @@
 
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (global) {
-    global.SancordSelfProfileMenu = api;
+    global.SanvoSelfProfileMenu = api;
+    global.SancordSelfProfileMenu = api; // LEGACY COMPATIBILITY
     global.toggleSelfProfileMenu = toggleSelfProfileMenu;
     global.closeSelfProfileMenu = closeSelfProfileMenu;
   }

@@ -3,11 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sancord</title>
+  <title>Sanvo</title>
   <link rel="icon" type="image/svg+xml" href="/sancord-icon.svg" />
   <link rel="stylesheet" href="/styles.css?v=22" />
   <!-- Design system e refatoração visual: camada final, depois de styles.css. -->
   <link rel="stylesheet" href="/ui.css?v=18" />
+  <link rel="stylesheet" href="/cosmetics/cosmetics.css?v=1" />
 </head>
 <body data-auth-pending>
   <div id="connection-banner" class="connection-banner hidden" role="status" aria-live="polite">
@@ -19,7 +20,7 @@
   <main id="offline-screen" class="auth-screen offline-screen hidden" aria-labelledby="offline-title">
     <section class="auth-card offline-card">
       <div class="offline-brand"><img src="/sancord-icon.svg" alt="" /><span data-ui-icon="signal" aria-hidden="true"></span></div>
-      <h1 id="offline-title">Conectando ao Sancord</h1>
+      <h1 id="offline-title">Conectando ao Sanvo</h1>
       <p>Vamos continuar tentando. O aplicativo abre assim que conectar.</p>
       <div class="offline-progress" role="status"><span aria-hidden="true"></span><strong data-offline-status>Reconectando…</strong></div>
       <button type="button" class="btn-secondary" data-connection-retry>Tentar novamente</button>
@@ -29,7 +30,7 @@
   <main id="login-modal" class="auth-screen hidden" aria-labelledby="auth-title" data-auth-mode="login">
     <section class="auth-card">
       <header class="auth-heading">
-        <div class="auth-brand"><img src="/sancord-icon.svg" alt="" /><span>Sancord</span></div>
+        <div class="auth-brand"><img src="/sancord-icon.svg" alt="" /><span>Sanvo</span></div>
         <h1 id="auth-title" data-i18n="auth.title">Bem-vindo de volta!</h1>
         <p id="auth-description" class="hidden"></p>
       </header>
@@ -83,7 +84,7 @@
     </section>
   </main>
 
-  <!-- Efeito Visual Ambiente Exclusivo do Sancord -->
+  <!-- Efeito Visual Ambiente Exclusivo do Sanvo -->
   <div id="ui-ambient-fx" class="ui-ambient-fx"></div>
 
   <!-- Layout Principal estilo Discord Desktop -->
@@ -92,8 +93,8 @@
     <nav class="guild-rail">
       <div class="guild-item-wrap" id="rail-home-wrap">
         <div class="guild-pill"></div>
-        <button type="button" class="guild-icon home-guild" id="nav-home-btn" title="Início Sancord — Amigos e DMs">
-          <svg width="26" height="26" viewBox="0 0 64 64" fill="none" aria-label="Sancord">
+        <button type="button" class="guild-icon home-guild" id="nav-home-btn" title="Início Sanvo — Amigos e DMs">
+          <svg width="26" height="26" viewBox="0 0 64 64" fill="none" aria-label="Sanvo">
             <path d="M15 33C15 22.5 22.6 14 32 14C41.4 14 49 22.5 49 33" stroke="currentColor" stroke-width="4.8" stroke-linecap="round"/>
             <rect x="12" y="29" width="7.5" height="15" rx="3.75" fill="currentColor"/>
             <rect x="44.5" y="29" width="7.5" height="15" rx="3.75" fill="currentColor"/>
@@ -103,13 +104,15 @@
         </button>
       </div>
 
+      <div id="rail-unread-dms" class="rail-unread-dms hidden" aria-label="Mensagens diretas não lidas"></div>
+
       <div class="guild-separator"></div>
 
       <div id="guild-rail-list" class="guild-rail-list">
         <div class="guild-item-wrap active" id="rail-server-wrap">
           <div class="guild-pill"></div>
-          <button type="button" class="guild-icon active" id="nav-server-btn" title="Sancord">
-            <img src="/logo.png" alt="Sancord" class="guild-logo-img" />
+          <button type="button" class="guild-icon active" id="nav-server-btn" title="Sanvo">
+            <img src="/logo.png" alt="Sanvo" class="guild-logo-img" />
           </button>
         </div>
       </div>
@@ -129,7 +132,7 @@
       <div id="sidebar-server-view" class="sidebar-mode-view">
         <header class="server-header">
           <button type="button" class="server-title-group server-menu-trigger" id="server-menu-btn" aria-haspopup="menu" title="Menu do servidor">
-            <h2 id="server-title">Sancord</h2>
+            <h2 id="server-title">Sanvo</h2>
             <span class="connection-dot" id="ws-status-dot" title="Conectando..."></span>
             <svg class="server-menu-caret" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
           </button>
@@ -335,7 +338,7 @@
             <div id="friends-add-pane" class="friends-add-pane hidden">
               <div class="friends-add-card">
                 <h3>ADICIONAR AMIGO</h3>
-                <p>Você pode adicionar amigos usando o nome de usuário deles no Sancord.</p>
+                <p>Você pode adicionar amigos usando o nome de usuário deles no Sanvo.</p>
                 <form id="add-friend-form" class="add-friend-form">
                   <input
                     type="text"
@@ -359,7 +362,7 @@
             <section id="home-first-steps" class="home-first-steps hidden" aria-labelledby="home-first-steps-title">
               <span class="home-first-steps-icon" data-ui-icon="chat" aria-hidden="true"></span>
               <div>
-                <h2 id="home-first-steps-title" data-i18n="home.firstSteps">Comece pelo Sancord</h2>
+                <h2 id="home-first-steps-title" data-i18n="home.firstSteps">Comece pelo Sanvo</h2>
                 <p data-i18n="home.firstStepsDescription">Crie um espaço para suas conversas, entre com um convite ou encontre um amigo pelo nome de usuário.</p>
                 <div class="home-first-steps-actions">
                   <button type="button" id="first-create-server" class="btn-primary"><span data-ui-icon="plus" aria-hidden="true"></span><span data-i18n="home.firstCreate">Criar servidor</span></button>
@@ -508,6 +511,9 @@
         <div id="private-stage-controls" class="private-stage-controls hidden" role="group" aria-label="Controles da chamada privada"></div>
       </section>
 
+      <!-- Banner contextual de chamada privada (Chamando / Aguardando / Em andamento / Entrada tardia) -->
+      <section id="dm-active-call-banner" class="dm-active-call-banner hidden" role="region" aria-label="Chamada privada ativa"></section>
+
       <!-- Área de Mensagens do Chat -->
       <section id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-label="Mensagens"></section>
       <!-- Fórum (Fase 8): lista de postagens no lugar das mensagens -->
@@ -629,15 +635,16 @@
   </div>
 
   <!-- Toast de Chamada Privada Recebida (estilo Discord) -->
-  <div id="dm-call-toast" class="dm-call-toast hidden">
+  <div id="dm-call-toast" class="dm-call-toast hidden" role="dialog" aria-live="assertive" aria-label="Chamada recebida">
     <div id="dm-call-toast-avatar" class="avatar">?</div>
     <div class="dm-call-toast-info">
       <strong id="dm-call-toast-name">Amigo</strong>
-      <span>Chamada de voz privada recebida...</span>
+      <span id="dm-call-toast-sub">está ligando...</span>
+      <small id="dm-call-toast-warn" class="dm-call-toast-warn hidden"></small>
     </div>
     <div class="dm-call-toast-actions">
       <button type="button" id="dm-call-accept-btn" class="btn-accept-call" title="Atender">📞 Atender</button>
-      <button type="button" id="dm-call-dismiss-btn" class="btn-decline-call" title="Dispensar">✕</button>
+      <button type="button" id="dm-call-dismiss-btn" class="btn-decline-call" title="Recusar">✕ Recusar</button>
     </div>
   </div>
 
@@ -722,7 +729,7 @@
         </button>
 
         <div class="settings-nav-sep"></div>
-        <div class="settings-nav-category">SANCORD</div>
+        <div class="settings-nav-category">SANVO</div>
         <button type="button" class="settings-nav-item" data-settings-tab="updates" data-nav-label="Atualizações Versão Changelog Verificar">
           <span data-i18n="settings.updates">Atualizações</span>
         </button>
@@ -823,9 +830,9 @@
                     </div>
                   </div>
 
-                  <div class="account-field-row hidden" id="account-id-row" data-search-item="ID da conta Sancord identificador desenvolvedor">
+                  <div class="account-field-row hidden" id="account-id-row" data-search-item="ID da conta Sanvo Sancord identificador desenvolvedor">
                     <div>
-                      <div class="account-field-label">ID DA CONTA SANCORD (MODO DESENVOLVEDOR)</div>
+                      <div class="account-field-label">ID DA CONTA SANVO (MODO DESENVOLVEDOR)</div>
                       <div id="account-info-id" class="account-field-val monospace-val">—</div>
                     </div>
                     <button type="button" id="account-copy-id-btn" class="btn-secondary small-btn">Copiar ID</button>
@@ -958,7 +965,7 @@
                 <span class="settings-scope-badge synced">Sincronizado com sua conta</span>
               </div>
               <p class="settings-section-desc">
-                Lista real das sessões autenticadas no servidor Sancord. A sessão atual aparece marcada como <strong>Este dispositivo</strong> e não é encerrada pelo botão de revogação remota.
+                Lista real das sessões autenticadas no servidor Sanvo. A sessão atual aparece marcada como <strong>Este dispositivo</strong> e não é encerrada pelo botão de revogação remota.
               </p>
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
                 <button type="button" id="refresh-sessions-btn" class="btn-secondary small-btn">↻ Atualizar lista</button>
@@ -1519,10 +1526,17 @@
 
               <div class="mic-test-discord-row">
                 <button type="button" id="mic-test-btn" class="btn-primary mic-test-cta">Teste do microfone</button>
+                <button type="button" id="mic-test-ab-btn" class="btn-secondary small-btn hidden" aria-pressed="false" title="Alternar entre áudio processado e áudio bruto para comparar">Comparar A/B: Com supressão</button>
                 <button type="button" id="speaker-test-btn" class="btn-secondary small-btn">Testar som de saída</button>
                 <div id="mic-bars-meter" class="mic-bars-meter" aria-hidden="true"></div>
               </div>
-              <p class="settings-hint-text">O teste reproduz sua voz localmente e mostra o nível em tempo real sem enviar áudio pela rede.</p>
+              <div id="mic-dsp-status" class="mic-dsp-status">
+                <span id="mic-vad-pill" class="mic-status-pill">Silêncio</span>
+                <span id="mic-ns-pill" class="mic-status-pill is-active">Supressão ativa · Automático</span>
+                <span id="mic-clip-pill" class="mic-status-pill is-warn hidden">Entrada clipando — reduza o ganho</span>
+              </div>
+              <p class="settings-hint-text">O teste usa o mesmo pipeline real da chamada localmente (sem enviar áudio pela rede). Use fone de ouvido para evitar microfonia.</p>
+              <div id="dsp-dev-diagnostics" class="dsp-dev-diagnostics hidden" aria-live="polite"></div>
             </section>
 
             <section class="settings-section" data-search-item="Modo de entrada atividade de voz push-to-talk apertar para falar atraso soltar sensibilidade noise gate">
@@ -1599,38 +1613,59 @@
               </div>
             </section>
 
-            <section class="settings-section" data-search-item="Processamento de voz supressão de ruído cancelamento de eco passa-alta compressor opus">
+            <section class="settings-section" data-search-item="Processamento de voz supressão de ruído cancelamento de eco controle automático de ganho agc passa-alta compressor opus noise gate">
               <div class="settings-section-head">
                 <h3>Processamento de voz (DSP &amp; WebRTC)</h3>
                 <span class="settings-scope-badge">Somente neste dispositivo</span>
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
-                  <div class="settings-row-title">Supressão de ruído inteligente + Noise Gate</div>
-                  <div class="settings-row-desc">Corta ruído de ventilador, chiado de fundo e teclado leve quando você não está falando.</div>
+                  <div class="settings-row-title">Supressão de ruído</div>
+                  <div class="settings-row-desc" id="dsp-ns-mode-desc">Ajusta a intensidade automaticamente de acordo com seu ambiente.</div>
+                  <div class="settings-row-desc hidden" id="dsp-ns-strong-note" style="color:var(--warn, #f0b232);margin-top:2px;">Pode alterar ligeiramente a qualidade da voz em ambientes muito ruidosos.</div>
                 </div>
-                <input type="checkbox" id="dsp-noise-gate" checked />
+                <select id="dsp-ns-mode" class="settings-select" style="width:auto;min-width:146px;" aria-label="Modo de supressão de ruído">
+                  <option value="auto" selected>Automático</option>
+                  <option value="light">Leve</option>
+                  <option value="standard">Padrão</option>
+                  <option value="strong">Forte</option>
+                  <option value="off">Desligado</option>
+                </select>
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
-                  <div class="settings-row-title">Filtro Passa-Alta (85 Hz)</div>
-                  <div class="settings-row-desc">Remove batidas na mesa e graves abafados antes de enviar para a chamada.</div>
+                  <div class="settings-row-title">Cancelamento de eco (AEC)</div>
+                  <div class="settings-row-desc">Impede que o som dos participantes retorne pelo seu microfone em caixas de som.</div>
+                </div>
+                <input type="checkbox" id="dsp-aec" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Controle automático de ganho (AGC)</div>
+                  <div class="settings-row-desc">Equilibra automaticamente o volume de captação do microfone em cooperação com a supressão.</div>
+                </div>
+                <input type="checkbox" id="dsp-agc" checked />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Filtro Passa-Alta (70 Hz)</div>
+                  <div class="settings-row-desc">Remove batidas graves na mesa e zumbido elétrico preservando graves naturais da voz.</div>
                 </div>
                 <input type="checkbox" id="dsp-highpass" checked />
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
-                  <div class="settings-row-title">Compressor dinâmico de voz</div>
-                  <div class="settings-row-desc">Evita que sua voz estoure ao falar alto e deixa falas baixas mais nítidas.</div>
+                  <div class="settings-row-title">Compressor e Limiter de voz</div>
+                  <div class="settings-row-desc">Nivelamento suave pós-supressão que evita distorção em falas altas sem amplificar ruído de fundo.</div>
                 </div>
                 <input type="checkbox" id="dsp-compressor" checked />
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
-                  <div class="settings-row-title">Cancelamento de eco (AEC) e controle automático de ganho</div>
-                  <div class="settings-row-desc">Impede que o som dos participantes retorne pelo seu microfone.</div>
+                  <div class="settings-row-title">Noise Gate auxiliar</div>
+                  <div class="settings-row-desc">Recurso opcional complementar: fecha o canal abaixo do limiar de sensibilidade em dB.</div>
                 </div>
-                <input type="checkbox" id="dsp-aec" checked />
+                <input type="checkbox" id="dsp-noise-gate" />
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
@@ -1710,7 +1745,7 @@
               <div class="settings-row">
                 <div class="settings-row-text">
                   <div class="settings-row-title">Redefinir configurações de voz e áudio</div>
-                  <div class="settings-row-desc">Restaura dispositivos, ganho, modo de entrada e filtros DSP para o padrão do Sancord.</div>
+                  <div class="settings-row-desc">Restaura dispositivos, ganho, modo de entrada e filtros DSP para o padrão do Sanvo.</div>
                 </div>
                 <div class="settings-row-control">
                   <button type="button" id="voice-goto-diagnostics-btn" class="btn-secondary small-btn">Abrir diagnóstico</button>
@@ -1759,7 +1794,7 @@
                 <h3>Como seus dados são usados</h3>
               </div>
               <p class="settings-section-desc">
-                O Sancord <strong>não coleta telemetria de uso, perfil comportamental nem rastreamento de terceiros</strong>. Suas mensagens, servidores, amizades e preferências sincronizadas ficam armazenados exclusivamente no host Sancord ao qual você se conecta.
+                O Sanvo <strong>não coleta telemetria de uso, perfil comportamental nem rastreamento de terceiros</strong>. Suas mensagens, servidores, amizades e preferências sincronizadas ficam armazenados exclusivamente no host Sanvo ao qual você se conecta.
               </p>
             </section>
 
@@ -1850,7 +1885,7 @@
               <div class="settings-row">
                 <div class="settings-row-text">
                   <div class="settings-row-title">Pré-visualizar imagens, anexos e links automaticamente</div>
-                  <div class="settings-row-desc">Exibe miniaturas e cartões de prévia obtidos pelo servidor do Sancord, sem expor seu IP aos sites externos.</div>
+                  <div class="settings-row-desc">Exibe miniaturas e cartões de prévia obtidos pelo servidor do Sanvo, sem expor seu IP aos sites externos.</div>
                 </div>
                 <input type="checkbox" id="privacy-auto-embeds" checked />
               </div>
@@ -2005,7 +2040,7 @@
                 <h3>Jogos detectados e registrados</h3>
                 <span class="settings-scope-badge">Somente neste dispositivo</span>
               </div>
-              <p id="activity-desktop-only-note" class="settings-hint-text hidden">A detecção automática de jogos está disponível no aplicativo Sancord Desktop para Windows.</p>
+              <p id="activity-desktop-only-note" class="settings-hint-text hidden">A detecção automática de jogos está disponível no aplicativo Sanvo Desktop para Windows.</p>
               <div id="activity-detected-banner" class="activity-status-banner"></div>
               <div class="activity-toolbar-row">
                 <span id="activity-catalog-hint" class="settings-hint-text"></span>
@@ -2052,10 +2087,17 @@
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
-                  <div class="settings-row-title">Notificar mesmo quando o Sancord estiver em foco</div>
+                  <div class="settings-row-title">Notificar mesmo quando o Sanvo estiver em foco</div>
                   <div class="settings-row-desc">Envia alerta do sistema para mensagens em outros canais mesmo com a janela ativa.</div>
                 </div>
                 <input type="checkbox" id="notif-when-focused" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Mostrar contador de notificações no ícone do Sanvo</div>
+                  <div class="settings-row-desc">Exibe a badge numérica vermelha no ícone do Sanvo na barra de tarefas do Windows para notificações não lidas.</div>
+                </div>
+                <input type="checkbox" id="notif-taskbar-badge" checked />
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
@@ -2064,22 +2106,130 @@
                 </div>
                 <input type="checkbox" id="notif-title-badge" checked />
               </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Badge de DMs não lidas na barra lateral</div>
+                  <div class="settings-row-desc">Exibe o avatar das conversas diretas com mensagens não lidas e o contador vermelho ao lado do início.</div>
+                </div>
+                <input type="checkbox" id="notif-dm-rail-badge" checked />
+              </div>
             </section>
 
-            <section class="settings-section" data-search-item="Volume dos sons efeitos sonoros interface testar som">
+            <section class="settings-section" data-search-item="Volume dos sons efeitos sonoros interface testar som nova mensagem">
               <div class="settings-section-head">
-                <h3>Volume dos sons</h3>
+                <h3>Volume de notificações</h3>
                 <span class="settings-scope-badge">Somente neste dispositivo</span>
               </div>
               <div class="settings-field">
                 <div class="slider-label-row">
-                  <label for="notif-ui-volume-slider">Volume das notificações e efeitos</label>
+                  <label for="notif-ui-volume-slider">Volume de notificações</label>
                   <span id="notif-ui-volume-value">100%</span>
                 </div>
                 <input type="range" id="notif-ui-volume-slider" min="0" max="150" step="5" value="100" class="settings-range" />
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                <button type="button" id="notif-test-sound-btn" class="btn-primary small-btn">Testar som do Sancord</button>
+                <button type="button" id="notif-test-sound-btn" class="btn-primary small-btn">Testar som do Sanvo</button>
+              </div>
+            </section>
+
+            <section class="settings-section" data-search-item="Sons de chamadas entrada saída transmissão stream câmera mute deafen ringtone volume efeitos call">
+              <div class="settings-section-head">
+                <h3>Sons de chamadas</h3>
+                <span class="settings-scope-badge">Somente neste dispositivo</span>
+              </div>
+              <p class="settings-section-desc">Efeitos sonoros originais do Sanvo para eventos compartilhados na call, controles locais e toque de chamada. Independente do volume das pessoas.</p>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Sons de chamadas</div>
+                  <div class="settings-row-desc">Interruptor principal dos efeitos de voz, transmissão e câmera.</div>
+                </div>
+                <input type="checkbox" id="call-sounds-master" checked />
+              </div>
+              <div class="settings-field" style="margin: 10px 0 12px;">
+                <div class="slider-label-row">
+                  <label for="call-sounds-volume">Volume dos efeitos da chamada</label>
+                  <span id="call-sounds-volume-value">85%</span>
+                </div>
+                <input type="range" id="call-sounds-volume" min="0" max="100" step="5" value="85" class="settings-range" />
+              </div>
+              <div id="call-sounds-controls-list">
+                <div class="settings-sound-row">
+                  <div class="settings-row-text">
+                    <div class="settings-row-title">Entrada de usuário</div>
+                    <div class="settings-row-desc">Quando alguém entra na mesma call ou canal de voz.</div>
+                  </div>
+                  <div class="settings-row-control">
+                    <button type="button" class="btn-secondary small-btn" data-call-cue-preview="voice_join" aria-label="Testar som Entrada de usuário">▶</button>
+                    <input type="checkbox" id="call-sound-join" checked />
+                  </div>
+                </div>
+                <div class="settings-sound-row">
+                  <div class="settings-row-text">
+                    <div class="settings-row-title">Saída de usuário</div>
+                    <div class="settings-row-desc">Quando alguém sai da call ou muda de canal.</div>
+                  </div>
+                  <div class="settings-row-control">
+                    <button type="button" class="btn-secondary small-btn" data-call-cue-preview="voice_leave" aria-label="Testar som Saída de usuário">▶</button>
+                    <input type="checkbox" id="call-sound-leave" checked />
+                  </div>
+                </div>
+                <div class="settings-sound-row">
+                  <div class="settings-row-text">
+                    <div class="settings-row-title">Transmissão iniciada</div>
+                    <div class="settings-row-desc">Quando um participante inicia o compartilhamento de tela.</div>
+                  </div>
+                  <div class="settings-row-control">
+                    <button type="button" class="btn-secondary small-btn" data-call-cue-preview="stream_start" aria-label="Testar som Transmissão iniciada">▶</button>
+                    <input type="checkbox" id="call-sound-stream-start" checked />
+                  </div>
+                </div>
+                <div class="settings-sound-row">
+                  <div class="settings-row-text">
+                    <div class="settings-row-title">Transmissão encerrada</div>
+                    <div class="settings-row-desc">Quando um compartilhamento de tela é finalizado.</div>
+                  </div>
+                  <div class="settings-row-control">
+                    <button type="button" class="btn-secondary small-btn" data-call-cue-preview="stream_stop" aria-label="Testar som Transmissão encerrada">▶</button>
+                    <input type="checkbox" id="call-sound-stream-stop" checked />
+                  </div>
+                </div>
+                <div class="settings-sound-row">
+                  <div class="settings-row-text">
+                    <div class="settings-row-title">Câmera</div>
+                    <div class="settings-row-desc">Feedback discreto quando a câmera é ligada ou desligada na call.</div>
+                  </div>
+                  <div class="settings-row-control">
+                    <button type="button" class="btn-secondary small-btn" data-call-cue-preview="camera_on" aria-label="Testar som Câmera">▶</button>
+                    <input type="checkbox" id="call-sound-camera" checked />
+                  </div>
+                </div>
+                <div class="settings-sound-row">
+                  <div class="settings-row-text">
+                    <div class="settings-row-title">Mute / Deafen local</div>
+                    <div class="settings-row-desc">Feedback local ao silenciar o microfone ou ensurdecer o áudio.</div>
+                  </div>
+                  <div class="settings-row-control">
+                    <button type="button" class="btn-secondary small-btn" data-call-cue-preview="mute_on" aria-label="Testar som Mute e Deafen">▶</button>
+                    <input type="checkbox" id="call-sound-controls" checked />
+                  </div>
+                </div>
+                <div class="settings-sound-row">
+                  <div class="settings-row-text">
+                    <div class="settings-row-title">Toque de chamadas recebidas</div>
+                    <div class="settings-row-desc">Toque original do Sanvo em chamadas privadas recebidas (silenciado automaticamente em Não Perturbe).</div>
+                  </div>
+                  <div class="settings-row-control">
+                    <button type="button" class="btn-secondary small-btn" data-call-cue-preview="incoming_call_loop" aria-label="Testar toque de Chamada recebida">▶</button>
+                    <input type="checkbox" id="call-sound-incoming" checked />
+                  </div>
+                </div>
+                <div class="settings-field" style="margin: 8px 0 4px;">
+                  <div class="slider-label-row">
+                    <label for="call-ringtone-volume">Volume do toque de chamadas</label>
+                    <span id="call-ringtone-volume-value">85%</span>
+                  </div>
+                  <input type="range" id="call-ringtone-volume" min="0" max="100" step="5" value="85" class="settings-range" />
+                </div>
               </div>
             </section>
 
@@ -2090,8 +2240,8 @@
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
-                  <div class="settings-row-title">Sons de novas mensagens e DMs (geral)</div>
-                  <div class="settings-row-desc">Interruptor geral para alertas sonoros de mensagens e menções.</div>
+                  <div class="settings-row-title">Som de nova mensagem</div>
+                  <div class="settings-row-desc">Interruptor geral para o efeito sonoro original do Sanvo em novas mensagens, DMs e menções elegíveis.</div>
                 </div>
                 <input type="checkbox" id="notif-sound-messages" checked />
               </div>
@@ -2145,7 +2295,7 @@
 
             <section class="settings-section" data-search-item="Cor de destaque accent paleta temas coloridos atmosfera vidro partículas bordas">
               <div class="settings-section-head">
-                <h3>Cor de destaque e atmosferas Sancord</h3>
+                <h3>Cor de destaque e atmosferas Sanvo</h3>
                 <span class="settings-scope-badge">Somente neste dispositivo</span>
               </div>
               <div class="settings-row">
@@ -2161,9 +2311,9 @@
 
               <div class="appearance-custom-banner" style="margin-top:12px;">
                 <div class="appearance-custom-left">
-                  <div class="appearance-mini-app-icon"><span>Sancord</span></div>
+                  <div class="appearance-mini-app-icon"><span>Sanvo</span></div>
                   <div class="appearance-custom-text">
-                    <strong>Atmosferas livres do Sancord</strong>
+                    <strong>Atmosferas livres do Sanvo</strong>
                     <p>Personalize gradientes de atmosfera, vidro translúcido e partículas exclusivas sem restrições.</p>
                   </div>
                 </div>
@@ -2172,12 +2322,12 @@
 
               <div id="appearance-accent-section">
                 <div class="appearance-section-label">
-                  Tema de cor especial <span class="accent-swatch-badge">EXCLUSIVO SANCORD</span>
+                  Tema de cor especial <span class="accent-swatch-badge">EXCLUSIVO SANVO</span>
                 </div>
                 <div class="appearance-accent-swatches">
                   <button type="button" class="accent-swatch-tile active" data-accent-theme="none" title="Padrão Blurple" style="background: linear-gradient(135deg, #5865f2, #2b2d31);"></button>
                   <button type="button" class="accent-swatch-tile" data-accent-theme="gta" title="Pôr do Sol GTA" style="background: linear-gradient(135deg, #a855f7, #f97316);"></button>
-                  <button type="button" class="accent-swatch-tile" data-accent-theme="sancord-aurora" title="Aurora Sancord" style="background: linear-gradient(135deg, #00f5d4, #5865f2, #ff00a0);"></button>
+                  <button type="button" class="accent-swatch-tile" data-accent-theme="sancord-aurora" title="Aurora Sanvo" style="background: linear-gradient(135deg, #00f5d4, #5865f2, #ff00a0);"></button>
                 </div>
 
                 <div class="appearance-section-label">
@@ -2268,7 +2418,7 @@
                 </div>
                 <input type="range" id="appearance-font-slider" min="12" max="20" step="1" value="14" class="settings-range" />
                 <div class="font-scale-preview-box">
-                  <div id="appearance-font-preview" class="message-text" style="margin: 0;">Prévia do chat: bora abrir uma call no Sancord hoje? 🎮</div>
+                  <div id="appearance-font-preview" class="message-text" style="margin: 0;">Prévia do chat: bora abrir uma call no Sanvo hoje? 🎮</div>
                 </div>
               </div>
 
@@ -2347,7 +2497,7 @@
               <div class="settings-row">
                 <div class="settings-row-text">
                   <div class="settings-row-title">Reprodução automática de GIFs, avatares e banners</div>
-                  <div class="settings-row-desc">O Sancord limita GIFs simultâneos e pausa em segundo plano.</div>
+                  <div class="settings-row-desc">O Sanvo limita GIFs simultâneos e pausa em segundo plano.</div>
                 </div>
                 <div class="settings-row-control">
                   <select id="appearance-profile-animations" class="settings-select" style="width:200px;">
@@ -2627,15 +2777,15 @@
             <section class="settings-section" data-search-item="Windows inicialização iniciar minimizado fechar bandeja pasta dados">
               <div class="settings-section-head">
                 <h3>Integração com Windows Desktop</h3>
-                <span class="settings-scope-badge" id="windows-env-badge">Sancord Desktop</span>
+                <span class="settings-scope-badge" id="windows-env-badge">Sanvo Desktop</span>
               </div>
               <p class="settings-section-desc" id="windows-env-note">
-                Controla o comportamento nativo do executável Sancord no Windows.
+                Controla o comportamento nativo do executável Sanvo no Windows.
               </p>
               <div class="settings-row">
                 <div class="settings-row-text">
-                  <div class="settings-row-title">Abrir Sancord ao iniciar o Windows</div>
-                  <div class="settings-row-desc">Registra o Sancord Desktop na inicialização do usuário atual (<code>HKCU\...\Run</code>).</div>
+                  <div class="settings-row-title">Abrir Sanvo ao iniciar o Windows</div>
+                  <div class="settings-row-desc">Registra o Sanvo Desktop na inicialização do usuário atual (<code>HKCU\...\Run</code>).</div>
                 </div>
                 <input type="checkbox" id="windows-autostart-toggle" />
               </div>
@@ -2649,7 +2799,7 @@
               <div class="settings-row">
                 <div class="settings-row-text">
                   <div class="settings-row-title">Minimizar ao clicar no botão fechar (✕)</div>
-                  <div class="settings-row-desc">Mantém o Sancord em execução na barra de tarefas em vez de encerrar o processo.</div>
+                  <div class="settings-row-desc">Mantém o Sanvo em execução na barra de tarefas em vez de encerrar o processo.</div>
                 </div>
                 <input type="checkbox" id="windows-minimize-on-close-toggle" />
               </div>
@@ -2683,7 +2833,7 @@
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
-                  <div class="settings-row-title">Sancord Desktop <strong data-update-current>v0.2.3</strong></div>
+                  <div class="settings-row-title">Sanvo Desktop <strong data-update-current>v0.2.7</strong></div>
                   <div class="settings-row-desc" data-update-status role="status" aria-live="polite">Verifique se há uma nova versão disponível.</div>
                   <div class="settings-hint-text" id="updates-last-checked">Última verificação: ainda não executada nesta sessão</div>
                 </div>
@@ -2759,7 +2909,7 @@
               <div class="settings-row">
                 <div class="settings-row-text">
                   <div class="settings-row-title">Diretório de dados e cache desktop</div>
-                  <div class="settings-row-desc" id="advanced-data-dir-desc">Abra a pasta de dados locais do cliente Sancord Desktop.</div>
+                  <div class="settings-row-desc" id="advanced-data-dir-desc">Abra a pasta de dados locais do cliente Sanvo Desktop.</div>
                 </div>
                 <div class="settings-row-control">
                   <button type="button" id="advanced-open-data-dir-btn" class="btn-secondary small-btn">Abrir pasta</button>
@@ -2784,7 +2934,7 @@
             <section class="settings-section" data-search-item="Diagnóstico executar relatório sanitizado websocket microfone áudio cache updater">
               <div class="settings-section-head">
                 <h3>Verificação do ambiente</h3>
-                <span class="settings-scope-badge">Exclusivo Sancord</span>
+                <span class="settings-scope-badge">Exclusivo Sanvo</span>
               </div>
               <p class="settings-section-desc">
                 Executa verificações reais de conectividade WebSocket, armazenamento local, dispositivos de áudio detectados, cache de mídia, permissões e atualizador. O relatório copiado remove automaticamente tokens, senhas e credenciais.
@@ -2799,14 +2949,14 @@
 
           <!-- PÁGINA: Sobre -->
           <div id="settings-tab-about" class="settings-panel hidden">
-            <h2>Sobre o Sancord</h2>
+            <h2>Sobre o Sanvo</h2>
 
-            <section class="settings-section" data-search-item="Sobre Sancord versão arquitetura créditos github licenças open source">
+            <section class="settings-section" data-search-item="Sobre Sanvo Sancord versão arquitetura créditos github licenças open source">
               <div class="settings-about-hero">
-                <img src="/logo.png" alt="Sancord" />
+                <img src="/logo.png" alt="Sanvo" />
                 <div>
-                  <strong style="font-size:18px;color:var(--text-primary);">Sancord Desktop</strong>
-                  <div class="settings-hint-text" id="about-version-line">Versão 0.2.3 • Canal Estável</div>
+                  <strong style="font-size:18px;color:var(--text-primary);">Sanvo Desktop</strong>
+                  <div class="settings-hint-text" id="about-version-line">Versão 0.2.7 • Canal Estável</div>
                   <div class="settings-hint-text" id="about-runtime-line">Rust (Axum + Tokio + SQLite + Wry/WebView2) • WebRTC P2P</div>
                 </div>
               </div>
@@ -2827,7 +2977,7 @@
               <div class="settings-section-head">
                 <h3>Tecnologias e licenças open source</h3>
               </div>
-              <p class="settings-section-desc">Principais bibliotecas open source reais utilizadas na compilação do Sancord (verificadas em <code>Cargo.toml</code>).</p>
+              <p class="settings-section-desc">Principais bibliotecas open source reais utilizadas na compilação do Sanvo (verificadas em <code>Cargo.toml</code>).</p>
               <div id="about-licenses-list" class="settings-licenses-list"></div>
             </section>
           </div>
@@ -2902,11 +3052,11 @@
             </div>
             <div class="profile-info-block">
               <label>MEMBRO DESDE</label>
-              <p id="profile-card-member-since">Membro do Sancord</p>
+              <p id="profile-card-member-since">Membro do Sanvo</p>
             </div>
             <div id="profile-card-friends-since-row" class="profile-info-block hidden">
               <label>AMIZADE</label>
-              <p id="profile-card-friends-since">Amigos no Sancord</p>
+              <p id="profile-card-friends-since">Amigos no Sanvo</p>
             </div>
             <div id="profile-card-links-wrap" class="profile-info-block hidden">
               <label>CONEXÕES</label>
@@ -3331,7 +3481,7 @@
         <p class="picker-sub" style="margin-bottom: 12px;">Cole abaixo o código (ex: <code class="inline-code">SANC-7F4K92</code>) ou o link completo de convite enviado por um amigo.</p>
         <div class="settings-field">
           <label for="join-srv-code-input">LINK OU CÓDIGO DE CONVITE</label>
-          <input type="text" id="join-srv-code-input" placeholder="Código SANC-7F4K92 ou link sancord://open/..." autocomplete="off" />
+          <input type="text" id="join-srv-code-input" placeholder="Código SANC-7F4K92 ou link sanvo://open/..." autocomplete="off" />
           <div id="join-srv-error" class="add-friend-feedback err hidden"></div>
         </div>
 
@@ -3393,7 +3543,7 @@
           <div id="invite-modal-expiry-note" class="invite-expiry-note">Seu link de convite expira em 7 dias.</div>
           <div class="invite-footer-links">
             <button type="button" id="invite-modal-edit-link-btn" class="invite-inline-link-btn">Editar link de convite</button>
-            <span class="invite-code-chip">Código: <strong id="invite-modal-code-badge">SANCORD</strong></span>
+            <span class="invite-code-chip">Código: <strong id="invite-modal-code-badge">SANVO</strong></span>
             <button type="button" id="invite-modal-copy-code-btn" class="invite-inline-link-btn">Copiar código</button>
             <button type="button" id="invite-modal-regen-btn" class="invite-inline-link-btn hidden" title="Trocar o convite padrão (o antigo para de funcionar)">↻ Trocar padrão</button>
           </div>
@@ -3836,7 +3986,7 @@
             </div>
             <div class="dsp-toggles-list" style="margin: 12px 0;">
               <label class="dsp-toggle-row"><div><div class="dsp-title">Bloquear links</div><div class="dsp-sub">Exceto os domínios liberados abaixo.</div></div><input type="checkbox" id="automod-links" /></label>
-              <label class="dsp-toggle-row"><div><div class="dsp-title">Bloquear convites</div><div class="dsp-sub">Códigos SANC-… e links sancord://.</div></div><input type="checkbox" id="automod-invites" /></label>
+              <label class="dsp-toggle-row"><div><div class="dsp-title">Bloquear convites</div><div class="dsp-sub">Códigos SANC-… e links sanvo://.</div></div><input type="checkbox" id="automod-invites" /></label>
               <label class="dsp-toggle-row"><div><div class="dsp-title">Bloquear mensagens repetidas</div><div class="dsp-sub">A mesma mensagem 3 vezes em 30 segundos.</div></div><input type="checkbox" id="automod-repeats" /></label>
             </div>
             <div class="profile-editor-card">
@@ -4001,10 +4151,14 @@
   <script src="/js/offline-cache.js?v=1"></script>
   <!-- Chat (mensagens, composer, anexos, não lidas): depende dos elementos do app.js. -->
   <script src="/js/chat.js?v=27"></script>
+  <script src="/js/notification-manager.js?v=1"></script>
   <!-- Social (Fase 5): bloqueio, solicitações, grupos, privacidade e perfil completo. -->
   <script src="/js/social.js?v=9"></script>
   <!-- Voz (Fase 6): volume/silêncio por pessoa, moderação, toque e retomada de chamada. -->
-  <script src="/js/voice.js?v=2"></script>
+  <script src="/js/voice-dsp-core.js?v=1"></script>
+  <script src="/js/sound-manager.js?v=1"></script>
+  <script src="/js/voice-event-sounds.js?v=1"></script>
+  <script src="/js/voice.js?v=3"></script>
   <!-- Avançados (Fase 8): busca no histórico, AutoMod e auditoria. -->
   <script src="/js/advanced.js?v=4"></script>
   <script src="/js/search.js?v=1"></script>
@@ -4016,9 +4170,11 @@
   <!-- Polimento (Fase 9): notificações por canal, navegação rápida, atalhos e acessibilidade. -->
   <script src="/js/polish.js?v=4"></script>
   <script src="/js/profile-motion.js?v=4"></script>
+  <script src="/cosmetics/cosmetics-engine.js?v=1"></script>
   <script src="/js/profile-card.js?v=2"></script>
   <script src="/js/profile.js?v=11"></script>
-  <script src="/js/profile-board.js?v=3"></script>
+  <script src="/js/game-picker.js?v=1"></script>
+  <script src="/js/profile-board.js?v=4"></script>
   <script src="/js/profile-collection.js?v=3"></script>
   <script src="/js/profile-sharing.js?v=4"></script>
   <script src="/js/settings-center.js?v=2"></script>

@@ -94,6 +94,6 @@ test('fluxo completo da interface conserva ações explícitas até o reinício'
   c.event({phase:'handoff',current:'0.1.0'});
   c.event({phase:'updated',current:'0.2.0',version:'0.2.0'});
   assert.equal(c.el('[data-update-current]').textContent,'0.2.0');
-  assert.equal(c.el('[data-update-status]').textContent,'Sancord atualizado para v0.2.0.');
+  assert.equal(c.el('[data-update-status]').textContent,'Sanvo atualizado para v0.2.0.');
   assert.deepEqual(c.sent,['updates:status','updates:check','updates:download','updates:restart']);
 });

@@ -433,7 +433,7 @@ pub(crate) async fn handle(user_id: &str, msg: ClientMessage, state: &SharedStat
                 reason,
                 created_at: crate::auth::now_ms(),
             });
-            st.feedback(user_id, true, "report_user", "Denúncia enviada. Obrigado por ajudar a manter o Sancord seguro.");
+            st.feedback(user_id, true, "report_user", "Denúncia enviada. Obrigado por ajudar a manter o Sanvo seguro.");
         }
 
         _ => {}

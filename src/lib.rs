@@ -1,4 +1,4 @@
-//! Núcleo do servidor Sancord.
+//! Núcleo do servidor Sanvo (nome legado: Sancord).
 //!
 //! - HTTP (`http.rs`): cadastro, login, sessão, logout, convites, saúde.
 //! - WebSocket (`ws.rs`): eventos em tempo real (mensagens, presença, voz/sinalização).
@@ -15,8 +15,10 @@ pub mod community;
 pub mod config;
 pub mod db;
 pub mod discovery;
+pub mod games;
 pub mod http;
 pub mod integrations;
+pub mod legacy_sancord_migration;
 pub mod link_preview;
 pub mod models;
 pub mod moderation;
@@ -81,6 +83,10 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/public-url", get(http::public_url_handler))
         .route("/api/invite/:code", get(http::invite_preview_handler))
         .route("/api/invites/:code", get(http::invite_preview_handler))
+        .route("/api/games/popular", get(games::popular_handler))
+        .route("/api/games/search", get(games::search_handler))
+        .route("/api/games/resolve", get(games::resolve_handler))
+        .route("/api/games/:id", get(games::by_id_handler))
         .route("/api/channels/:channel/integrations", get(integrations::list).post(integrations::create))
         .route("/api/integrations/:id/rotate", post(integrations::rotate))
         .route("/api/integrations/:id/revoke", post(integrations::revoke))

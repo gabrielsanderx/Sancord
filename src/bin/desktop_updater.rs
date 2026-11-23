@@ -101,10 +101,12 @@ impl Updater {
         updates::verify_manifest(&cfg, &downloaded.release.raw, &downloaded.release.signature)?;
         updates::verify_package(&downloaded.package, &downloaded.release.manifest)?;
         let current = env::current_exe().map_err(|e| e.to_string())?;
-        let target = env::var_os("SANCORD_LAUNCHER_EXE").map(PathBuf::from).unwrap_or_else(|| current.clone());
+        let target = sancord::legacy_sancord_migration::env_var_compat("SANVO_LAUNCHER_EXE", "SANCORD_LAUNCHER_EXE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| current.clone());
         let target = fs::canonicalize(target).map_err(|_| "Não foi possível localizar o aplicativo instalado.")?;
         let dir = downloaded.package.parent().ok_or("Pasta inválida.")?;
-        let helper = dir.join("SancordUpdateHelper.exe");
+        let helper = dir.join("SanvoUpdateHelper.exe");
         fs::copy(&current, &helper).map_err(|e| e.to_string())?;
         fs::write(dir.join("WebView2Loader.dll"), include_bytes!("../../WebView2Loader.dll")).map_err(|e| e.to_string())?;
         let job = InstallJob { parent_pid: std::process::id(), target, package: downloaded.package.clone(),
@@ -112,7 +114,7 @@ impl Updater {
             current_version: env!("CARGO_PKG_VERSION").into(), endpoint: self.endpoint.lock().ok().and_then(|p| p.clone()) };
         let job_path = dir.join("install.json");
         fs::write(&job_path, serde_json::to_vec(&job).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-        Command::new(helper).arg("--sancord-apply-update").arg(job_path).current_dir(dir)
+        Command::new(helper).arg("--sanvo-apply-update").arg(job_path).current_dir(dir)
             .creation_flags(super::CREATE_NO_WINDOW).spawn().map_err(|_| "Não foi possível iniciar a instalação. O aplicativo atual foi preservado.")?;
         self.emit(json!({"phase":"handoff"}));
         Ok(())
@@ -122,7 +124,8 @@ impl Updater {
 /// Executado antes de criar WebView, captura ou servidor. Nunca executa pacote não verificado.
 pub fn run_helper_if_requested() -> bool {
     let args: Vec<_> = env::args_os().skip(1).collect();
-    if args.first().is_none_or(|a| a != "--sancord-apply-update") { return false; }
+    // Aceita flag oficial --sanvo-apply-update e flag legada --sancord-apply-update (LEGACY COMPATIBILITY).
+    if args.first().is_none_or(|a| a != "--sanvo-apply-update" && a != "--sancord-apply-update") { return false; }
     let result = (|| -> updates::Result<()> {
         if args.len() != 2 { return Err("Argumentos de atualização inválidos.".into()); }
         use std::io::Read;
@@ -150,10 +153,12 @@ pub fn run_helper_if_requested() -> bool {
             let mut cmd = Command::new(target);
             cmd.current_dir(target.parent().ok_or("Pasta inválida.")?).creation_flags(super::CREATE_NO_WINDOW);
             // O launcher novo deve apontar para si mesmo, não para o helper.
+            cmd.env_remove("SANVO_LAUNCHER_EXE");
             cmd.env_remove("SANCORD_LAUNCHER_EXE");
             if let Some(endpoint) = &job.endpoint {
                 let origin = super::desktop_links::origin_of(endpoint).ok_or("Servidor de retorno inválido.")?;
-                cmd.env("SANCORD_SERVER_URL", origin);
+                cmd.env("SANVO_SERVER_URL", &origin);
+                cmd.env("SANCORD_SERVER_URL", origin); // LEGACY COMPATIBILITY
             }
             let result_path = Path::new(&args[1]).parent().and_then(Path::parent).map(|p| p.join("result.json"));
             if let Some(path) = &result_path {
@@ -171,7 +176,7 @@ pub fn run_helper_if_requested() -> bool {
     if let Err(error) = result {
         use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OK, MB_ICONERROR};
         let text: Vec<u16> = format!("Atualização não concluída.\n{error}").encode_utf16().chain(Some(0)).collect();
-        unsafe { MessageBoxW(None, windows_core::PCWSTR(text.as_ptr()), windows_core::w!("Sancord"), MB_OK | MB_ICONERROR); }
+        unsafe { MessageBoxW(None, windows_core::PCWSTR(text.as_ptr()), windows_core::w!("Sanvo"), MB_OK | MB_ICONERROR); }
     }
     true
 }

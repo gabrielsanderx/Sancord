@@ -2,9 +2,9 @@ const SancordConnection = (() => {
   const delays = [1000, 2000, 4000, 8000, 15000, 30000];
   const titles = {
     network: "Parece que você está offline",
-    server: "Não conseguimos conectar ao Sancord",
+    server: "Não conseguimos conectar ao Sanvo",
     realtime: "A conexão em tempo real foi interrompida",
-    maintenance: "O Sancord está temporariamente em manutenção",
+    maintenance: "O Sanvo está temporariamente em manutenção",
   };
   let phase = "OFFLINE", reason = null, ready = false, stopped = true;
   let everConnected = false, loaded = false, anonymous = false, attempt = 0, lostAt = 0, lastHeartbeat = 0;
@@ -36,12 +36,12 @@ const SancordConnection = (() => {
     notice.querySelector("[data-connection-retry]").classList.toggle("hidden", live);
     notice.querySelector("[data-connection-diagnostics]").classList.toggle("hidden", live || !long);
     screen.classList.toggle("hidden", !cold() || (!lostAt && !document.body.hasAttribute("data-auth-pending")));
-    screen.querySelector("h1").textContent = titles[reason] || "Conectando ao Sancord";
+    screen.querySelector("h1").textContent = titles[reason] || "Conectando ao Sanvo";
     screen.querySelector("[data-offline-status]").textContent = retryTimer ? "Aguardando nova tentativa…" : "Reconectando…";
     for (const button of document.querySelectorAll("[data-connection-retry]")) button.disabled = Boolean(state.ws || (anonymous && probe));
     const dot = document.getElementById("ws-status-dot");
     dot?.classList.toggle("connected", live);
-    if (dot) dot.title = live ? "Conectado ao Sancord" : notice.querySelector(".connection-banner-text").textContent;
+    if (dot) dot.title = live ? "Conectado ao Sanvo" : notice.querySelector(".connection-banner-text").textContent;
     if (typeof syncComposerChrome === "function") syncComposerChrome();
     if (typeof SancordOutbox !== "undefined") SancordOutbox.render();
     document.dispatchEvent(new CustomEvent("sancord:connection", { detail: { phase, reason } }));
@@ -78,6 +78,10 @@ const SancordConnection = (() => {
     if (stopped && !getStoredToken()) return;
     const username = getStoredUsername();
     if (username) SancordSelfProfileMenu.removeSavedAccount(username);
+    if (typeof state !== "undefined") state.selfUser = null;
+    if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.clearSessionState === "function") {
+      SancordNotifications.clearSessionState();
+    }
     SancordOfflineCache.clear();
     SancordOutbox.suspend();
     stop(true);
@@ -290,3 +294,8 @@ const SancordConnection = (() => {
     status: () => ({ phase, reason, attempt, nextAt, lastHeartbeat, lostAt, socket: state.ws?.readyState ?? null }),
   };
 })();
+const SanvoConnection = SancordConnection;
+if (typeof globalThis !== "undefined") {
+  globalThis.SanvoConnection = SancordConnection;
+  globalThis.SancordConnection = SancordConnection; // LEGACY COMPATIBILITY
+}

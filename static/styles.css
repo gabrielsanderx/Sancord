@@ -7111,23 +7111,64 @@ body[data-theme="light"] .active-now-card {
 /* Tooltip */
 .sancord-tooltip {
   position: fixed;
-  z-index: 100002;
+  z-index: var(--z-tooltip, 110000);
   pointer-events: none;
   background: var(--surface-floating);
   color: var(--text-header);
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.35;
   padding: 6px 10px;
   border-radius: 6px;
   box-shadow: var(--shadow-floating);
-  max-width: 260px;
+  max-width: min(280px, calc(100vw - 20px));
+  width: max-content;
+  overflow-wrap: break-word;
+  white-space: normal;
   opacity: 0;
-  transform: translateX(-4px);
+  transform: translateY(3px) scale(0.98);
   transition: opacity 90ms ease, transform 90ms ease;
+}
+.sancord-tooltip[data-side="bottom"] {
+  transform: translateY(-3px) scale(0.98);
+}
+.sancord-tooltip[data-side="right"] {
+  transform: translateX(-3px) scale(0.98);
+}
+.sancord-tooltip[data-side="left"] {
+  transform: translateX(3px) scale(0.98);
 }
 .sancord-tooltip.visible {
   opacity: 1;
-  transform: translateX(0);
+  transform: translate(0, 0) scale(1);
+}
+.sancord-tooltip::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  pointer-events: none;
+}
+.sancord-tooltip[data-side="top"]::after {
+  left: var(--tooltip-arrow-x, 50%);
+  bottom: -3.5px;
+  transform: translateX(-50%) rotate(45deg);
+}
+.sancord-tooltip[data-side="bottom"]::after {
+  left: var(--tooltip-arrow-x, 50%);
+  top: -3.5px;
+  transform: translateX(-50%) rotate(45deg);
+}
+.sancord-tooltip[data-side="right"]::after {
+  top: var(--tooltip-arrow-y, 50%);
+  left: -3.5px;
+  transform: translateY(-50%) rotate(45deg);
+}
+.sancord-tooltip[data-side="left"]::after {
+  top: var(--tooltip-arrow-y, 50%);
+  right: -3.5px;
+  transform: translateY(-50%) rotate(45deg);
 }
 
 /* Diálogos (UI kit) */

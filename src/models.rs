@@ -1735,6 +1735,48 @@ pub struct DmConversation {
     pub last_timestamp: Option<String>,
 }
 
+/// Estado autoritativo da máquina de estados de chamadas privadas (DM / Group DM).
+/// Separa explicitamente o período de toque (`Ringing`) da sessão de voz ativa (`WaitingActive` / `Connected`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CallState {
+    Ringing,
+    WaitingActive,
+    Connected,
+    Ended,
+}
+
+/// Snapshot serializado de uma chamada privada, usado em tempo real e na reconstrução após reconexão.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallSnapshot {
+    pub call_id: String,
+    pub dm_id: String,
+    pub voice_channel_id: String,
+    pub state: CallState,
+    pub caller_username: String,
+    pub caller_display_name: String,
+    pub caller_color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_avatar: Option<String>,
+    pub active_participants: Vec<String>,
+    pub ringing_targets: Vec<String>,
+    pub declined_by: Vec<String>,
+    pub created_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ring_started_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ring_expires_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_expires_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>,
+    pub server_now: i64,
+}
+
 /// Mensagens enviadas do Cliente (Frontend) para o Servidor Rust via WebSocket
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", content = "payload")]
@@ -2413,8 +2455,18 @@ pub enum ClientMessage {
         channel_id: Option<String>,
     },
 
-    /// Recusar uma chamada privada recebida (avisa quem está na chamada)
+    /// Recusar uma chamada privada recebida (avisa quem está na chamada e para o toque em todos os aparelhos)
     DeclineCall { channel_id: String },
+
+    /// Cancelar o toque ativo de uma chamada privada sem necessariamente encerrar a sala
+    CancelCall { channel_id: String },
+
+    /// Chamar novamente participantes que não atenderam numa chamada privada ainda aberta (com cooldown)
+    RingCall {
+        channel_id: String,
+        #[serde(default)]
+        target_username: Option<String>,
+    },
 
     /// Fase 8: registro de auditoria (mais recentes primeiro; `before` = cursor em ms)
     GetAuditLog {
@@ -2725,15 +2777,64 @@ pub enum ServerMessage {
 
     /// Notifica que um participante saiu da call para fechar a RTCPeerConnection
     PeerLeftVoice { channel_id: String, peer_id: String },
+    /// Evento sonoro compartilhado e autorizado pelo servidor para participantes da mesma call.
+    VoiceCueEvent {
+        event_id: String,
+        event_type: String,
+        voice_session_id: String,
+        actor_user_id: String,
+        timestamp: i64,
+    },
 
     /// Um moderador moveu (`Some`) ou desconectou (`None`) você da voz
     VoiceMoved { channel_id: Option<String>, by: String },
 
-    /// Alguém recusou a chamada privada em que você está
-    CallDeclined { channel_id: String, by_username: String },
+    /// Alguém recusou a chamada privada em que você está (ou você recusou em outro aparelho)
+    CallDeclined {
+        channel_id: String,
+        by_username: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
+    },
 
-    /// A chamada privada terminou (para de tocar em quem não atendeu)
-    CallEnded { channel_id: String },
+    /// Alguém atendeu a chamada privada (sincroniza multi-dispositivo e para ringtone/ringback imediatamente)
+    CallAnswered {
+        call_id: String,
+        channel_id: String,
+        by_username: String,
+    },
+
+    /// O período de toque (ringing) expirou, mas a sessão pode continuar aberta em WAITING_ACTIVE/CONNECTED
+    CallRingTimeout {
+        call_id: String,
+        channel_id: String,
+    },
+
+    /// O chamador cancelou o toque ativo (para ringtone imediatamente nos destinatários)
+    CallCanceled {
+        call_id: String,
+        channel_id: String,
+        by_username: String,
+    },
+
+    /// Snapshot autoritativo do estado atual de uma chamada privada (RINGING, WAITING_ACTIVE, CONNECTED, ENDED)
+    CallStateUpdated {
+        call: CallSnapshot,
+    },
+
+    /// Lista de chamadas privadas ativas/disponíveis do usuário (enviada na conexão/reconexão)
+    ActiveCallsSync {
+        calls: Vec<CallSnapshot>,
+    },
+
+    /// A chamada privada terminou definitivamente (para de tocar e remove opção de entrada tardia)
+    CallEnded {
+        channel_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 
     /// Fase 8
     AuditLog { server_id: String, entries: Vec<AuditEntry>, has_more: bool },
@@ -2853,13 +2954,21 @@ pub enum ServerMessage {
         messages: Vec<ChatMessage>,
     },
 
-    /// Notificação de chamada privada recebida em uma DM
+    /// Notificação de chamada privada recebida em uma DM ou grupo
     DmCallIncoming {
         dm_id: String,
         voice_channel_id: String,
         from_username: String,
         from_color: String,
         from_avatar: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ring_started_at: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ring_expires_at: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server_now: Option<i64>,
     },
 
     /// Lista de sessões ativas da conta do usuário
@@ -2939,9 +3048,50 @@ pub struct ProfileWidget {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProfileWidgetContent {
-    FavoriteGame { name: String, description: String, cover_id: Option<String> },
-    Playing { name: String },
-    WantToPlay { name: String },
+    FavoriteGame {
+        name: String,
+        #[serde(default)]
+        description: String,
+        #[serde(default)]
+        cover_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        game_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cover_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        release_year: Option<u16>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        platforms: Vec<String>,
+    },
+    Playing {
+        #[serde(default)]
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        game_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cover_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        release_year: Option<u16>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        platforms: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        auto_activity: bool,
+    },
+    WantToPlay {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        game_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cover_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        release_year: Option<u16>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        platforms: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+    },
     About { text: String },
     Link { label: String, url: String },
     Achievements,

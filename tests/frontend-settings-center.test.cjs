@@ -9,7 +9,7 @@ test('central de configurações tem 4 grupos, 22 páginas reais, busca profunda
   assert.equal(d.querySelector('.settings-esc-hint')?.textContent, 'ESC');
 
   const categories = [...d.querySelectorAll('.settings-nav .settings-nav-category')].map(el => el.textContent.trim());
-  assert.deepEqual(categories, ['CONTA', 'PRIVACIDADE E SOCIAL', 'CONFIGURAÇÕES DO APP', 'SANCORD']);
+  assert.deepEqual(categories, ['CONTA', 'PRIVACIDADE E SOCIAL', 'CONFIGURAÇÕES DO APP', 'SANVO']);
 
   const tabs = [...d.querySelectorAll('.settings-nav-item[data-settings-tab]')].map(el => el.dataset.settingsTab);
   assert.equal(tabs.length, 22);

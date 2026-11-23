@@ -1,11 +1,11 @@
 [package]
 name = "sancord"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
-# BinÃƒÂ¡rios declarados explicitamente: `src/bin/capture_bridge.rs` ÃƒÂ© um mÃƒÂ³dulo do
-# SancordApp, nÃƒÂ£o um programa (a detecÃƒÂ§ÃƒÂ£o automÃƒÂ¡tica o tratava como binÃƒÂ¡rio sem `main`).
+# BinÃƒÆ’Ã‚Â¡rios declarados explicitamente: `src/bin/capture_bridge.rs` ÃƒÆ’Ã‚Â© um mÃƒÆ’Ã‚Â³dulo do
+# SancordApp, nÃƒÆ’Ã‚Â£o um programa (a detecÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o automÃƒÆ’Ã‚Â¡tica o tratava como binÃƒÆ’Ã‚Â¡rio sem `main`).
 autobins = false
-description = "Sancord Ã¢â‚¬â€ plataforma de comunicaÃƒÂ§ÃƒÂ£o em tempo real (Axum + WebSockets + SQLite + WebRTC)"
+description = "Sancord ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â plataforma de comunicaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o em tempo real (Axum + WebSockets + SQLite + WebRTC)"
 
 [lib]
 name = "sancord"
@@ -35,16 +35,16 @@ bundle = []
 embed-resource = "2.5"
 
 [dependencies]
-# PersistÃƒÂªncia: SQLite embutido (compila o SQLite junto, sem depender do sistema)
+# PersistÃƒÆ’Ã‚Âªncia: SQLite embutido (compila o SQLite junto, sem depender do sistema)
 rusqlite = { version = "0.32", features = ["bundled"] }
-# Hash de senha moderno (Argon2id) + geraÃƒÂ§ÃƒÂ£o de tokens com OsRng
+# Hash de senha moderno (Argon2id) + geraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o de tokens com OsRng
 argon2 = "0.5"
 sha2 = "0.10"
 hex = "0.4"
 semver = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 tracing-appender = "0.2"
-# Assinatura dos anÃƒÂºncios de descoberta (host assina, app desktop verifica)
+# Assinatura dos anÃƒÆ’Ã‚Âºncios de descoberta (host assina, app desktop verifica)
 ed25519-dalek = "2"
 # ServiceExt para servir anexos com ServeFile (suporte a Range/ETag)
 tower = { version = "0.4", features = ["util"] }
@@ -60,7 +60,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 tao = "0.30"
 wry = "0.47"
-# Mesma versÃ£o que o wry usa: permissÃµes de microfone/cÃ¢mera do WebView2.
+# Mesma versÃƒÂ£o que o wry usa: permissÃƒÂµes de microfone/cÃƒÂ¢mera do WebView2.
 webview2-com = "0.33"
 tokio-tungstenite = "0.24"
 windows-core = "0.58"
@@ -77,6 +77,7 @@ windows = { version = "0.58", features = [
     "Win32_System_Variant",
     "Win32_System_WinRT",
     "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
@@ -85,6 +86,6 @@ windows = { version = "0.58", features = [
 ] }
 
 [dev-dependencies]
-# Certificados efÃƒÂªmeros e servidor HTTPS somente para os testes do updater.
+# Certificados efÃƒÆ’Ã‚Âªmeros e servidor HTTPS somente para os testes do updater.
 rcgen = { version = "0.14", default-features = false, features = ["ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

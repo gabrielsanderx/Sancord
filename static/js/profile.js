@@ -96,9 +96,10 @@ function applyProfileAnimPolicy() {
     sel.value = PROFILE_ANIM_POLICIES.includes(state.audioSettings?.profileAnimations) ? state.audioSettings.profileAnimations : "hover";
     const reduced = Boolean(state.audioSettings?.reduceMotion) || systemPrefersReducedMotion();
     sel.disabled = reduced || state.audioSettings?.showProfileAnimations === false;
-    sel.title = reduced ? "Reduzir animações está ativo no Sancord ou no Windows." : "";
+    sel.title = reduced ? "Reduzir animações está ativo no Sanvo ou no Windows." : "";
   }
   updateProfileMotion();
+  if (typeof SancordCosmetics !== "undefined") SancordCosmetics.reconcileIdleBudget();
 }
 
 // Uma camada de efeito por vez. Re-renderizações do perfil preservam a execução atual.
@@ -138,6 +139,7 @@ function stopProfileEffect(layer = activeProfileEffect?.layer) {
   playing.observer.disconnect();
   layer.removeEventListener("animationend", playing.onEnd);
   layer.classList.remove("is-playing", `effect-${playing.id}`);
+  if (typeof SancordCosmetics !== "undefined") SancordCosmetics.clearEffectTimeline(layer);
   playing.card.classList.remove("profile-effect-running");
 }
 
@@ -157,7 +159,8 @@ function playProfileEffect(layer) {
   for (let el = card; el; el = el.parentElement) {
     observer.observe(el, { attributes: true, attributeFilter: ["class", "hidden"] });
   }
-  const duration = profileCardArt.effect[id]?.duration || PROFILE_EFFECT_DURATION_MS;
+  const v3Duration = typeof SancordCosmetics !== "undefined" ? SancordCosmetics.getProfileEffectDuration(id) : null;
+  const duration = v3Duration || profileCardArt.effect[id]?.duration || PROFILE_EFFECT_DURATION_MS;
   const timer = setTimeout(() => stopProfileEffect(layer), duration + 100);
   activeProfileEffect = { layer, card, id, timer, observer, onEnd };
   layer.style.setProperty("--profile-effect-duration", `${duration}ms`);
@@ -165,6 +168,7 @@ function playProfileEffect(layer) {
   void layer.offsetWidth;
   layer.addEventListener("animationend", onEnd);
   layer.classList.add("is-playing", `effect-${id}`);
+  if (typeof SancordCosmetics !== "undefined") SancordCosmetics.startEffectTimeline(layer, id);
   card.classList.add("profile-effect-running");
   return true;
 }
@@ -881,7 +885,10 @@ function applyProfileFrame(cardEl, frameId) {
   cardEl.classList.remove("has-frame");
   delete cardEl.dataset.frameClass;
   cardEl.querySelector(":scope > .pf-layer")?.remove();
-  if (!nextClass) return;
+  if (!nextClass) {
+    if (typeof SancordCosmetics !== "undefined") SancordCosmetics.attachFrameIdle(cardEl, null);
+    return;
+  }
   cardEl.dataset.frameClass = nextClass;
   cardEl.classList.add("has-frame", nextClass);
   const layer = document.createElement("div");
@@ -889,6 +896,7 @@ function applyProfileFrame(cardEl, frameId) {
   layer.setAttribute("aria-hidden", "true");
   layer.innerHTML = `<div class="pf-ring"></div>${profileFrameArt(frameId) || FRAME_ORNAMENTS[frameId] || ""}`;
   cardEl.appendChild(layer);
+  if (typeof SancordCosmetics !== "undefined") SancordCosmetics.attachFrameIdle(cardEl, frameId);
 }
 
 // Molduras reativas: presença e voz viram atributos; o CSS reage. Só cosmético
@@ -1036,7 +1044,7 @@ const PICKER_TABS = [
 ];
 const RARITY_LABELS = { common: "Comum", rare: "Rara", epic: "Épica", legendary: "Lendária", event: "Evento", founder: "Fundação" };
 const COLLECTION_LABELS = {
-  classicos: "Clássicos", "sancord-core": "Sancord Core", cosmic: "Cosmic", sakura: "Sakura", cyber: "Cyber", midnight: "Midnight",
+  classicos: "Clássicos", "sancord-core": "Sanvo Core", "sanvo-core": "Sanvo Core", cosmic: "Cosmic", sakura: "Sakura", cyber: "Cyber", midnight: "Midnight",
   inferno: "Inferno", frost: "Frost", ocean: "Ocean", retro: "Retrô", royal: "Royal", conquistas: "Conquistas", "temporada-inverno": "Temporada de inverno",
 };
 const picker = { kind: null, tab: "all", selected: null, el: null };
@@ -1268,7 +1276,7 @@ function renderPickerDetail(item) {
   if (!ownsCosmetic(item.kind, item.id)) {
     const lock = document.createElement("div");
     lock.className = "cosmetic-locked-hint";
-    lock.textContent = `🔒 ${hint}. Concedido pelo Sancord — não dá para equipar por aqui.`;
+    lock.textContent = `🔒 ${hint}. Concedido pelo Sanvo — não dá para equipar por aqui.`;
     box.appendChild(lock);
   }
   refreshAnimatedMedia(box);

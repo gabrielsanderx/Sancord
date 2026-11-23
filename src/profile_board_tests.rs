@@ -300,3 +300,99 @@ async fn profile_board_supports_custom_widget_and_automatic_milestones() {
     assert!(achs.contains(&"milestone_5_friends"), "{achs:?}");
     assert!(achs.contains(&"milestone_100_messages"), "{achs:?}");
 }
+
+#[tokio::test]
+async fn game_catalog_api_and_game_widget_metadata_persist_safely() {
+    let srv = start_server().await;
+    let client = reqwest::Client::new();
+
+    let base = format!("http://{}", srv.addr);
+    let get_json = |path: String| {
+        let client = client.clone();
+        async move {
+            let text = client.get(path).send().await.unwrap().text().await.unwrap();
+            serde_json::from_str::<Value>(&text).unwrap()
+        }
+    };
+
+    // Endpoints de catálogo de jogos (populares, busca por alias/título, resolve, by_id).
+    let pop = get_json(format!("{base}/api/games/popular?limit=10")).await;
+    assert_eq!(pop["ok"], true);
+    assert_eq!(pop["games"].as_array().unwrap().len(), 10);
+
+    let search = get_json(format!("{base}/api/games/search?q=cs2")).await;
+    assert_eq!(search["games"][0]["id"], "steam:730");
+
+    let resolved = get_json(format!("{base}/api/games/resolve?name=Minecraft")).await;
+    assert_eq!(resolved["game"]["id"], "sancord:minecraft");
+
+    let by_id = get_json(format!("{base}/api/games/steam:730")).await;
+    assert_eq!(by_id["game"]["title"], "Counter-Strike 2");
+
+    // Persistência dos novos metadados de jogo + auto_activity no Mural.
+    let token = register(&srv, "GamerMural").await;
+    let mut owner = connect(&srv, &token).await;
+    wait_for(&mut owner, "Welcome").await;
+
+    // Rejeita cover_url externa fora da allowlist.
+    save(
+        &mut owner,
+        &json!({
+            "revision": 0,
+            "audience": "everyone",
+            "widgets": [{
+                "kind": "favorite_game",
+                "visible": true,
+                "name": "Minecraft",
+                "description": "",
+                "cover_id": null,
+                "game_id": "sancord:minecraft",
+                "cover_url": "https://evil.example.com/pixel.png"
+            }]
+        }),
+    )
+    .await;
+    let bad = wait_for(&mut owner, "ServerFeedback").await;
+    assert_eq!(bad["ok"], false);
+
+    // Aceita jogo do catálogo + Jogando agora em modo automático (nome vazio permitido quando auto_activity=true).
+    let board = json!({
+        "revision": 0,
+        "audience": "everyone",
+        "widgets": [
+            {
+                "kind": "favorite_game",
+                "visible": true,
+                "name": "Counter-Strike 2",
+                "description": "Clássico competitivo",
+                "cover_id": null,
+                "game_id": "steam:730",
+                "cover_url": "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/730/header.jpg",
+                "release_year": 2023,
+                "platforms": ["PC"]
+            },
+            {
+                "kind": "want_to_play",
+                "visible": true,
+                "name": "ELDEN RING",
+                "game_id": "steam:1245620",
+                "cover_url": "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1245620/header.jpg",
+                "release_year": 2022,
+                "platforms": ["PC", "PlayStation"],
+                "note": "Jogar nas férias"
+            },
+            {
+                "kind": "playing",
+                "visible": true,
+                "name": "",
+                "auto_activity": true
+            }
+        ]
+    });
+    save(&mut owner, &board).await;
+    let saved = wait_for(&mut owner, "ProfileBoardSaved").await["board"].clone();
+    assert_eq!(saved["revision"], 1);
+    assert_eq!(saved["widgets"][0]["game_id"], "steam:730");
+    assert_eq!(saved["widgets"][1]["note"], "Jogar nas férias");
+    assert_eq!(saved["widgets"][2]["auto_activity"], true);
+}

@@ -1,0 +1,542 @@
+/* ============================================================================
+   Sancord — Estilos do Motor Unificado de Cosméticos (v3)
+   • Paletas temáticas coerentes por coleção
+   • Avatar Decorations multi-camada + eventos secundários e raros (IDLE_WITH_EVENTS)
+   • Profile Frames arquitetônicas responsivas por contexto
+   • Profile Effects com timeline multi-estágio (init → entrance → main → climax → dissipate)
+   • Nameplates ilustradas em SVG com legibilidade garantida
+   • Display Name Styles (10 fontes distintas + materiais ricos animados por contexto)
+   ============================================================================ */
+
+/* Paletas temáticas adicionais (complementam core, cosmic, sakura em ui.css) */
+.profile-art-cyber   { --art-lit: #e0f2fe; --art-ink: #0891b2; --art-edge: #22d3ee; }
+.profile-art-royal   { --art-lit: #fef3c7; --art-ink: #b45309; --art-edge: #f59e0b; }
+.profile-art-frost   { --art-lit: #ffffff; --art-ink: #0284c7; --art-edge: #7dd3fc; }
+.profile-art-inferno { --art-lit: #fef08a; --art-ink: #9a3412; --art-edge: #fb923c; }
+.profile-art-ocean   { --art-lit: #e0f2fe; --art-ink: #0f766e; --art-edge: #2dd4bf; }
+.profile-art-emerald { --art-lit: #a7f3d0; --art-ink: #065f46; --art-edge: #10b981; }
+
+/* ---------------------------------------------------------------------------
+   1. Avatar Decorations v3 — Camadas, bleed consciente e animações orgânicas
+   --------------------------------------------------------------------------- */
+.cos-v3-deco {
+  pointer-events: none;
+  overflow: visible;
+}
+.cos-v3-deco svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible !important;
+}
+:is(.profile-card-avatar-wrap, .avatar-deco-wrap, .user-avatar-wrap):has(> .cos-v3-deco) {
+  overflow: visible;
+}
+
+/* Estados padrão (curated static pose para Reduced Motion e contextos compactos) */
+.cos-eyelid { opacity: 0; }
+.cos-shooting-star { opacity: 0; transform: translate(-18px, 8px); }
+.cos-drifting-petal { opacity: 0; transform: translate(0, 0) rotate(0deg); }
+.cos-glint-sweep { opacity: 0; stroke-dasharray: 28 120; stroke-dashoffset: 60; }
+
+/* Animações idle orgânicas (somente quando motion ativo e fora da Member List) */
+.cos-companion-breathe {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+.cos-scarf-sway,
+.cos-branch-sway,
+.cos-tassel-sway,
+.cos-ear-twitch {
+  transform-box: fill-box;
+}
+.cos-branch-sway { transform-origin: 20% 80%; }
+.cos-tassel-sway { transform-origin: 50% 0%; }
+.cos-ear-twitch  { transform-origin: 35% 85%; }
+
+:is(.profile-motion-active, [data-cosmetic-idle-active="true"], .cosmetic-choice:hover, .pe-choice:hover) .cos-companion-breathe {
+  animation: cosBreathe 6s ease-in-out infinite;
+}
+:is(.profile-motion-active, [data-cosmetic-idle-active="true"], .cosmetic-choice:hover, .pe-choice:hover) .cos-scarf-sway {
+  animation: cosScarfSway 6.4s ease-in-out infinite;
+}
+:is(.profile-motion-active, [data-cosmetic-idle-active="true"], .cosmetic-choice:hover, .pe-choice:hover) .cos-branch-sway {
+  animation: cosBranchSway 5.6s ease-in-out infinite;
+}
+:is(.profile-motion-active, [data-cosmetic-idle-active="true"], .cosmetic-choice:hover, .pe-choice:hover) .cos-tassel-sway {
+  animation: cosTasselSway 4.8s ease-in-out infinite;
+}
+:is(.profile-motion-active, [data-cosmetic-idle-active="true"], .cosmetic-choice:hover, .pe-choice:hover) .cos-twinkle {
+  animation: cosTwinkle 3.8s ease-in-out infinite;
+}
+.cos-twinkle.cos-d1 { animation-delay: -0.9s; }
+.cos-twinkle.cos-d2 { animation-delay: -1.9s; }
+.cos-twinkle.cos-d3 { animation-delay: -2.8s; }
+:is(.profile-motion-active, [data-cosmetic-idle-active="true"], .cosmetic-choice:hover, .pe-choice:hover) .cos-led-breathe {
+  animation: cosLedBreathe 4.6s ease-in-out infinite;
+}
+:is(.profile-motion-active, [data-cosmetic-idle-active="true"], .cosmetic-choice:hover, .pe-choice:hover) .cos-ember-float {
+  animation: cosEmberFloat 4.2s ease-in-out infinite;
+}
+.cos-ember-float.cos-d1 { animation-delay: -1.3s; }
+.cos-ember-float.cos-d2 { animation-delay: -2.4s; }
+
+/* Eventos secundários (IDLE_WITH_EVENTS: piscar, pétala solta, orelha mexe, brilho atravessa) */
+.is-secondary-event .cos-eye {
+  animation: cosBlinkEye 420ms ease-in-out 1;
+}
+.is-secondary-event .cos-eyelid {
+  animation: cosBlinkLid 420ms ease-in-out 1;
+}
+.is-secondary-event .cos-drifting-petal {
+  animation: cosPetalDriftEvent 1650ms cubic-bezier(0.22, 0.61, 0.36, 1) 1;
+}
+.is-secondary-event .cos-ear-twitch {
+  animation: cosEarTwitch 680ms ease-in-out 1;
+}
+.is-secondary-event .cos-glint-sweep {
+  animation: cosGlintSweep 1100ms ease-in-out 1;
+}
+
+/* Evento raro (estrela cadente atravessando o arco superior) */
+.is-rare-event .cos-shooting-star {
+  animation: cosShootingStar 1200ms cubic-bezier(0.16, 1, 0.3, 1) 1;
+}
+
+@keyframes cosBreathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-1.4px) scale(1.022); }
+}
+@keyframes cosScarfSway {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(1.4deg) translateY(-0.6px); }
+}
+@keyframes cosBranchSway {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(2.1deg); }
+}
+@keyframes cosTasselSway {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(5deg); }
+}
+@keyframes cosTwinkle {
+  0%, 100% { opacity: 0.42; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1.14); }
+}
+@keyframes cosLedBreathe {
+  0%, 100% { opacity: 0.58; }
+  50% { opacity: 1; }
+}
+@keyframes cosEmberFloat {
+  0% { transform: translateY(4px); opacity: 0; }
+  25% { opacity: 0.95; }
+  85% { opacity: 0.65; }
+  100% { transform: translateY(-10px) translateX(2px); opacity: 0; }
+}
+@keyframes cosBlinkEye {
+  0%, 100% { opacity: 1; }
+  38%, 62% { opacity: 0; }
+}
+@keyframes cosBlinkLid {
+  0%, 100% { opacity: 0; }
+  38%, 62% { opacity: 1; }
+}
+@keyframes cosPetalDriftEvent {
+  0% { opacity: 0; transform: translate(0, 0) rotate(0deg); }
+  15% { opacity: 0.96; }
+  80% { opacity: 0.85; }
+  100% { opacity: 0; transform: translate(58px, 64px) rotate(145deg); }
+}
+@keyframes cosEarTwitch {
+  0%, 100% { transform: rotate(0deg); }
+  30% { transform: rotate(-10deg); }
+  55% { transform: rotate(4deg); }
+  75% { transform: rotate(-5deg); }
+}
+@keyframes cosGlintSweep {
+  0% { opacity: 0; stroke-dashoffset: 90; }
+  22% { opacity: 0.88; }
+  78% { opacity: 0.72; }
+  100% { opacity: 0; stroke-dashoffset: -70; }
+}
+@keyframes cosShootingStar {
+  0% { opacity: 0; transform: translate(-24px, 10px) scale(0.75); }
+  18% { opacity: 1; }
+  75% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(34px, -14px) scale(1.05); }
+}
+
+/* ---------------------------------------------------------------------------
+   2. Profile Frames v3 — Arquitetura responsiva por contexto
+   --------------------------------------------------------------------------- */
+.profile-card[data-profile-render-context="SELF_PROFILE_MENU"] {
+  --frame-art-size: 20px;
+}
+.profile-card[data-profile-render-context="compact"],
+.profile-card[data-profile-render-context="PROFILE_POPOUT"] {
+  --frame-art-size: 26px;
+}
+.profile-card[data-profile-render-context="full"],
+.profile-card[data-profile-render-context="FULL_PROFILE"],
+.profile-card[data-profile-render-context="editor-full"],
+.profile-card[data-profile-render-context="EDITOR_PREVIEW"] {
+  --frame-art-size: clamp(38px, 3.8vw, 56px);
+}
+.profile-card.pf-mini {
+  --frame-art-size: 14px;
+}
+
+.cos-v3-frame .frame-art-crest.cos-frame-crest {
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(64px, 32%, 116px);
+  height: 15px;
+  background: none;
+  clip-path: none;
+  border-radius: 0;
+}
+.cos-v3-frame .frame-art-crest.cos-frame-crest svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+}
+.cos-v3-frame .frame-art-bottom-seal {
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(56px, 28%, 98px);
+  height: 11px;
+}
+.cos-v3-frame .frame-art-bottom-seal svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+}
+.profile-card.pf-mini .frame-art-bottom-seal,
+.profile-card[data-profile-render-context="SELF_PROFILE_MENU"] .frame-art-bottom-seal {
+  display: none;
+}
+.cos-v3-frame .frame-node {
+  fill: var(--art-lit);
+  stroke: none;
+}
+:is(.profile-motion-active, [data-cosmetic-idle-active="true"]) .cos-v3-frame .frame-node {
+  animation: cosTwinkle 4.4s ease-in-out infinite;
+}
+.is-secondary-event .cos-v3-frame .frame-art-rail {
+  opacity: 0.96;
+  transition: opacity 420ms ease;
+}
+.is-secondary-event .cos-v3-frame .frame-art-crest {
+  filter: drop-shadow(0 0 6px var(--art-edge));
+}
+
+/* ---------------------------------------------------------------------------
+   3. Profile Effects v3 — Timeline multi-estágio (BACK + FRONT)
+   --------------------------------------------------------------------------- */
+.profile-effect-timeline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.profile-effect-timeline .effect-plane-back {
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 380ms ease;
+}
+.profile-effect-timeline .effect-plane-front {
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 320ms ease, transform 560ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Estágios explícitos da timeline */
+.profile-effect-layer.ef-stage-init .effect-plane-back,
+.profile-effect-layer.ef-stage-init .effect-plane-front {
+  opacity: 0;
+}
+.profile-effect-layer.ef-stage-entrance .effect-plane-back {
+  opacity: 0.85;
+}
+.profile-effect-layer.ef-stage-entrance .effect-plane-front {
+  opacity: 0.72;
+}
+.profile-effect-layer.ef-stage-main .effect-plane-back {
+  opacity: 1;
+}
+.profile-effect-layer.ef-stage-main .effect-plane-front {
+  opacity: 0.96;
+}
+.profile-effect-layer.ef-stage-climax .effect-plane-back {
+  opacity: 1;
+}
+.profile-effect-layer.ef-stage-climax .effect-plane-front {
+  opacity: 1;
+}
+.profile-effect-layer.ef-stage-dissipate .effect-plane-back,
+.profile-effect-layer.ef-stage-dissipate .effect-plane-front {
+  opacity: 0;
+  transition: opacity 640ms ease-out;
+}
+
+/* Movimentos por estágio */
+.profile-effect-layer .ef-scan-beam { transform: translateY(0); }
+.profile-effect-layer.is-playing .ef-scan-beam {
+  animation: efScanDown var(--profile-effect-duration, 2300ms) cubic-bezier(0.22, 0.61, 0.36, 1) 1 both;
+}
+.profile-effect-layer .ef-climax-burst {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.55);
+  transition: opacity 320ms ease, transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.profile-effect-layer.ef-stage-climax .ef-climax-burst {
+  opacity: 1;
+  transform: scale(1.08);
+}
+.profile-effect-layer.ef-stage-dissipate .ef-climax-burst {
+  opacity: 0;
+  transform: scale(1.28);
+}
+
+.profile-effect-layer.is-playing .ef-comet-1 {
+  animation: efCometOne var(--profile-effect-duration, 2600ms) cubic-bezier(0.16, 1, 0.3, 1) 1 both;
+}
+.profile-effect-layer.is-playing .ef-comet-2 {
+  animation: efCometTwo var(--profile-effect-duration, 2600ms) cubic-bezier(0.16, 1, 0.3, 1) 1 both;
+}
+.profile-effect-layer.is-playing .ef-back-petals {
+  animation: efPetalsBack var(--profile-effect-duration, 2700ms) cubic-bezier(0.22, 0.61, 0.36, 1) 1 both;
+}
+.profile-effect-layer.is-playing .ef-front-petals {
+  animation: efPetalsFront var(--profile-effect-duration, 2700ms) cubic-bezier(0.22, 0.61, 0.36, 1) 1 both;
+}
+.profile-effect-layer.is-playing .ef-ember-rise {
+  animation: efEmbersRise var(--profile-effect-duration, 2500ms) ease-out 1 both;
+}
+.profile-effect-layer.is-playing .ef-trace-paths {
+  stroke-dasharray: 140;
+  stroke-dashoffset: 140;
+  animation: efTraceDraw var(--profile-effect-duration, 2300ms) ease-in-out 1 both;
+}
+
+@keyframes efScanDown {
+  0% { transform: translateY(0); opacity: 0; }
+  12% { opacity: 0.72; }
+  52% { transform: translateY(108px); opacity: 0.52; }
+  100% { transform: translateY(112px); opacity: 0; }
+}
+@keyframes efCometOne {
+  0% { transform: translate(-34px, 24px); opacity: 0; }
+  22% { opacity: 1; }
+  68% { transform: translate(14px, -10px); opacity: 0.92; }
+  100% { transform: translate(28px, -18px); opacity: 0; }
+}
+@keyframes efCometTwo {
+  0%, 12% { transform: translate(-38px, 28px); opacity: 0; }
+  36% { opacity: 0.9; }
+  76% { transform: translate(12px, -12px); opacity: 0.78; }
+  100% { transform: translate(26px, -20px); opacity: 0; }
+}
+@keyframes efPetalsBack {
+  0% { transform: translate(-18px, -10px); opacity: 0; }
+  20% { opacity: 0.72; }
+  72% { transform: translate(14px, 18px); opacity: 0.64; }
+  100% { transform: translate(22px, 28px); opacity: 0; }
+}
+@keyframes efPetalsFront {
+  0% { transform: translate(-26px, -16px) rotate(-6deg); opacity: 0; }
+  18% { opacity: 0.96; }
+  68% { transform: translate(18px, 22px) rotate(12deg); opacity: 0.88; }
+  100% { transform: translate(28px, 34px) rotate(18deg); opacity: 0; }
+}
+@keyframes efEmbersRise {
+  0% { transform: translateY(18px); opacity: 0; }
+  24% { opacity: 0.96; }
+  74% { transform: translateY(-34px); opacity: 0.84; }
+  100% { transform: translateY(-54px); opacity: 0; }
+}
+@keyframes efTraceDraw {
+  0% { stroke-dashoffset: 140; opacity: 0; }
+  20% { opacity: 0.9; }
+  58% { stroke-dashoffset: 0; opacity: 0.95; }
+  100% { stroke-dashoffset: -40; opacity: 0; }
+}
+
+/* ---------------------------------------------------------------------------
+   4. Nameplates v3 — Peças gráficas compostas em SVG com leitura preservada
+   --------------------------------------------------------------------------- */
+.has-np-art {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.has-np-art > :not(.np-art-layer) {
+  position: relative;
+  z-index: 1;
+}
+.np-art-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  overflow: hidden;
+  opacity: 0.92;
+  transition: opacity 180ms ease;
+}
+.np-art-layer svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.members-sidebar .member-item .np-art-layer {
+  opacity: 0.56;
+}
+.members-sidebar .member-item:is(:hover, :focus-visible) .np-art-layer {
+  opacity: 0.88;
+}
+.profile-nameplate-wrap.has-np-art {
+  padding: 2px 10px;
+}
+/* Nos cabeçalhos de cartão de perfil (Popout, Perfil Completo, Self Profile Menu e Prévia),
+   o Display Name nunca recebe tarja/retângulo de placa atrás do texto. */
+.profile-card .profile-nameplate-wrap,
+.profile-card .profile-nameplate-wrap.profile-nameplate-chip,
+.profile-card .profile-nameplate-wrap.has-np-art,
+.profile-card .profile-nameplate-wrap[class*="nameplate-"] {
+  padding: 0 !important;
+  margin: 0;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: visible;
+}
+.profile-card .profile-nameplate-wrap > .np-art-layer {
+  display: none !important;
+}
+body.profile-hide-nameplates .np-art-layer {
+  display: none !important;
+}
+:is(.profile-motion-active, [data-cosmetic-idle-active="true"], .dm-item:hover, .friend-row:hover, .pe-choice:hover) .cos-np-sway {
+  transform-box: fill-box;
+  transform-origin: right center;
+  animation: cosBranchSway 5.8s ease-in-out infinite;
+}
+
+/* ---------------------------------------------------------------------------
+   5. Display Name Styles v3 — 10 Fontes distintas + Materiais sofisticados
+   --------------------------------------------------------------------------- */
+.styled-name.name-style-editorial,
+.styled-name[data-name-font="editorial"] {
+  font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.styled-name.name-style-bubble,
+.styled-name[data-name-font="bubble"] {
+  font-family: "Comic Sans MS", "Arial Rounded MT Bold", "Segoe UI", sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.styled-name.name-style-cyber,
+.styled-name[data-name-font="cyber"] {
+  font-family: "Bahnschrift", "Consolas", "Segoe UI", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.styled-name.name-style-fantasy,
+.styled-name[data-name-font="fantasy"] {
+  font-family: "Constantia", "Palatino Linotype", Georgia, serif;
+  font-variant-caps: small-caps;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* Novos materiais ricos (Gummy, Ink, Cosmic) e upgrade dos existentes */
+.styled-name.name-style-gummy {
+  color: color-mix(in srgb, var(--name-color, #f472b6) 82%, #ffffff);
+  font-weight: 800;
+  -webkit-text-stroke: 0.55px color-mix(in srgb, var(--name-color, #ec4899) 70%, #3b0764);
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.55),
+    0 2px 4px color-mix(in srgb, var(--name-color, #ec4899) 45%, rgba(0, 0, 0, 0.45));
+}
+.styled-name.name-style-ink {
+  color: var(--name-ink, #f8fafc);
+  font-weight: 800;
+  -webkit-text-stroke: 0.9px color-mix(in srgb, var(--name-color, #0f172a) 82%, #000000);
+  text-shadow:
+    1.5px 1.5px 0 color-mix(in srgb, var(--name-color, #6366f1) 75%, #111827),
+    3px 3px 0 rgba(0, 0, 0, 0.38);
+}
+.styled-name.name-style-cosmic {
+  --sancord-name-gradient: linear-gradient(110deg, #a5b4fc 0%, #38bdf8 28%, #e879f9 58%, #fde68a 82%, #a5b4fc 100%);
+  background-image: var(--sancord-name-gradient);
+  background-size: 240% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent !important;
+  font-weight: 750;
+}
+.styled-name.name-style-prism {
+  --sancord-name-gradient: linear-gradient(105deg, #f472b6 0%, #fbbf24 22%, #34d399 46%, #38bdf8 70%, #a78bfa 88%, #f472b6 100%);
+  background-size: 240% 100%;
+}
+.styled-name.name-style-holographic {
+  --sancord-name-gradient: linear-gradient(118deg, #c4b5fd 12%, #ffffff 36%, #67e8f9 54%, #f9a8d4 74%, #c4b5fd 92%);
+  background-size: 260% 100%;
+}
+.styled-name.name-style-outline {
+  font-weight: 800;
+  -webkit-text-stroke: 0.85px color-mix(in srgb, var(--name-color, var(--accent)) 85%, var(--name-ink));
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* Animação do MATERIAL (nunca desloca o texto!) nos contextos apropriados */
+:is(
+  [data-profile-render-context="full"],
+  [data-profile-render-context="FULL_PROFILE"],
+  [data-profile-render-context="editor-full"],
+  [data-profile-render-context="EDITOR_PREVIEW"],
+  [data-profile-render-context="compact"],
+  [data-profile-render-context="PROFILE_POPOUT"],
+  [data-profile-render-context="SELF_PROFILE_MENU"],
+  .name-style-showcase-box
+) .styled-name:is(.name-style-prism, .name-style-holographic, .name-style-cosmic, .name-style-custom-gradient, .name-style-gradient) {
+  animation: cosNameMaterialFlow 6.5s ease-in-out infinite;
+}
+.members-sidebar .styled-name {
+  animation: none !important;
+}
+@keyframes cosNameMaterialFlow {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* ---------------------------------------------------------------------------
+   6. Respeito estrito a Reduced Motion, Janela Inativa e Member List
+   --------------------------------------------------------------------------- */
+.members-sidebar :is(.cos-v3-deco, .cos-v3-deco *, .np-art-layer, .np-art-layer *) {
+  animation: none !important;
+}
+body:is(.anim-policy-never, .profile-window-inactive, .profile-static-decorations) :is(.cos-v3-deco, .cos-v3-deco *) {
+  animation: none !important;
+}
+body:is(.anim-policy-never, .profile-window-inactive, .profile-static-frames) :is(.cos-v3-frame, .cos-v3-frame *) {
+  animation: none !important;
+}
+body:is(.anim-policy-never, .profile-window-inactive, .profile-static-names) .styled-name {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.cos-v3-deco, .cos-v3-deco *, .cos-v3-frame, .cos-v3-frame *, .np-art-layer, .np-art-layer *, .styled-name) {
+    animation: none !important;
+  }
+}

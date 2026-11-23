@@ -11,7 +11,31 @@ pub type Result<T> = std::result::Result<T, String>;
 pub const MAX_PACKAGE: u64 = 256 * 1024 * 1024;
 // Compatibilidade do pacote é SO/arquitetura; não depende do linker GNU/MSVC.
 pub const TARGET: &str = "windows-x86_64";
-pub const ASSET: &str = "Sancord.exe";
+pub const SANVO_ASSET: &str = "Sanvo.exe";
+pub const LEGACY_ASSET: &str = "Sancord.exe";
+/// LEGACY COMPATIBILITY: nome do asset legado mantido para compatibilidade de transição.
+pub const ASSET: &str = LEGACY_ASSET;
+
+pub const SANVO_MANIFEST_JSON: &str = "sanvo-update.json";
+pub const SANVO_MANIFEST_SIG: &str = "sanvo-update.sig";
+pub const LEGACY_MANIFEST_JSON: &str = "sancord-update.json";
+pub const LEGACY_MANIFEST_SIG: &str = "sancord-update.sig";
+
+pub fn is_supported_asset(asset: &str) -> bool {
+    asset == SANVO_ASSET || asset == LEGACY_ASSET
+}
+
+pub fn is_supported_repository(repo: &str, config: &UpdateConfig) -> bool {
+    if repo == config.repository {
+        return true;
+    }
+    // Transição oficial Sancord -> Sanvo sob o mesmo proprietário e chave Ed25519.
+    matches!(
+        (config.repository.as_str(), repo),
+        ("gabrielsanderx/Sancord", "gabrielsanderx/Sanvo")
+            | ("gabrielsanderx/Sanvo", "gabrielsanderx/Sancord")
+    )
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct UpdateConfig { pub repository: String, pub public_key: String }
@@ -55,7 +79,7 @@ pub fn verify_manifest(config: &UpdateConfig, raw: &[u8], signature: &str) -> Re
     key(&config.public_key)?.verify_strict(raw, &signature_bytes).map_err(|_| "A assinatura da atualização não confere. Instalação bloqueada.")?;
     let m: Manifest = serde_json::from_slice(raw).map_err(|_| "Metadados inválidos.")?;
     let version = Version::parse(&m.version).map_err(|_| "Versão inválida.")?;
-    if m.schema != 1 || m.repository != config.repository || m.target != TARGET || m.asset != ASSET
+    if m.schema != 1 || !is_supported_repository(&m.repository, config) || m.target != TARGET || !is_supported_asset(&m.asset)
         || !version.pre.is_empty() || !version.build.is_empty() || m.size == 0 || m.size > MAX_PACKAGE
         || m.sha256.len() != 64 || !m.sha256.bytes().all(|b| b.is_ascii_hexdigit()) || m.notes.len() > 48 * 1024 {
         return Err("Metadados incompatíveis com este aplicativo.".into());
@@ -66,7 +90,7 @@ pub fn verify_manifest(config: &UpdateConfig, raw: &[u8], signature: &str) -> Re
 pub fn client() -> Result<Client> {
     Client::builder().https_only(true).connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(300)).redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(concat!("Sancord/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Sanvo/", env!("CARGO_PKG_VERSION")))
         .build().map_err(|_| "Não foi possível iniciar a conexão segura.".into())
 }
 fn bounded(mut reader: impl Read, limit: u64) -> Result<Vec<u8>> {
@@ -115,8 +139,25 @@ fn check_from(config: &UpdateConfig, current: &str, client: &Client, source: &Re
     if response.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
     let response = response.error_for_status().map_err(|_| "GitHub indisponível ou limite de consultas atingido. Tente mais tarde.")?;
     let Some(version) = release_version(&bounded(response, 1024 * 1024)?, current)? else { return Ok(None); };
-    let raw = get_bytes(client, &source.asset(&version, "sancord-update.json"), 64 * 1024)?;
-    let signature = String::from_utf8(get_bytes(client, &source.asset(&version, "sancord-update.sig"), 256)?).map_err(|_| "Assinatura inválida.")?;
+    // Durante a transição Sancord -> Sanvo, aceita tanto sanvo-update.json quanto sancord-update.json.
+    let pairs = if config.repository.ends_with("/Sanvo") {
+        [(SANVO_MANIFEST_JSON, SANVO_MANIFEST_SIG), (LEGACY_MANIFEST_JSON, LEGACY_MANIFEST_SIG)]
+    } else {
+        [(LEGACY_MANIFEST_JSON, LEGACY_MANIFEST_SIG), (SANVO_MANIFEST_JSON, SANVO_MANIFEST_SIG)]
+    };
+    let (raw, signature) = match get_bytes(client, &source.asset(&version, pairs[0].0), 64 * 1024) {
+        Ok(raw) => {
+            let sig = String::from_utf8(get_bytes(client, &source.asset(&version, pairs[0].1), 256)?)
+                .map_err(|_| "Assinatura inválida.")?;
+            (raw, sig)
+        }
+        Err(_) => {
+            let raw = get_bytes(client, &source.asset(&version, pairs[1].0), 64 * 1024)?;
+            let sig = String::from_utf8(get_bytes(client, &source.asset(&version, pairs[1].1), 256)?)
+                .map_err(|_| "Assinatura inválida.")?;
+            (raw, sig)
+        }
+    };
     let verified = verify_manifest(config, &raw, &signature)?;
     if verified.manifest.version != version { return Err("A versão assinada difere da release.".into()); }
     Ok(Some(verified))
@@ -147,7 +188,7 @@ pub fn download(config: &UpdateConfig, release: &VerifiedRelease, path: &Path, p
 }
 fn download_from(config: &UpdateConfig, release: &VerifiedRelease, path: &Path, progress: impl FnMut(u64, u64), client: &Client, source: &ReleaseSource) -> Result<()> {
     let verified = verify_manifest(config, &release.raw, &release.signature)?;
-    let response = client.get(source.asset(&verified.manifest.version, ASSET)).send()
+    let response = client.get(source.asset(&verified.manifest.version, &verified.manifest.asset)).send()
         .and_then(|r| r.error_for_status()).map_err(|_| "Falha de rede durante o download. Tente novamente.")?;
     stage_stream(response, path, &verified.manifest, progress)
 }

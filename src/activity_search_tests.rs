@@ -556,3 +556,191 @@ async fn profile_badges_visibility_order_security_and_realtime_sync() {
         assert!(crate::cosmetics::owns(acc, founder_frame));
     }
 }
+
+#[tokio::test]
+async fn dm_unread_multi_device_sync_and_blocked_group_sender_isolation() {
+    let srv = start_server().await;
+    let tok_a = register(&srv, "NotifAlice").await;
+    let tok_b = register(&srv, "NotifBob").await;
+
+    let mut alice_pc1 = connect(&srv, &tok_a).await;
+    wait_for(&mut alice_pc1, "Welcome").await;
+    let mut alice_pc2 = connect(&srv, &tok_a).await;
+    wait_for(&mut alice_pc2, "Welcome").await;
+    let mut bob = connect(&srv, &tok_b).await;
+    wait_for(&mut bob, "Welcome").await;
+
+    // Amizade para DM direta (sem cair em solicitação silenciosa).
+    send(&mut alice_pc1, json!({"type":"SendFriendRequest","payload":{"target_username":"NotifBob"}})).await;
+    let _ = wait_for(&mut bob, "FriendsSync").await;
+    send(&mut bob, json!({"type":"RespondFriendRequest","payload":{"from_username":"NotifAlice","accept":true}})).await;
+    let _ = wait_for(&mut bob, "FriendsSync").await;
+
+    send(&mut bob, json!({"type":"OpenDm","payload":{"target_username":"NotifAlice"}})).await;
+    let dm_id = wait_for(&mut bob, "DmOpened").await["dm_id"].as_str().unwrap().to_string();
+    for text in ["oi", "vai jogar?", "entrou?"] {
+        send(&mut bob, json!({"type":"SendChat","payload":{"channel_id":dm_id,"content":text}})).await;
+        let _ = wait_for(&mut alice_pc1, "NewChatMessage").await;
+    }
+
+    // Reconnect (ou 3ª sessão) recebe exatamente 3 não lidas do SQLite.
+    let mut alice_pc3 = connect(&srv, &tok_a).await;
+    let welcome3 = wait_for(&mut alice_pc3, "Welcome").await;
+    let dm_rs = welcome3["read_states"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["channel_id"] == dm_id)
+        .expect("read_state da DM presente no Welcome");
+    assert_eq!(dm_rs["mention_count"], 3);
+
+    // Alice lê no PC 2 (AckChannel) -> PC 1 e PC 3 recebem ReadStateUpdated zerando o contador!
+    send(&mut alice_pc2, json!({"type":"AckChannel","payload":{"channel_id":dm_id,"message_id":""}})).await;
+    let rs1 = wait_for(&mut alice_pc1, "ReadStateUpdated").await;
+    assert_eq!(rs1["state"]["channel_id"], dm_id);
+    assert_eq!(rs1["state"]["mention_count"], 0);
+    let rs3 = wait_for(&mut alice_pc3, "ReadStateUpdated").await;
+    assert_eq!(rs3["state"]["channel_id"], dm_id);
+    assert_eq!(rs3["state"]["mention_count"], 0);
+
+    // Após leitura, nova mensagem de Bob volta a contar 1; Alice responde pelo PC 1 e PC 2 recebe ReadStateUpdated=0.
+    send(&mut bob, json!({"type":"SendChat","payload":{"channel_id":dm_id,"content":"cadê você?"}})).await;
+    let _ = wait_for(&mut alice_pc1, "NewChatMessage").await;
+    {
+        let st = srv.state.read().await;
+        let acc_id = st.account_id_for("notifalice").unwrap();
+        assert_eq!(st.read_state(&acc_id, &dm_id).mention_count, 1);
+    }
+    send(&mut alice_pc1, json!({"type":"SendChat","payload":{"channel_id":dm_id,"content":"cheguei!"}})).await;
+    let rs2 = wait_for(&mut alice_pc2, "ReadStateUpdated").await;
+    assert_eq!(rs2["state"]["channel_id"], dm_id);
+    assert_eq!(rs2["state"]["mention_count"], 0);
+
+    // Se Bob envia uma mensagem e a apaga antes de Alice ler (#54), o servidor reduz mention_count e emite ReadStateUpdated=0.
+    send(&mut bob, json!({"type":"SendChat","payload":{"channel_id":dm_id,"content":"ops mensagem errada"}})).await;
+    let msg_id = loop {
+        let m = wait_for(&mut alice_pc1, "NewChatMessage").await;
+        if m["message"]["content"] == "ops mensagem errada" {
+            break m["message"]["id"].as_str().unwrap().to_string();
+        }
+    };
+    {
+        let st = srv.state.read().await;
+        let acc_id = st.account_id_for("notifalice").unwrap();
+        assert_eq!(st.read_state(&acc_id, &dm_id).mention_count, 1);
+    }
+    send(&mut bob, json!({"type":"DeleteChat","payload":{"channel_id":dm_id,"message_id":msg_id}})).await;
+    let rs_del = wait_for(&mut alice_pc2, "ReadStateUpdated").await;
+    assert_eq!(rs_del["state"]["channel_id"], dm_id);
+    assert_eq!(rs_del["state"]["mention_count"], 0);
+}
+
+#[tokio::test]
+async fn voice_cue_events_isolate_channels_track_transitions_dedupe_and_rate_limit() {
+    let srv = start_server().await;
+    let tok_a = register(&srv, "CallCueA").await;
+    let tok_b = register(&srv, "CallCueB").await;
+    let tok_c = register(&srv, "CallCueC").await;
+    let tok_d = register(&srv, "CallCueD").await;
+
+    let mut a = connect(&srv, &tok_a).await;
+    let wa = wait_for(&mut a, "Welcome").await;
+    let uid_a = wa["user"]["id"].as_str().unwrap().to_string();
+
+    let mut b = connect(&srv, &tok_b).await;
+    let wb = wait_for(&mut b, "Welcome").await;
+    let uid_b = wb["user"]["id"].as_str().unwrap().to_string();
+
+    let mut c = connect(&srv, &tok_c).await;
+    let wc = wait_for(&mut c, "Welcome").await;
+    let uid_c = wc["user"]["id"].as_str().unwrap().to_string();
+
+    let mut d = connect(&srv, &tok_d).await;
+    wait_for(&mut d, "Welcome").await;
+
+    // A e B entram em voice-geral; C e D entram em voice-gameplay (canais distintos).
+    send(&mut a, json!({"type":"JoinVoice","payload":{"channel_id":"voice-geral"}})).await;
+    wait_for(&mut a, "VoiceStateSync").await;
+
+    send(&mut b, json!({"type":"JoinVoice","payload":{"channel_id":"voice-geral"}})).await;
+    let cue_join_b = wait_for(&mut a, "VoiceCueEvent").await;
+    assert_eq!(cue_join_b["event_type"], "voice_join");
+    assert_eq!(cue_join_b["voice_session_id"], "voice-geral");
+    assert_eq!(cue_join_b["actor_user_id"], uid_b);
+    assert!(!cue_join_b["event_id"].as_str().unwrap().is_empty());
+
+    send(&mut c, json!({"type":"JoinVoice","payload":{"channel_id":"voice-gameplay"}})).await;
+    wait_for(&mut c, "VoiceStateSync").await;
+    send(&mut d, json!({"type":"JoinVoice","payload":{"channel_id":"voice-gameplay"}})).await;
+    let cue_join_d = wait_for(&mut c, "VoiceCueEvent").await;
+    assert_eq!(cue_join_d["event_type"], "voice_join");
+    assert_eq!(cue_join_d["voice_session_id"], "voice-gameplay");
+
+    // B inicia stream -> A e B recebem stream_start; mudar qualidade NÃO reenvia stream_start!
+    send(&mut b, json!({
+        "type": "UpdateVoiceState",
+        "payload": { "muted": false, "deafened": false, "screen_sharing": true, "camera_on": false, "stream_quality": "720p30" }
+    })).await;
+    let cue_stream_a = wait_for(&mut a, "VoiceCueEvent").await;
+    let cue_stream_b = wait_for(&mut b, "VoiceCueEvent").await;
+    assert_eq!(cue_stream_a["event_type"], "stream_start");
+    assert_eq!(cue_stream_a["event_id"], cue_stream_b["event_id"]);
+
+    // Troca de qualidade mantendo screen_sharing=true não dispara novo stream_start.
+    send(&mut b, json!({
+        "type": "UpdateVoiceState",
+        "payload": { "muted": false, "deafened": false, "screen_sharing": true, "camera_on": false, "stream_quality": "1080p60" }
+    })).await;
+    // C ativa câmera em voice-gameplay -> D recebe camera_on; A NÃO recebe evento de voice-gameplay!
+    send(&mut c, json!({
+        "type": "UpdateVoiceState",
+        "payload": { "muted": false, "deafened": false, "screen_sharing": false, "camera_on": true }
+    })).await;
+    let cue_cam_d = wait_for(&mut d, "VoiceCueEvent").await;
+    assert_eq!(cue_cam_d["event_type"], "camera_on");
+    assert_eq!(cue_cam_d["voice_session_id"], "voice-gameplay");
+    assert_eq!(cue_cam_d["actor_user_id"], uid_c);
+
+    // Spam imediato de câmera por C dentro da janela de cooldown é contido pelo servidor.
+    {
+        let mut st = srv.state.write().await;
+        let allowed_spam = crate::voice::emit_voice_cue(&mut st, "voice-gameplay", &uid_c, "camera_off", true);
+        assert!(!allowed_spam, "cooldown do servidor deve conter spam imediato de câmera");
+    }
+
+    // C move de voice-gameplay -> voice-geral: D recebe voice_leave (gameplay) e A recebe voice_join (geral).
+    send(&mut c, json!({"type":"JoinVoice","payload":{"channel_id":"voice-geral"}})).await;
+    let cue_leave_d = wait_for(&mut d, "VoiceCueEvent").await;
+    assert_eq!(cue_leave_d["event_type"], "voice_leave");
+    assert_eq!(cue_leave_d["voice_session_id"], "voice-gameplay");
+    let cue_join_a = wait_for(&mut a, "VoiceCueEvent").await;
+    assert_eq!(cue_join_a["event_type"], "voice_join");
+    assert_eq!(cue_join_a["voice_session_id"], "voice-geral");
+    assert_eq!(cue_join_a["actor_user_id"], uid_c);
+    let cue_join_b_from_c = wait_for(&mut b, "VoiceCueEvent").await;
+    assert_eq!(cue_join_b_from_c["event_type"], "voice_join");
+    assert_eq!(cue_join_b_from_c["actor_user_id"], uid_c);
+
+    // A sai da call -> B recebe voice_leave com actor_user_id = uid_a.
+    send(&mut a, json!({"type":"LeaveVoice"})).await;
+    let cue_leave_b = wait_for(&mut b, "VoiceCueEvent").await;
+    assert_eq!(cue_leave_b["event_type"], "voice_leave");
+    assert_eq!(cue_leave_b["actor_user_id"], uid_a);
+
+    // Call privada (DM Call): amizade -> A liga -> B atende -> ambos recebem call_connected!
+    send(&mut a, json!({"type":"SendFriendRequest","payload":{"target_username":"CallCueB"}})).await;
+    let _ = wait_for(&mut b, "FriendsSync").await;
+    send(&mut b, json!({"type":"RespondFriendRequest","payload":{"from_username":"CallCueA","accept":true}})).await;
+    let _ = wait_for(&mut b, "FriendsSync").await;
+    send(&mut b, json!({"type":"LeaveVoice"})).await;
+    let dm_voice = format!("dmvoice:{}", crate::state::ServerState::make_dm_id("callcuea", "callcueb").strip_prefix("dm:").unwrap());
+    send(&mut a, json!({"type":"JoinVoice","payload":{"channel_id":dm_voice}})).await;
+    let incoming = wait_for(&mut b, "DmCallIncoming").await;
+    assert_eq!(incoming["voice_channel_id"], dm_voice);
+    send(&mut b, json!({"type":"JoinVoice","payload":{"channel_id":dm_voice}})).await;
+    let cc_a = wait_for(&mut a, "VoiceCueEvent").await;
+    let cc_b = wait_for(&mut b, "VoiceCueEvent").await;
+    assert_eq!(cc_a["event_type"], "call_connected");
+    assert_eq!(cc_b["event_type"], "call_connected");
+    assert_eq!(cc_a["event_id"], cc_b["event_id"]);
+}

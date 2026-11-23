@@ -2,12 +2,21 @@
 use std::borrow::Cow;
 use wry::http::{Method, Request, Response, StatusCode};
 
+// LEGACY COMPATIBILITY: partição interna de origin do WebView2 preservada para não invalidar
+// o localStorage existente de usuários migrados do Sancord para o Sanvo.
 pub const APP_URL: &str = "sancord://localhost/index.html";
 pub const CONNECT_URL: &str = "sancord://localhost/connect.html";
 pub const APP_ORIGIN: &str = "http://sancord.localhost";
 
 pub fn is_app_page(url: &str) -> bool {
-    ["sancord://localhost/", "http://sancord.localhost/"].iter().any(|base| url.starts_with(base))
+    [
+        "sancord://localhost/",
+        "http://sancord.localhost/",
+        "sanvo://localhost/",
+        "http://sanvo.localhost/",
+    ]
+    .iter()
+    .any(|base| url.starts_with(base))
 }
 
 pub fn response(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
@@ -16,6 +25,8 @@ pub fn response(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/connect.html" => (super::LOADER_HTML.as_bytes(), "text/html; charset=utf-8"),
         "/styles.css" => (include_bytes!("../../static/styles.css"), "text/css; charset=utf-8"),
         "/ui.css" => (include_bytes!("../../static/ui.css"), "text/css; charset=utf-8"),
+        "/cosmetics/cosmetics.css" => (include_bytes!("../../static/cosmetics/cosmetics.css"), "text/css; charset=utf-8"),
+        "/cosmetics/cosmetics-engine.js" => (include_bytes!("../../static/cosmetics/cosmetics-engine.js"), "text/javascript; charset=utf-8"),
         "/app.js" => (include_bytes!("../../static/app.js"), "text/javascript; charset=utf-8"),
         "/js/transport.js" => (include_bytes!("../../static/js/transport.js"), "text/javascript; charset=utf-8"),
         "/js/connection.js" => (include_bytes!("../../static/js/connection.js"), "text/javascript; charset=utf-8"),
@@ -31,11 +42,16 @@ pub fn response(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/js/member-list.js" => (include_bytes!("../../static/js/member-list.js"), "text/javascript; charset=utf-8"),
         "/js/permissions.js" => (include_bytes!("../../static/js/permissions.js"), "text/javascript; charset=utf-8"),
         "/js/chat.js" => (include_bytes!("../../static/js/chat.js"), "text/javascript; charset=utf-8"),
+        "/js/notification-manager.js" => (include_bytes!("../../static/js/notification-manager.js"), "text/javascript; charset=utf-8"),
         "/js/composer.js" => (include_bytes!("../../static/js/composer.js"), "text/javascript; charset=utf-8"),
         "/js/stickers.js" => (include_bytes!("../../static/js/stickers.js"), "text/javascript; charset=utf-8"),
         "/js/voice-recorder.js" => (include_bytes!("../../static/js/voice-recorder.js"), "text/javascript; charset=utf-8"),
         "/js/scheduled.js" => (include_bytes!("../../static/js/scheduled.js"), "text/javascript; charset=utf-8"),
         "/js/social.js" => (include_bytes!("../../static/js/social.js"), "text/javascript; charset=utf-8"),
+        "/js/sound-manager.js" => (include_bytes!("../../static/js/sound-manager.js"), "text/javascript; charset=utf-8"),
+        "/js/voice-event-sounds.js" => (include_bytes!("../../static/js/voice-event-sounds.js"), "text/javascript; charset=utf-8"),
+        "/js/voice-dsp-core.js" => (include_bytes!("../../static/js/voice-dsp-core.js"), "text/javascript; charset=utf-8"),
+        "/js/voice-dsp-worklet.js" => (include_bytes!("../../static/js/voice-dsp-worklet.js"), "text/javascript; charset=utf-8"),
         "/js/voice.js" => (include_bytes!("../../static/js/voice.js"), "text/javascript; charset=utf-8"),
         "/js/advanced.js" => (include_bytes!("../../static/js/advanced.js"), "text/javascript; charset=utf-8"),
         "/js/search.js" => (include_bytes!("../../static/js/search.js"), "text/javascript; charset=utf-8"),
@@ -46,6 +62,7 @@ pub fn response(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/js/profile.js" => (include_bytes!("../../static/js/profile.js"), "text/javascript; charset=utf-8"),
         "/js/profile-card.js" => (include_bytes!("../../static/js/profile-card.js"), "text/javascript; charset=utf-8"),
         "/js/profile-motion.js" => (include_bytes!("../../static/js/profile-motion.js"), "text/javascript; charset=utf-8"),
+        "/js/game-picker.js" => (include_bytes!("../../static/js/game-picker.js"), "text/javascript; charset=utf-8"),
         "/js/profile-board.js" => (include_bytes!("../../static/js/profile-board.js"), "text/javascript; charset=utf-8"),
         "/js/profile-collection.js" => (include_bytes!("../../static/js/profile-collection.js"), "text/javascript; charset=utf-8"),
         "/js/profile-sharing.js" => (include_bytes!("../../static/js/profile-sharing.js"), "text/javascript; charset=utf-8"),
@@ -56,7 +73,24 @@ pub fn response(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/js/activity.js" => (include_bytes!("../../static/js/activity.js"), "text/javascript; charset=utf-8"),
         "/js/updater.js" => (include_bytes!("../../static/js/updater.js"), "text/javascript; charset=utf-8"),
         "/logo.png" => (include_bytes!("../../static/logo.png"), "image/png"),
-        "/sancord-icon.svg" => (include_bytes!("../../static/sancord-icon.svg"), "image/svg+xml"),
+        "/sanvo-icon.svg" | "/sancord-icon.svg" => (include_bytes!("../../static/sanvo-icon.svg"), "image/svg+xml"),
+        "/assets/sounds/voice/join.wav" => (include_bytes!("../../static/assets/sounds/voice/join.wav"), "audio/wav"),
+        "/assets/sounds/voice/leave.wav" => (include_bytes!("../../static/assets/sounds/voice/leave.wav"), "audio/wav"),
+        "/assets/sounds/voice/connected.wav" => (include_bytes!("../../static/assets/sounds/voice/connected.wav"), "audio/wav"),
+        "/assets/sounds/voice/disconnected.wav" => (include_bytes!("../../static/assets/sounds/voice/disconnected.wav"), "audio/wav"),
+        "/assets/sounds/voice/reconnected.wav" => (include_bytes!("../../static/assets/sounds/voice/reconnected.wav"), "audio/wav"),
+        "/assets/sounds/stream/start.wav" => (include_bytes!("../../static/assets/sounds/stream/start.wav"), "audio/wav"),
+        "/assets/sounds/stream/stop.wav" => (include_bytes!("../../static/assets/sounds/stream/stop.wav"), "audio/wav"),
+        "/assets/sounds/camera/on.wav" => (include_bytes!("../../static/assets/sounds/camera/on.wav"), "audio/wav"),
+        "/assets/sounds/camera/off.wav" => (include_bytes!("../../static/assets/sounds/camera/off.wav"), "audio/wav"),
+        "/assets/sounds/controls/mute.wav" => (include_bytes!("../../static/assets/sounds/controls/mute.wav"), "audio/wav"),
+        "/assets/sounds/controls/unmute.wav" => (include_bytes!("../../static/assets/sounds/controls/unmute.wav"), "audio/wav"),
+        "/assets/sounds/controls/deafen.wav" => (include_bytes!("../../static/assets/sounds/controls/deafen.wav"), "audio/wav"),
+        "/assets/sounds/controls/undeafen.wav" => (include_bytes!("../../static/assets/sounds/controls/undeafen.wav"), "audio/wav"),
+        "/assets/sounds/calls/incoming.wav" => (include_bytes!("../../static/assets/sounds/calls/incoming.wav"), "audio/wav"),
+        "/assets/sounds/calls/outgoing.wav" => (include_bytes!("../../static/assets/sounds/calls/outgoing.wav"), "audio/wav"),
+        "/assets/sounds/errors/voice_error.wav" => (include_bytes!("../../static/assets/sounds/errors/voice_error.wav"), "audio/wav"),
+        "/assets/sounds/notifications/message_received.wav" => (include_bytes!("../../static/assets/sounds/notifications/message_received.wav"), "audio/wav"),
         _ => return Response::builder().status(StatusCode::NOT_FOUND).body(Cow::Borrowed(&b"Recurso interno inexistente"[..])).unwrap_or_default(),
     };
     if request.method() != Method::GET && request.method() != Method::HEAD {

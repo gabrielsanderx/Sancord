@@ -181,7 +181,8 @@ const BLOCKED_PROCESSES: &[&str] = &[
     "mmc.exe", "regedit.exe", "control.exe", "cmd.exe", "powershell.exe", "pwsh.exe",
     "windowsterminal.exe", "openconsole.exe", "rundll32.exe", "spoolsv.exe",
     "smartscreen.exe", "securityhealthsystray.exe", "widgets.exe", "phoneexperiencehost.exe",
-    "sancord.exe", "sancordapp.exe", "sancordserver.exe", "sancordbundle.exe",
+    "sanvo.exe", "sanvodesktop.exe", "sanvoapp.exe", "sanvoserver.exe", "sanvobundle.exe",
+    "sancord.exe", "sancorddesktop.exe", "sancordapp.exe", "sancordserver.exe", "sancordbundle.exe", // LEGACY COMPATIBILITY
     "discord.exe", "discordptb.exe", "discordcanary.exe",
     "chrome.exe", "msedge.exe", "msedgewebview2.exe", "firefox.exe", "opera.exe",
     "operagx.exe", "brave.exe", "vivaldi.exe", "arc.exe", "waterfox.exe",
@@ -782,7 +783,7 @@ impl GameDetector {
     pub fn register_game(&mut self, exe_raw: &str, display_raw: &str) -> Result<RegisteredGame, &'static str> {
         let exe_name = normalize_exe_name(exe_raw).ok_or("Informe um executável válido (.exe).")?;
         if is_blocked_process(&exe_name) {
-            return Err("Processos do sistema, navegadores ou o próprio Sancord não podem ser registrados como jogo.");
+            return Err("Processos do sistema, navegadores ou o próprio Sanvo não podem ser registrados como jogo.");
         }
         let display_name = clean_display_name(display_raw).ok_or("Informe o nome do jogo.")?;
         if let Some(existing) = self.registered.iter_mut().find(|g| g.exe_name == exe_name) {
@@ -985,6 +986,7 @@ mod tests {
         let apps = vec![
             app("explorer.exe", "Desktop", false),
             app("chrome.exe", "Google Chrome", true),
+            app("sanvo.exe", "Sanvo", false),
             app("sancord.exe", "Sancord", false),
             app("discord.exe", "Discord", false),
             app("svchost.exe", "Host", false),

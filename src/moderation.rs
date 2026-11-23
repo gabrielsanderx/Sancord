@@ -164,7 +164,11 @@ fn link_domains(text: &str) -> Vec<String> {
 
 fn has_invite(text: &str) -> bool {
     let lower = text.to_lowercase();
-    lower.contains("sancord://")
+    lower.contains("sanvo://")
+        || lower.contains("sancord://") // LEGACY COMPATIBILITY
+        || lower.match_indices("sanv-").any(|(i, _)| {
+            lower[i + 5..].chars().take_while(|c| c.is_ascii_alphanumeric()).count() >= 4
+        })
         || lower.match_indices("sanc-").any(|(i, _)| {
             lower[i + 5..].chars().take_while(|c| c.is_ascii_alphanumeric()).count() >= 4
         })

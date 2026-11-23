@@ -1,4 +1,4 @@
-param([string]$OutputDir = 'dist')
+﻿param([string]$OutputDir = 'dist')
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 & "$PSScriptRoot/build-desktop.ps1" -OutputDir $OutputDir
@@ -14,5 +14,7 @@ $notesPath = Join-Path (Resolve-Path -LiteralPath $OutputDir).Path 'release-note
 [IO.File]::WriteAllText($notesPath, $match.Groups[1].Value.Trim(), [Text.UTF8Encoding]::new($false))
 Copy-Item -LiteralPath target/release/sancord-release.exe -Destination (Join-Path $OutputDir 'release-tools.exe')
 # O ZIP contém apenas o cliente. Banco e backend do anfitrião nunca são atualizados pelo cliente.
+Compress-Archive -LiteralPath (Join-Path $OutputDir 'Sanvo.exe') -DestinationPath (Join-Path $OutputDir "Sanvo-$version-windows-x64.zip") -Force
+# LEGACY COMPATIBILITY: pacote ZIP de transição
 Compress-Archive -LiteralPath (Join-Path $OutputDir 'Sancord.exe') -DestinationPath (Join-Path $OutputDir "Sancord-$version-windows-x64.zip") -Force
-Write-Host "Pacote Windows $version gerado. Nada foi publicado."
+Write-Host "Pacote Windows Sanvo $version gerado. Nada foi publicado."

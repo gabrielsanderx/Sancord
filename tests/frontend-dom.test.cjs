@@ -5,7 +5,7 @@ const { openInterface } = require('./helpers/dom.cjs');
 test('HTML completo carrega scripts na ordem real e preserva marca, badges e reações', async t => {
   const h = await openInterface(t), d = h.document;
   assert.deepEqual(h.captures, []);
-  assert.ok(d.querySelector('#nav-home-btn svg[aria-label="Sancord"]'));
+  assert.ok(d.querySelector('#nav-home-btn svg[aria-label="Sanvo"]'));
   assert.equal(d.querySelectorAll('button:not(#nav-home-btn) svg:not([data-sancord-icon])').length, 0);
   assert.ok(d.querySelector('#pinned-msgs-btn').contains(d.getElementById('pinned-count-badge')));
   assert.ok(d.querySelector('#server-menu-btn .server-menu-caret[data-sancord-icon="chevron"]'));

@@ -6,6 +6,7 @@ mod desktop_assets;
 mod desktop_auth_storage;
 mod desktop_links;
 mod desktop_permissions;
+mod desktop_taskbar;
 mod desktop_updater;
 use desktop_links::{confirm_page, desktop_url, link_endpoint, open_link_page, origin_of, KnownEndpoints};
 
@@ -15,7 +16,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::os::windows::process::CommandExt;
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tao::{
@@ -73,17 +74,29 @@ impl DesktopPrefs {
 }
 
 const RUN_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
-const RUN_REG_VALUE: &str = "SancordDesktop";
+const RUN_REG_VALUE: &str = sancord::legacy_sancord_migration::RUN_REG_VALUE_SANVO;
+const RUN_REG_VALUE_LEGACY: &str = sancord::legacy_sancord_migration::RUN_REG_VALUE_LEGACY_SANCORD;
 
 fn query_windows_autostart() -> bool {
-    Command::new("reg.exe")
-        .args(["query", RUN_REG_KEY, "/v", RUN_REG_VALUE])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .is_ok_and(|o| o.status.success())
+    for val_name in [RUN_REG_VALUE, RUN_REG_VALUE_LEGACY] {
+        let ok = Command::new("reg.exe")
+            .args(["query", RUN_REG_KEY, "/v", val_name])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if ok {
+            return true;
+        }
+    }
+    false
 }
 
 fn set_windows_autostart(enabled: bool, minimized: bool) {
+    // Limpa chave legada SancordDesktop sempre que o autostart é atualizado ou desativado.
+    let _ = Command::new("reg.exe")
+        .args(["delete", RUN_REG_KEY, "/v", RUN_REG_VALUE_LEGACY, "/f"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
     if !enabled {
         let _ = Command::new("reg.exe")
             .args(["delete", RUN_REG_KEY, "/v", RUN_REG_VALUE, "/f"])
@@ -91,7 +104,10 @@ fn set_windows_autostart(enabled: bool, minimized: bool) {
             .output();
         return;
     }
-    let Ok(exe) = env::current_exe() else { return };
+    let exe = sancord::legacy_sancord_migration::env_var_compat("SANVO_LAUNCHER_EXE", "SANCORD_LAUNCHER_EXE")
+        .map(PathBuf::from)
+        .or_else(|| env::current_exe().ok());
+    let Some(exe) = exe else { return };
     let value = if minimized {
         format!("\"{}\" --minimized", exe.display())
     } else {
@@ -163,7 +179,7 @@ const TITLEBAR_INIT_SCRIPT: &str = r#"
         align-items: center;
         justify-content: space-between;
         padding-left: 12px;
-        z-index: 999999;
+        z-index: var(--z-titlebar, 9000);
         user-select: none;
         border-bottom: 1px solid rgba(255,255,255,0.05);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -256,7 +272,7 @@ const TITLEBAR_INIT_SCRIPT: &str = r#"
     bar.innerHTML = `
       <div id="sancord-titlebar-drag">
         <div class="sancord-tb-title">
-          <span>SANCORD</span>
+          <span>SANVO</span>
           <span class="sancord-tb-badge">DESKTOP</span>
         </div>
       </div>
@@ -302,7 +318,7 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sancord</title>
+  <title>Sanvo</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/ui.css" />
   <style>
@@ -380,8 +396,8 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
 <body>
   <div class="card">
     <div class="status-ring"></div>
-    <h1>Sancord Desktop</h1>
-    <p id="status-text">Localizando servidor Sancord...</p>
+    <h1>Sanvo Desktop</h1>
+    <p id="status-text">Localizando servidor Sanvo...</p>
 
     <button class="manual-toggle" id="toggle-manual">Conectar a um endereço específico</button>
     <form class="manual-box" id="manual-form">
@@ -392,7 +408,7 @@ const LOADER_HTML: &str = r#"<!DOCTYPE html>
 
   <div class="card confirm-card" id="confirm-card" style="display:none">
     <h1>Abrir este link?</h1>
-    <p>O link quer abrir o Sancord conectado a:</p>
+    <p>O link quer abrir o Sanvo conectado a:</p>
     <p><strong id="confirm-origin" style="color:#fff;word-break:break-all"></strong></p>
     <p style="font-size:13px">Esse servidor receberá seu login e suas mensagens. Continue só se você conhece e confia em quem o enviou.</p>
     <div style="display:flex;gap:8px;justify-content:center">
@@ -495,7 +511,7 @@ fn spawn_remote_discovery_thread(proxy: EventLoopProxy<UserEvent>, cancelled: Ar
             }
 
             let _ = proxy.send_event(UserEvent::Status(
-                "Procurando servidor ativo do Sancord...".to_string(),
+                "Procurando servidor ativo do Sanvo...".to_string(),
             ));
 
             if let Some(text) = http_get_text(
@@ -536,7 +552,7 @@ fn spawn_remote_discovery_thread(proxy: EventLoopProxy<UserEvent>, cancelled: Ar
             }
 
             let _ = proxy.send_event(UserEvent::Status(
-                "Aguardando o anfitrião iniciar o servidor Sancord...".to_string(),
+                "Aguardando o anfitrião iniciar o servidor Sanvo...".to_string(),
             ));
             std::thread::sleep(Duration::from_secs(3));
         }
@@ -548,18 +564,29 @@ fn is_local_server_running() -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
 }
 
-/// Se estivermos no PC onde o servidor existe (D:\Sancord) e ele estiver desligado,
+/// Se estivermos no PC onde o servidor existe e ele estiver desligado,
 /// inicia o servidor + túnel automaticamente em segundo plano!
 fn ensure_local_host_started_if_present() -> bool {
-    if env::var("SANCORD_DISABLE_LOCAL_HOST").as_deref() == Ok("1") { return false; }
+    use sancord::legacy_sancord_migration::env_var_compat;
+    if env_var_compat("SANVO_DISABLE_LOCAL_HOST", "SANCORD_DISABLE_LOCAL_HOST").as_deref() == Some("1") { return false; }
     if is_local_server_running() {
         return true;
     }
 
-    let host_exe = env::var_os("SANCORD_HOST_EXE").map(PathBuf::from)
-        .or_else(|| env::current_exe().ok().and_then(|exe| exe.parent().map(|p| p.join("SancordServer.exe"))).filter(|p| p.exists()));
+    let host_exe = env_var_compat("SANVO_HOST_EXE", "SANCORD_HOST_EXE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::current_exe().ok().and_then(|exe| {
+                let parent = exe.parent()?;
+                ["SanvoServer.exe", "SancordServer.exe"]
+                    .into_iter()
+                    .map(|name| parent.join(name))
+                    .find(|p| p.exists())
+            })
+        });
     if let Some(host_exe) = host_exe.filter(|p| p.is_file()) {
-        let host_dir = env::var_os("SANCORD_HOST_DIR").map(PathBuf::from)
+        let host_dir = env_var_compat("SANVO_HOST_DIR", "SANCORD_HOST_DIR")
+            .map(PathBuf::from)
             .unwrap_or_else(|| host_exe.parent().unwrap_or(Path::new(".")).to_path_buf());
         let _ = Command::new(&host_exe)
             .current_dir(&host_dir)
@@ -598,6 +625,7 @@ fn ensure_local_host_started_if_present() -> bool {
 }
 
 static ORIG_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+static CURRENT_TASKBAR_BADGE: AtomicU32 = AtomicU32::new(0);
 
 unsafe extern "system" fn workarea_wndproc(
     hwnd: windows::Win32::Foundation::HWND,
@@ -670,8 +698,7 @@ fn main() {
     }
 
     let local_app_data = env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".to_string());
-    let data_dir = env::var_os("SANCORD_DESKTOP_DATA_DIR").map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(&local_app_data).join("SancordDesktopData"));
+    let data_dir = sancord::legacy_sancord_migration::resolve_desktop_data_dir(Path::new(&local_app_data));
     let _ = fs::create_dir_all(&data_dir);
     let _ = fs::write(data_dir.join("logo.png"), LOGO_BYTES);
 
@@ -683,7 +710,8 @@ fn main() {
     let capture_token = sancord::auth::generate_token();
     let capture_port = capture_bridge::start_capture_bridge(capture_token.clone(), trusted.clone());
     let mut known = KnownEndpoints::load(&data_dir);
-    let explicit_endpoint = env::var("SANCORD_SERVER_URL").ok().and_then(|url| origin_of(&url));
+    let explicit_endpoint = sancord::legacy_sancord_migration::env_var_compat("SANVO_SERVER_URL", "SANCORD_SERVER_URL")
+        .and_then(|url| origin_of(&url));
     if let Some(ep) = &explicit_endpoint {
         known.trust(ep);
     }
@@ -700,16 +728,18 @@ fn main() {
     let proxy: EventLoopProxy<UserEvent> = event_loop.create_proxy();
     let updater = desktop_updater::Updater::new(&data_dir, proxy.clone());
     let discovery_cancelled = Arc::new(AtomicBool::new(false));
+    let base_title = sancord::legacy_sancord_migration::env_var_compat("SANVO_WINDOW_TITLE", "SANCORD_WINDOW_TITLE")
+        .unwrap_or_else(|| "Sanvo".into());
 
     let window = std::rc::Rc::new(
         WindowBuilder::new()
-            .with_title(env::var("SANCORD_WINDOW_TITLE").unwrap_or_else(|_| "Sancord".into()))
+            .with_title(base_title.clone())
             .with_window_icon(window_icon)
             .with_decorations(false)
             .with_inner_size(LogicalSize::new(1320.0, 830.0))
             .with_min_inner_size(LogicalSize::new(940.0, 600.0))
             .build(&event_loop)
-            .expect("Falha ao criar janela nativa do Sancord"),
+            .expect("Falha ao criar janela nativa do Sanvo"),
     );
 
     install_workarea_maximize_hook(&window);
@@ -722,7 +752,6 @@ fn main() {
     let ipc_prefs = desktop_prefs.clone();
     let mut web_context = WebContext::new(Some(data_dir));
     let win_ipc = window.clone();
-    let base_title = env::var("SANCORD_WINDOW_TITLE").unwrap_or_else(|_| "Sancord".into());
     let ipc_proxy = proxy.clone();
     let nav_proxy = proxy.clone();
     let new_window_proxy = proxy.clone();
@@ -758,9 +787,10 @@ fn main() {
     // A porta/segredo da ponte NÃO vão no script de inicialização (que roda em
     // qualquer página); são injetados depois do carregamento, só em origem confiável.
     let builder = WebViewBuilder::with_web_context(&mut web_context)
-        .with_custom_protocol("sancord".into(), |_id, request| desktop_assets::response(request))
+        .with_custom_protocol("sanvo".into(), |_id, request| desktop_assets::response(request))
+        .with_custom_protocol("sancord".into(), |_id, request| desktop_assets::response(request)) // LEGACY COMPATIBILITY
         .with_initialization_script(TITLEBAR_INIT_SCRIPT)
-        .with_initialization_script("window.__SANCORD_AUTH_DPAPI = true; window.__SANCORD_ACTIVITY_NATIVE = true;")
+        .with_initialization_script("window.__SANVO_AUTH_DPAPI = true; window.__SANVO_ACTIVITY_NATIVE = true; window.__SANCORD_AUTH_DPAPI = true; window.__SANCORD_ACTIVITY_NATIVE = true;")
         .with_navigation_handler(move |url: String| {
             if desktop_assets::is_app_page(&url) {
                 return true;
@@ -873,6 +903,28 @@ fn main() {
                 }
                 let snapshot = desktop_state_json(&ipc_data_dir, &prefs);
                 let _ = ipc_proxy.send_event(UserEvent::DesktopState(snapshot));
+                return;
+            }
+            if let Some(n) = cmd.strip_prefix("taskbar-badge:") {
+                let count: u32 = n.trim().parse().unwrap_or(0).min(999);
+                CURRENT_TASKBAR_BADGE.store(count, Ordering::Relaxed);
+                desktop_taskbar::apply_taskbar_badge(win_ipc.hwnd() as isize, count);
+                return;
+            }
+            if cmd == "call-attention:start" {
+                desktop_taskbar::set_call_attention_flash(win_ipc.hwnd() as isize, true);
+                return;
+            }
+            if cmd == "call-attention:stop" {
+                desktop_taskbar::set_call_attention_flash(win_ipc.hwnd() as isize, false);
+                return;
+            }
+            if cmd == "window:focus" {
+                if win_ipc.is_minimized() {
+                    win_ipc.set_minimized(false);
+                }
+                win_ipc.set_focus();
+                desktop_taskbar::set_call_attention_flash(win_ipc.hwnd() as isize, false);
                 return;
             }
             if let Some(n) = cmd.strip_prefix("badge:") {
@@ -1001,9 +1053,17 @@ fn main() {
                 }
             }
             Event::WindowEvent {
+                event: WindowEvent::ScaleFactorChanged { .. },
+                ..
+            } => {
+                let count = CURRENT_TASKBAR_BADGE.load(Ordering::Relaxed);
+                desktop_taskbar::apply_taskbar_badge(window.hwnd() as isize, count);
+            }
+            Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
+                desktop_taskbar::apply_taskbar_badge(window.hwnd() as isize, 0);
                 *control_flow = ControlFlow::Exit;
             }
             _ => {}
@@ -1017,8 +1077,8 @@ mod title_tests {
 
     #[test]
     fn window_title_shows_pending_mentions() {
-        assert_eq!(desktop_title("Sancord", 0), "Sancord");
-        assert_eq!(desktop_title("Sancord", 3), "(3) Sancord");
-        assert_eq!(desktop_title("Sancord QA", 250), "(99+) Sancord QA");
+        assert_eq!(desktop_title("Sanvo", 0), "Sanvo");
+        assert_eq!(desktop_title("Sanvo", 3), "(3) Sanvo");
+        assert_eq!(desktop_title("Sanvo QA", 250), "(99+) Sanvo QA");
     }
 }

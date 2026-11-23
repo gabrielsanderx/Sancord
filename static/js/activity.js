@@ -32,6 +32,66 @@ const SancordActivity = (() => {
   let lastPublishedJson = "__init__";
   let initialized = false;
   let timerId = null;
+  const listeners = new Set();
+
+  function notifyListeners() {
+    const active = resolveActiveActivity();
+    for (const fn of listeners) {
+      try { fn(active); } catch (_) {}
+    }
+    try {
+      if (typeof onBoardEditorChanged === "function" && typeof boardEditor !== "undefined" && boardEditor?.draft) {
+        onBoardEditorChanged();
+      }
+      const tab = document.getElementById("settings-tab-profile");
+      if (tab && !tab.classList.contains("hidden") && typeof renderPeActivity === "function" && typeof draftPreviewUser === "function") {
+        renderPeActivity(draftPreviewUser());
+      }
+    } catch (_) {}
+  }
+
+  function subscribe(fn) {
+    if (typeof fn !== "function") return () => {};
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  }
+
+  function getDetectedGame() {
+    const active = resolveActiveActivity();
+    if (active && active.name) return { ...active };
+    if (detected && detected.name) {
+      return {
+        kind: detected.kind || "playing",
+        application_id: detected.application_id || null,
+        name: detected.name,
+        started_at: detected.started_at || null,
+        exe_name: detected.exe_name || null,
+        source: "game_detector",
+      };
+    }
+    return null;
+  }
+
+  function getLocalGames() {
+    const out = [];
+    const seen = new Set();
+    const push = (name, meta = {}) => {
+      const clean = String(name || "").trim();
+      if (!clean) return;
+      const key = clean.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ name: clean, ...meta });
+    };
+    const active = getDetectedGame();
+    if (active) push(active.name, { detectedNow: true, started_at: active.started_at, exe_name: active.exe_name });
+    for (const g of registered) {
+      if (g && g.display_name && g.enabled !== false) {
+        push(g.display_name, { detectedNow: Boolean(detected && detected.exe_name === g.exe_name), registered: true, exe_name: g.exe_name });
+      }
+    }
+    return out;
+  }
 
   function loadLocalConfig() {
     try {
@@ -290,6 +350,7 @@ const SancordActivity = (() => {
     }
     syncToServer();
     renderSettingsPanel();
+    notifyListeners();
   }
 
   function applyNativeSnapshot(detail) {
@@ -326,6 +387,7 @@ const SancordActivity = (() => {
 
     syncToServer();
     renderSettingsPanel();
+    notifyListeners();
   }
 
   function setConfig(patch) {
@@ -338,6 +400,7 @@ const SancordActivity = (() => {
     postNative("set-config", config);
     syncToServer(true);
     renderSettingsPanel();
+    notifyListeners();
   }
 
   function registerGame(exeName, displayName) {
@@ -581,6 +644,7 @@ const SancordActivity = (() => {
   function onSelfStatusChanged() {
     syncToServer(true);
     renderSettingsPanel();
+    notifyListeners();
   }
 
   function onSettingsOpened() {
@@ -607,10 +671,19 @@ const SancordActivity = (() => {
     kindHeader,
     createRichActivityCard,
     resolveActiveActivity,
+    getDetectedGame,
+    getLocalGames,
+    subscribe,
+    refreshLiveTimers,
     getConfig: () => ({ ...config }),
   };
 })();
+const SanvoActivity = SancordActivity;
+if (typeof globalThis !== "undefined") {
+  globalThis.SanvoActivity = SancordActivity;
+  globalThis.SancordActivity = SancordActivity; // LEGACY COMPATIBILITY
+}
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { SancordActivity };
+  module.exports = { SancordActivity, SanvoActivity };
 }

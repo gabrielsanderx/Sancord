@@ -18,7 +18,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     env:
-      SANCORD_DISCOVERY_PUBKEY: ${{ vars.SANCORD_DISCOVERY_PUBKEY }}
+      SANVO_DISCOVERY_PUBKEY: ${{ vars.SANVO_DISCOVERY_PUBKEY || vars.SANCORD_DISCOVERY_PUBKEY }}
+      SANCORD_DISCOVERY_PUBKEY: ${{ vars.SANVO_DISCOVERY_PUBKEY || vars.SANCORD_DISCOVERY_PUBKEY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -63,7 +64,8 @@ jobs:
           path: dist
       - name: Assinar e verificar metadados
         env:
-          SANCORD_UPDATE_SIGNING_KEY: ${{ secrets.SANCORD_UPDATE_SIGNING_KEY }}
+          SANVO_UPDATE_SIGNING_KEY: ${{ secrets.SANVO_UPDATE_SIGNING_KEY || secrets.SANCORD_UPDATE_SIGNING_KEY }}
+          SANCORD_UPDATE_SIGNING_KEY: ${{ secrets.SANCORD_UPDATE_SIGNING_KEY || secrets.SANVO_UPDATE_SIGNING_KEY }}
         run: |
           ./dist/release-tools.exe sign dist dist/release-notes.md
           if ($LASTEXITCODE -ne 0) { throw 'Assinatura recusada.' }
@@ -73,6 +75,11 @@ jobs:
         with:
           name: signed-windows-release
           path: |
+            dist/Sanvo.exe
+            dist/SanvoServer.exe
+            dist/Sanvo-*-windows-x64.zip
+            dist/sanvo-update.json
+            dist/sanvo-update.sig
             dist/Sancord.exe
             dist/SancordServer.exe
             dist/Sancord-*-windows-x64.zip
@@ -127,9 +134,10 @@ jobs:
         run: |
           gh release view $env:RELEASE_TAG *> $null
           if ($LASTEXITCODE -eq 0) { throw 'Essa release já existe. Não será sobrescrita.' }
-          $zip = Get-ChildItem dist -Filter 'Sancord-*-windows-x64.zip'
-          if (@($zip).Count -ne 1) { throw 'Pacote de release ambíguo.' }
-          gh release create $env:RELEASE_TAG dist/Sancord.exe dist/SancordServer.exe $zip.FullName dist/sancord-update.json dist/sancord-update.sig --draft --verify-tag --title "Sancord $env:RELEASE_TAG" --notes-file dist/release-notes.md
+          $sanvoZip = Get-ChildItem dist -Filter 'Sanvo-*-windows-x64.zip'
+          $legacyZip = Get-ChildItem dist -Filter 'Sancord-*-windows-x64.zip'
+          if (@($sanvoZip).Count -ne 1 -or @($legacyZip).Count -ne 1) { throw 'Pacote de release ambíguo.' }
+          gh release create $env:RELEASE_TAG dist/Sanvo.exe dist/SanvoServer.exe $sanvoZip.FullName dist/sanvo-update.json dist/sanvo-update.sig dist/Sancord.exe dist/SancordServer.exe $legacyZip.FullName dist/sancord-update.json dist/sancord-update.sig --draft --verify-tag --title "Sanvo $env:RELEASE_TAG" --notes-file dist/release-notes.md
           if ($LASTEXITCODE -ne 0) { throw 'Upload incompleto; não publicar o draft.' }
           gh release edit $env:RELEASE_TAG --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw 'A release permaneceu em draft; revise no GitHub.' }

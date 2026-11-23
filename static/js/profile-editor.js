@@ -241,7 +241,7 @@ function renderPeGallery(kind) {
     if (!choice) return;
     if (choice.classList.contains("locked")) {
       const item = cosmeticInfo(kind, choice.dataset.id);
-      hint.textContent = `🔒 ${pickerUnlockHint(item) || "Item exclusivo"}. Concedido pelo Sancord, não dá para equipar por aqui.`;
+      hint.textContent = `🔒 ${pickerUnlockHint(item) || "Item exclusivo"}. Concedido pelo Sanvo, não dá para equipar por aqui.`;
       return;
     }
     profileDraft[field] = choice.dataset.id;
@@ -486,7 +486,7 @@ function renderPeBadgesEditor() {
     empty.className = "pe-badges-empty";
     empty.innerHTML =
       `<strong>Nenhuma insígnia disponível</strong>` +
-      `<p class="pe-hint">Esta conta ainda não possui insígnias. Insígnias são concedidas automaticamente ou pela equipe do Sancord.</p>`;
+      `<p class="pe-hint">Esta conta ainda não possui insígnias. Insígnias são concedidas automaticamente ou pela equipe do Sanvo.</p>`;
     host.append(empty);
     return;
   }
@@ -719,12 +719,31 @@ function onBoardEditorChanged() {
   if (!root) return;
   const { draft, latest } = boardEditor;
   if (status) status.textContent = document.getElementById("board-editor-status")?.textContent || "";
+  const liveActivity = (typeof SancordActivity !== "undefined" && typeof SancordActivity.getDetectedGame === "function"
+    ? SancordActivity.getDetectedGame()
+    : null) || state.selfUser?.activity || null;
+  const boardOpts = {
+    editable: true,
+    activity: liveActivity,
+    activityVisible: true,
+    onEdit: (widget) => {
+      const idx = draft?.widgets ? draft.widgets.indexOf(widget) : -1;
+      if (idx >= 0) editBoardWidget(widget.kind, idx);
+    },
+    onRemove: (widget) => {
+      const idx = draft?.widgets ? draft.widgets.indexOf(widget) : -1;
+      if (idx >= 0) {
+        draft.widgets.splice(idx, 1);
+        renderBoardEditor();
+      }
+    },
+  };
   if (draft) {
-    renderVisitedBoard({ ...draft, achievements: latest?.achievements || [] }, "Seu mural está vazio. Adicione um widget abaixo.", root);
+    renderVisitedBoard({ ...draft, achievements: latest?.achievements || [] }, "Seu mural está vazio. Adicione um widget abaixo.", root, boardOpts);
   } else {
     root.replaceChildren();
   }
-  renderProfileWishlist(draft, document.getElementById("pe-wishlist-widgets"));
+  renderProfileWishlist(draft, document.getElementById("pe-wishlist-widgets"), boardOpts);
   const addWish = document.getElementById("pe-add-wishlist");
   if (addWish) addWish.disabled = !draft || draft.widgets.length >= 8 || Boolean(boardEditor.saving || boardEditor.uploading);
   const grid = document.getElementById("pe-widget-shortcuts");
@@ -912,3 +931,14 @@ function onProfileEditorShown() {
   onBoardEditorChanged();
   peAfterRefresh();
 };
+
+if (typeof SancordActivity !== "undefined" && typeof SancordActivity.subscribe === "function") {
+  SancordActivity.subscribe(() => {
+    if (!state.selfUser) return;
+    if (boardEditor?.draft) onBoardEditorChanged();
+    const tab = document.getElementById("settings-tab-profile");
+    if (tab && !tab.classList.contains("hidden") && typeof renderPeActivity === "function") {
+      renderPeActivity(draftPreviewUser());
+    }
+  });
+}

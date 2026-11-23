@@ -94,7 +94,7 @@ test('seletor: abas, coleções, itens bloqueados não equipam e Aplicar vai par
   const tabs = [...pickerEl.querySelectorAll('.cosmetic-tab')].map(b => b.textContent);
   assert.deepEqual(tabs, ['Todas (4)', 'Animadas (3)', 'Estáticas (1)', 'Conquistas (1)', 'Evento (1)']);
   const titles = [...pickerEl.querySelectorAll('.cosmetic-collection-title')].map(x => x.textContent);
-  assert.deepEqual(titles, ['Sancord Core', 'Conquistas', 'Temporada de inverno']);
+  assert.deepEqual(titles, ['Sanvo Core', 'Conquistas', 'Temporada de inverno']);
 
   const founder = pickerEl.querySelector('.cosmetic-choice[data-id="founder"]');
   assert.equal(founder.classList.contains('locked'), true);

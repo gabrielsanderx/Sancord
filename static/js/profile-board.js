@@ -3,6 +3,8 @@ const boardWidgetNames = {
   favorite_game: "Jogo favorito", playing: "Jogando agora", want_to_play: "Quero jogar",
   about: "Sobre mim", link: "Link", achievements: "Conquistas", custom: "Bloco personalizado",
 };
+const GAME_WIDGET_KINDS = new Set(["favorite_game", "playing", "want_to_play"]);
+let visitedBoardSnapshot = null;
 const BOARD_MILESTONES = {
   milestone_first_server: { name: "Criador de comunidade", description: "Criou seu primeiro servidor no Sancord." },
   milestone_5_friends: { name: "Círculo de amigos", description: "Fez 5 ou mais amigos no Sancord." },
@@ -93,7 +95,157 @@ function boardText(tag, value, className) {
   return element;
 }
 
-function renderVisitedBoard(board, emptyMessage, root = document.getElementById("profile-board-widgets")) {
+function resolveGameWidgetCoverUrl(widget, liveTitle = null) {
+  if (!widget) return null;
+  if (widget.kind === "favorite_game" && /^[0-9a-f]{32}$/.test(widget.cover_id || "")) {
+    return cachedMediaUrl(`/api/attachments/${widget.cover_id}/capa`);
+  }
+  if (widget.cover_url && typeof SancordGamePicker !== "undefined" && SancordGamePicker.isSafeCoverUrl(widget.cover_url)) {
+    return widget.cover_url.startsWith("/api/") ? cachedMediaUrl(widget.cover_url) : widget.cover_url;
+  }
+  if (typeof SancordGamePicker !== "undefined") {
+    const known = SancordGamePicker.resolveKnownGame(liveTitle || widget.name);
+    if (known?.cover_url) return known.cover_url;
+  }
+  return null;
+}
+
+function renderGameWidgetCard(card, widget, opts = {}) {
+  const isAutoPlaying = widget.kind === "playing" && Boolean(widget.auto_activity);
+  const live = isAutoPlaying && opts.activityVisible !== false ? (opts.activity || null) : null;
+  const hasLiveGame = Boolean(live && live.name);
+  const displayTitle = isAutoPlaying
+    ? (hasLiveGame ? live.name : "Nenhum jogo no momento")
+    : (widget.name || boardWidgetNames[widget.kind]);
+
+  card.classList.add("profile-board-game-card");
+  if (isAutoPlaying) {
+    card.classList.add(hasLiveGame ? "is-live-playing" : "is-auto-idle");
+  }
+  if (hasLiveGame && live.started_at) {
+    card.dataset.activityCard = "1";
+    card.dataset.startedAt = String(live.started_at);
+  }
+
+  const known = typeof SancordGamePicker !== "undefined"
+    ? SancordGamePicker.resolveKnownGame(hasLiveGame ? live.name : widget.name)
+    : null;
+  const coverUrl = isAutoPlaying
+    ? (hasLiveGame ? (known?.cover_url || (typeof SancordGamePicker !== "undefined" && SancordGamePicker.isSafeCoverUrl(live.large_image) ? live.large_image : null)) : null)
+    : resolveGameWidgetCoverUrl(widget);
+
+  if (!isAutoPlaying || hasLiveGame) {
+    const media = document.createElement("div");
+    media.className = "profile-board-game-media";
+    if (coverUrl) {
+      const img = document.createElement("img");
+      img.className = "profile-board-cover";
+      img.src = coverUrl;
+      img.alt = `Capa de ${displayTitle}`;
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.addEventListener("error", () => {
+        img.remove();
+        if (typeof SancordGamePicker !== "undefined") {
+          media.append(SancordGamePicker.coverPlaceholderEl(displayTitle));
+        }
+      });
+      media.append(img);
+    } else if (typeof SancordGamePicker !== "undefined") {
+      media.append(SancordGamePicker.coverPlaceholderEl(displayTitle));
+    }
+    if (hasLiveGame) {
+      const liveBadge = boardText("span", "Ao vivo", "profile-board-live-pill");
+      media.append(liveBadge);
+    }
+    card.append(media);
+  }
+
+  const body = document.createElement("div");
+  body.className = "profile-board-game-body";
+  const titleEl = boardText("strong", displayTitle, "profile-board-game-title");
+  titleEl.title = displayTitle;
+  body.append(titleEl);
+
+  if (isAutoPlaying) {
+    if (hasLiveGame && live.started_at && typeof SancordActivity !== "undefined") {
+      const timeEl = boardText("p", `Jogando ${SancordActivity.formatElapsed(live.started_at)}`, "profile-board-game-meta is-live-time");
+      timeEl.dataset.activityTime = "1";
+      body.append(timeEl);
+    } else if (hasLiveGame) {
+      body.append(boardText("p", "Jogando agora no PC", "profile-board-game-meta"));
+    } else {
+      body.append(boardText("p", "Atualiza automaticamente quando um jogo abrir.", "profile-board-game-meta"));
+    }
+  } else {
+    const metaParts = [];
+    const year = widget.release_year || known?.release_year;
+    const platforms = widget.platforms?.length ? widget.platforms : (known?.platforms || []);
+    if (year) metaParts.push(String(year));
+    if (platforms.length) metaParts.push(platforms.slice(0, 2).join(" · "));
+    if (metaParts.length) {
+      body.append(boardText("p", metaParts.join(" · "), "profile-board-game-meta"));
+    }
+  }
+
+  const note = widget.description || widget.note || "";
+  if (note) body.append(boardText("p", note, "profile-board-game-note"));
+  card.append(body);
+
+  if (opts.editable && typeof opts.onEdit === "function") {
+    const editBtn = boardText("button", "Trocar", "profile-board-card-edit-btn");
+    editBtn.type = "button";
+    editBtn.setAttribute("aria-label", `Trocar ${displayTitle}`);
+    editBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      opts.onEdit(widget);
+    });
+    card.append(editBtn);
+  }
+
+  if (typeof SancordGamePicker !== "undefined" && (!isAutoPlaying || hasLiveGame || opts.editable)) {
+    card.classList.add("is-clickable");
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    const openDetails = () => SancordGamePicker.openGameDetails({
+      widget,
+      liveActivity: live,
+      isOwner: Boolean(opts.editable),
+      onSwap: opts.editable && typeof opts.onEdit === "function" ? () => opts.onEdit(widget) : null,
+      onRemove: opts.editable && typeof opts.onRemove === "function" ? () => opts.onRemove(widget) : null,
+    });
+    card.addEventListener("click", openDetails);
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openDetails();
+      }
+    });
+  }
+
+  // Se o jogo detectado não estiver no cache local ainda, resolve uma única vez em background.
+  if (hasLiveGame && !coverUrl && typeof SancordGamePicker !== "undefined" && typeof SancordGamePicker.resolveGameAsync === "function") {
+    SancordGamePicker.resolveGameAsync(live.name).then((resolved) => {
+      if (!resolved?.cover_url || !card.isConnected) return;
+      const media = card.querySelector(".profile-board-game-media");
+      if (!media || media.querySelector("img")) return;
+      media.querySelector(".gp-cover-fallback")?.remove();
+      const img = document.createElement("img");
+      img.className = "profile-board-cover";
+      img.src = resolved.cover_url;
+      img.alt = `Capa de ${displayTitle}`;
+      img.loading = "lazy";
+      img.decoding = "async";
+      media.prepend(img);
+    });
+  }
+}
+
+function renderVisitedBoard(board, emptyMessage, root = document.getElementById("profile-board-widgets"), opts = {}) {
+  if (!root) return;
+  if (root.id === "profile-board-widgets") {
+    visitedBoardSnapshot = board ? { board, emptyMessage, activity: opts.activity || null, activityVisible: opts.activityVisible !== false } : null;
+  }
   root.replaceChildren();
   const widgets = (board?.widgets || []).filter(widget => widget.visible && Object.hasOwn(boardWidgetNames, widget.kind));
   if (!widgets.length) {
@@ -139,16 +291,9 @@ function renderVisitedBoard(board, emptyMessage, root = document.getElementById(
         card.append(img);
       }
       card.append(boardText("p", widget.text || ""));
+    } else if (GAME_WIDGET_KINDS.has(widget.kind)) {
+      renderGameWidgetCard(card, widget, opts);
     } else {
-      if (widget.kind === "favorite_game" && /^[0-9a-f]{32}$/.test(widget.cover_id || "")) {
-        const img = document.createElement("img");
-        img.className = "profile-board-cover";
-        img.src = cachedMediaUrl(`/api/attachments/${widget.cover_id}/capa`);
-        img.alt = `Capa de ${widget.name}`;
-        img.loading = "lazy";
-        img.decoding = "async";
-        card.append(img);
-      }
       card.append(boardText(widget.kind === "about" ? "p" : "strong", widget.text || widget.name));
       if (widget.description) card.append(boardText("p", widget.description));
     }
@@ -156,9 +301,22 @@ function renderVisitedBoard(board, emptyMessage, root = document.getElementById(
   }
 }
 
-function renderProfileWishlist(board, root) {
+function refreshVisitedBoardActivity(activity) {
+  if (!visitedBoardSnapshot || !visitedBoardSnapshot.activityVisible) return;
+  const root = document.getElementById("profile-board-widgets");
+  if (!root) return;
+  visitedBoardSnapshot = { ...visitedBoardSnapshot, activity: activity || null };
+  renderVisitedBoard(
+    visitedBoardSnapshot.board,
+    visitedBoardSnapshot.emptyMessage,
+    root,
+    { activity: visitedBoardSnapshot.activity, activityVisible: visitedBoardSnapshot.activityVisible }
+  );
+}
+
+function renderProfileWishlist(board, root, opts = {}) {
   const wishlist = board && { widgets: (board.widgets || []).filter(widget => widget.kind === "want_to_play") };
-  renderVisitedBoard(wishlist, board ? "Nenhum jogo na lista de desejos." : "Lista de desejos indisponível.", root);
+  renderVisitedBoard(wishlist, board ? "Nenhum jogo na lista de desejos." : "Lista de desejos indisponível.", root, opts);
 }
 
 function parseBoardLink(raw) {
@@ -205,7 +363,7 @@ function renderBoardEditor() {
   if (badgeOption.disabled && boardKind.value === "achievements") boardKind.value = "favorite_game";
   for (const [index, widget] of draft.widgets.entries()) {
     const kind = boardWidgetNames[widget.kind];
-    const title = widget.title || widget.name || widget.label || kind;
+    const title = widget.title || widget.name || widget.label || (widget.kind === "playing" && widget.auto_activity ? "Automático (Atividade)" : kind);
     const row = document.createElement("li");
     row.className = "profile-board-editor-row";
     const grip = boardText("span", "⠿", "profile-board-grip");
@@ -283,6 +441,37 @@ async function editBoardWidget(kind, index = null) {
   const draft = editor.draft;
   if (!draft || editor.saving || editor.uploading || !Object.hasOwn(boardWidgetNames, kind)) return;
   const existing = draft.widgets[index];
+
+  if (GAME_WIDGET_KINDS.has(kind) && typeof SancordGamePicker !== "undefined") {
+    const pick = await SancordGamePicker.open({
+      kind,
+      existing: existing || null,
+      allowRemove: index !== null,
+    });
+    if (!pick || boardEditor.draft !== draft || boardEditor.saving) return;
+    if (pick.action === "remove" && existing) {
+      const currentIndex = draft.widgets.indexOf(existing);
+      if (currentIndex >= 0) {
+        draft.widgets.splice(currentIndex, 1);
+        renderBoardEditor();
+      }
+      return;
+    }
+    if (pick.action === "save" && pick.widget) {
+      if (index === null) {
+        if (draft.widgets.length >= 8) return;
+        draft.widgets.push(pick.widget);
+      } else {
+        const currentIndex = draft.widgets.indexOf(existing);
+        if (currentIndex < 0) return;
+        draft.widgets[currentIndex] = { ...pick.widget, visible: existing.visible };
+      }
+      renderBoardEditor();
+      return;
+    }
+    if (pick.action !== "manual") return;
+  }
+
   const widget = { visible: existing?.visible ?? true, kind };
   const field = (name, label, maxlength, options) => ({
     name, label, maxlength, value: existing?.[name] || "", required: true, ...options,

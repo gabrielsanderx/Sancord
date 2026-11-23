@@ -329,6 +329,11 @@ impl ServerState {
                     return false;
                 }
             }
+            VoiceCueEvent { voice_session_id, .. } => {
+                if !self.can_view_channel(recipient, voice_session_id) {
+                    return false;
+                }
+            }
             PeerJoinedVoice { channel_id, peer } => {
                 if !self.can_view_channel(recipient, channel_id) { return false; }
                 self.project_user_voice(recipient, peer);

@@ -139,3 +139,8 @@ const SancordOutbox = (() => {
 
   return { bind, enqueue, drain, suspend, acknowledge, reject, render };
 })();
+const SanvoOutbox = SancordOutbox;
+if (typeof globalThis !== "undefined") {
+  globalThis.SanvoOutbox = SancordOutbox;
+  globalThis.SancordOutbox = SancordOutbox; // LEGACY COMPATIBILITY
+}

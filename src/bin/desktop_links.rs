@@ -30,7 +30,12 @@ fn decode_component(raw: &str) -> Option<String> {
 
 pub fn open_link_page(raw: &str) -> Option<String> {
     if raw.len() > 16_384 { return None; }
-    let raw = raw.strip_prefix("sancord://open/?").or_else(|| raw.strip_prefix("http://sancord.open/?"))?;
+    // Aceita protocolo oficial sanvo:// e legado sancord:// (LEGACY COMPATIBILITY).
+    let raw = raw
+        .strip_prefix("sanvo://open/?")
+        .or_else(|| raw.strip_prefix("http://sanvo.open/?"))
+        .or_else(|| raw.strip_prefix("sancord://open/?"))
+        .or_else(|| raw.strip_prefix("http://sancord.open/?"))?;
     let mut values = std::collections::HashMap::new();
     for entry in raw.split('&') {
         let (key, value) = entry.split_once('=')?;
@@ -105,18 +110,27 @@ pub fn confirm_page(link: &str, origin: &str) -> String {
 }
 
 pub fn register_protocol() {
-    if env::var("SANCORD_REGISTER_PROTOCOL").as_deref() == Ok("0") { return; }
-    let Some(exe) = env::var_os("SANCORD_LAUNCHER_EXE").map(std::path::PathBuf::from)
+    if sancord::legacy_sancord_migration::env_var_compat("SANVO_REGISTER_PROTOCOL", "SANCORD_REGISTER_PROTOCOL").as_deref() == Some("0") {
+        return;
+    }
+    let Some(exe) = sancord::legacy_sancord_migration::env_var_compat("SANVO_LAUNCHER_EXE", "SANCORD_LAUNCHER_EXE")
+        .map(std::path::PathBuf::from)
         .or_else(|| env::current_exe().ok()) else { return; };
-    let root = r"HKCU\Software\Classes\sancord";
-    for args in [
-        vec!["add".to_string(), root.into(), "/ve".into(), "/d".into(), "URL:Sancord".into(), "/f".into()],
-        vec!["add".into(), root.into(), "/v".into(), "URL Protocol".into(), "/d".into(), String::new(), "/f".into()],
-        vec!["add".into(), format!(r"{root}\shell\open\command"), "/ve".into(), "/d".into(), format!("\"{}\" \"%1\"", exe.display()), "/f".into()],
+
+    // Registra o protocolo oficial sanvo:// e mantém o protocolo legado sancord:// (LEGACY COMPATIBILITY).
+    for (root, desc) in [
+        (r"HKCU\Software\Classes\sanvo", "URL:Sanvo"),
+        (r"HKCU\Software\Classes\sancord", "URL:Sanvo (Legacy Sancord)"),
     ] {
-        match Command::new("reg.exe").args(args).creation_flags(super::CREATE_NO_WINDOW).status() {
-            Ok(status) if status.success() => {},
-            _ => { eprintln!("Não foi possível registrar links do Sancord neste usuário."); break; },
+        for args in [
+            vec!["add".to_string(), root.into(), "/ve".into(), "/d".into(), desc.into(), "/f".into()],
+            vec!["add".into(), root.into(), "/v".into(), "URL Protocol".into(), "/d".into(), String::new(), "/f".into()],
+            vec!["add".into(), format!(r"{root}\shell\open\command"), "/ve".into(), "/d".into(), format!("\"{}\" \"%1\"", exe.display()), "/f".into()],
+        ] {
+            match Command::new("reg.exe").args(args).creation_flags(super::CREATE_NO_WINDOW).status() {
+                Ok(status) if status.success() => {},
+                _ => { eprintln!("Não foi possível registrar links do Sanvo neste usuário."); break; },
+            }
         }
     }
 }
@@ -154,7 +168,13 @@ mod tests {
         let page = open_link_page("sancord://open/?endpoint=https%3A%2F%2Fexample.com&invite=SANC-ABC123").unwrap();
         assert!(page.starts_with(super::super::desktop_assets::APP_URL));
         assert!(page.contains("invite=SANC-ABC123"));
+        let sanvo_page = open_link_page("sanvo://open/?endpoint=https%3A%2F%2Fexample.com&invite=SANV-XYZ789").unwrap();
+        assert!(sanvo_page.starts_with(super::super::desktop_assets::APP_URL));
+        assert!(sanvo_page.contains("invite=SANV-XYZ789"));
+        let sanvo_http_page = open_link_page("http://sanvo.open/?endpoint=https%3A%2F%2Fexample.com&invite=SANV-XYZ789").unwrap();
+        assert!(sanvo_http_page.contains("invite=SANV-XYZ789"));
         assert!(open_link_page("sancord://evil/?endpoint=https%3A%2F%2Fexample.com").is_none());
+        assert!(open_link_page("sanvo://evil/?endpoint=https%3A%2F%2Fexample.com").is_none());
         assert!(open_link_page("sancord://open/?endpoint=javascript%3Aalert(1)").is_none());
         assert!(open_link_page("sancord://open/?endpoint=https%3A%2F%2Fx&endpoint=https%3A%2F%2Fy").is_none());
     }

@@ -238,7 +238,8 @@ function openMentionsInbox(anchor = document.getElementById("mentions-inbox-btn"
   if (panel.parentElement !== document.body) document.body.appendChild(panel);
   const r = anchor?.getBoundingClientRect?.();
   if (r && r.width) {
-    panel.style.top = `${Math.round(r.bottom + 6)}px`;
+    const minTop = typeof SancordUI?.getTopbarSafeTop === "function" ? SancordUI.getTopbarSafeTop(8) : 8;
+    panel.style.top = `${Math.max(minTop, Math.round(r.bottom + 6))}px`;
     panel.style.right = `${Math.max(8, Math.round(window.innerWidth - r.right))}px`;
   }
   const list = document.getElementById("mentions-inbox-list");
@@ -773,7 +774,7 @@ document.addEventListener(
     e.stopPropagation();
     const host = linkHost(href);
     const values = await SancordUI.formDialog({
-      title: "Sair do Sancord?",
+      title: "Sair do Sanvo?",
       description: `Este link leva para ${host} (${href.slice(0, 200)}). Confira se é o site que você espera antes de continuar.`,
       fields: [{ name: "trust", type: "checklist", value: [], options: [{ value: "yes", label: `Confiar em ${host} a partir de agora` }] }],
       submitLabel: "Abrir link",

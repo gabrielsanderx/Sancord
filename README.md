@@ -1,9 +1,12 @@
-# Sancord
+# Sanvo
+
+> **Nome atual do projeto:** **Sanvo** (`Sanvo Desktop`)
+> **Nome legado:** `Sancord` (mantido apenas em camadas internas de compatibilidade e persistência para não quebrar instalações, sessões, banco de dados ou atualizações existentes).
 
 Plataforma de comunicação em tempo real para comunidades, amigos e grupos.
 Backend em **Rust** (Axum + Tokio + WebSockets + SQLite), aplicativo Windows
-**SancordApp** (WebView2 via `wry`) com HTML/CSS/JS compilados dentro do executável.
-Não há versão web pública: o backend fornece API, WebSocket e anexos.
+**Sanvo Desktop** (WebView2 via `wry`) com HTML/CSS/JS compilados dentro do executável (`Sanvo.exe`).
+Não há versão web pública: o backend fornece API, WebSocket e anexos (`SanvoServer.exe`).
 Voz, vídeo e compartilhamento de tela usam **WebRTC P2P (mesh)**; o servidor só repassa a sinalização.
 
 Estado atual: os fontes incluem o trabalho das nove fases originais, com validações

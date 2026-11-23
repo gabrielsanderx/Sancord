@@ -149,8 +149,11 @@ function buildMessageRequestsEntry() {
 function buildGroupDmItem(g) {
   const unread = state.unreadDms.get(g.id) || 0;
   const isActive = state.activeView === "home" && state.activeDmId === g.id;
+  const fmt = typeof SancordNotifications !== "undefined"
+    ? SancordNotifications.formatUnreadCount
+    : (n) => (n > 99 ? "99+" : String(n));
   const li = document.createElement("li");
-  li.className = `dm-item ${isActive ? "active" : ""}${typeof isMutedId === "function" && isMutedId(g.id) ? " is-muted" : ""}`;
+  li.className = `dm-item dm-group-item ${isActive ? "active" : ""}${unread > 0 ? " is-unread" : ""}${typeof isMutedId === "function" && isMutedId(g.id) ? " is-muted" : ""}`;
   const left = document.createElement("div");
   left.className = "dm-item-left";
   const meta = document.createElement("div");
@@ -166,10 +169,13 @@ function buildGroupDmItem(g) {
   left.append(groupIconEl(g), meta);
   li.appendChild(left);
   if (unread > 0) {
+    const trailing = document.createElement("div");
+    trailing.className = "dm-item-trailing";
     const badge = document.createElement("span");
     badge.className = "dm-count-badge";
-    badge.textContent = unread;
-    li.appendChild(badge);
+    badge.textContent = fmt(unread);
+    trailing.appendChild(badge);
+    li.appendChild(trailing);
   }
   li.addEventListener("click", () => openGroupConversation(g.id));
   li.addEventListener("contextmenu", (e) => {
@@ -612,7 +618,7 @@ async function openReportUserDialog(username, messageId = null) {
 // ---------------------------------------------------------------------------
 
 function requestFullProfile(username) {
-  const sent = username && username !== "Sancord Bot" && sendWs("GetUserProfile", {
+  const sent = username && username !== "Sanvo Bot" && username !== "Sancord Bot" && sendWs("GetUserProfile", {
     username, server_id: currentPopoverServerId,
   });
   renderVisitedBoard(null, sent ? "Carregando mural…" : "Mural indisponível.");
@@ -642,20 +648,21 @@ function onUserProfile(p) {
   if (currentPopoverUsername?.toLowerCase() !== u.username.toLowerCase() ||
       (p.server_id ?? null) !== currentPopoverServerId || profilePopoverModal?.classList.contains("hidden")) return;
   currentPopoverPrivacy = { bio_visible: p.bio_visible, banner_visible: p.banner_visible };
-  renderVisitedBoard(p.board);
-  renderProfileWishlist(p.board, document.getElementById("profile-wishlist-widgets"));
+  const live = state.users.get(currentPopoverUserId);
+  const profile = { ...live, ...u, ...profileAppearanceForWire(u) };
+  const boardActivity = p.activity_visible === false ? null : (profile.activity || null);
+  renderVisitedBoard(p.board, undefined, undefined, { activity: boardActivity, activityVisible: p.activity_visible !== false });
+  renderProfileWishlist(p.board, document.getElementById("profile-wishlist-widgets"), { activity: boardActivity });
   renderVisitedProfileLinks(p.links);
 
   if (profileCardMemberSince) {
-    const parts = u.created_at ? [`Sancord: ${u.created_at}`] : [];
+    const parts = u.created_at ? [`Sanvo: ${u.created_at}`] : [];
     if (p.joined_server_at) {
       const srv = state.servers.find((s) => s.id === p.server_id);
       parts.push(`${srv?.name || "Servidor"}: ${formatProfileDate(p.joined_server_at)}`);
     }
     profileCardMemberSince.textContent = parts.join(" • ") || "Informação indisponível";
   }
-  const live = state.users.get(currentPopoverUserId);
-  const profile = { ...live, ...u, ...profileAppearanceForWire(u) };
   renderVisitedProfile(profile, u.username, currentPopoverUserId);
   if (p.activity_visible === false) {
     if (profileActivityCardList) profileActivityCardList.textContent = "Atividade indisponível.";

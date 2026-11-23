@@ -63,7 +63,7 @@ const CLASSIC: &[CosmeticItem] = &[
     item("static-cyber-hud", AvatarDecoration, "Mira Tática", "classicos", "common", false, "free"),
     item("static-crimson", AvatarDecoration, "Rubi Gótico", "classicos", "common", false, "free"),
     item("static-diamond", AvatarDecoration, "Diamante Glacial", "classicos", "common", false, "free"),
-    item("static-blurple", AvatarDecoration, "Brasão Sancord", "classicos", "common", false, "free"),
+    item("static-blurple", AvatarDecoration, "Brasão Sanvo", "classicos", "common", false, "free"),
     item("static-emerald", AvatarDecoration, "Vinha Esmeralda", "classicos", "common", false, "free"),
     item("static-angel", AvatarDecoration, "Pérola Celestial", "classicos", "common", false, "free"),
     item("embers", ProfileEffect, "Brasas Carmesim", "classicos", "common", true, "free"),
@@ -189,10 +189,17 @@ const PHASE4: &[CosmeticItem] = &[
     item("modern", NameStyle, "Moderno", "sancord-core", "common", false, "free"),
     item("rounded", NameStyle, "Arredondado", "sancord-core", "common", false, "free"),
     item("mono", NameStyle, "Monoespaçado", "cyber", "common", false, "free"),
-    item("outline", NameStyle, "Contorno", "sancord-core", "common", false, "free"),
+    item("editorial", NameStyle, "Editorial", "royal", "common", false, "free"),
+    item("bubble", NameStyle, "Pop Bubble", "sakura", "common", false, "free"),
+    item("cyber", NameStyle, "Cyber Tech", "cyber", "rare", false, "free"),
+    item("fantasy", NameStyle, "Fantasia", "royal", "rare", false, "free"),
+    item("outline", NameStyle, "Contorno Artístico", "sancord-core", "common", false, "free"),
     item("glow", NameStyle, "Brilho Suave", "cosmic", "common", true, "free"),
-    item("prism", NameStyle, "Fluxo de Prisma", "cosmic", "rare", true, "free"),
-    item("holographic", NameStyle, "Faixa Holográfica", "cyber", "rare", true, "free"),
+    item("prism", NameStyle, "Prismático", "cosmic", "rare", true, "free"),
+    item("holographic", NameStyle, "Holográfico", "cyber", "rare", true, "free"),
+    item("gummy", NameStyle, "Gel Gummy", "sakura", "rare", false, "free"),
+    item("ink", NameStyle, "Tinta Artística", "retro", "rare", false, "free"),
+    item("cosmic", NameStyle, "Cósmico Fluido", "cosmic", "epic", true, "free"),
     item("custom-gradient", NameStyle, "Gradiente Personalizado", "sancord-core", "common", true, "free"),
 ];
 
@@ -217,19 +224,19 @@ pub struct BadgeDef {
 pub const MAX_VISIBLE_BADGES: usize = 6;
 
 pub const BADGES: &[BadgeDef] = &[
-    BadgeDef { id: "founder", name: "Fundação", category: "trust", description: "Fundou o projeto Sancord.", can_hide: true },
+    BadgeDef { id: "founder", name: "Fundador do Sanvo", category: "trust", description: "Fundador oficial do projeto Sanvo.", can_hide: true },
     BadgeDef { id: "developer", name: "Desenvolvimento", category: "trust", description: "Faz parte da equipe de desenvolvimento.", can_hide: true },
     BadgeDef { id: "moderator", name: "Moderação oficial", category: "trust", description: "Modera a comunidade oficial.", can_hide: true },
-    BadgeDef { id: "verified_bot", name: "Bot verificado", category: "trust", description: "Integração verificada pelo Sancord.", can_hide: false },
+    BadgeDef { id: "verified_bot", name: "Bot verificado", category: "trust", description: "Integração verificada pelo Sanvo.", can_hide: false },
     BadgeDef { id: "verified_developer", name: "Dev verificado", category: "trust", description: "Desenvolvedor de integração verificado.", can_hide: true },
     BadgeDef { id: "contributor", name: "Contribuição", category: "trust", description: "Contribuiu com código, tradução ou documentação.", can_hide: true },
     BadgeDef { id: "bug_hunter", name: "Caça-Bugs", category: "trust", description: "Ajudou a encontrar problemas importantes.", can_hide: true },
     BadgeDef { id: "event_winner", name: "Vencedora de evento", category: "trust", description: "Venceu um evento oficial.", can_hide: true },
-    BadgeDef { id: "early_user", name: "Pioneira", category: "cosmetic", description: "Conta criada na fase inicial do Sancord.", can_hide: true },
+    BadgeDef { id: "early_user", name: "Pioneira", category: "cosmetic", description: "Conta criada na fase inicial do Sanvo.", can_hide: true },
     BadgeDef { id: "alpha", name: "Alpha", category: "cosmetic", description: "Participou do Alpha.", can_hide: true },
     BadgeDef { id: "beta", name: "Beta", category: "cosmetic", description: "Participou do Beta.", can_hide: true },
     BadgeDef { id: "community", name: "Comunidade", category: "cosmetic", description: "Reconhecimento da comunidade.", can_hide: true },
-    BadgeDef { id: "supporter", name: "Apoio inicial", category: "cosmetic", description: "Apoiou o Sancord no início.", can_hide: true },
+    BadgeDef { id: "supporter", name: "Apoio inicial", category: "cosmetic", description: "Apoiou o Sanvo no início.", can_hide: true },
 ];
 
 pub fn badge(id: &str) -> Option<&'static BadgeDef> {
@@ -456,7 +463,7 @@ pub fn kind_name(kind: Kind) -> &'static str {
     }
 }
 
-const NAME_FONTS: &[&str] = &["gta", "retro", "gothic", "modern", "rounded", "mono"];
+const NAME_FONTS: &[&str] = &["gta", "retro", "gothic", "modern", "rounded", "mono", "editorial", "bubble", "cyber", "fantasy"];
 
 /// Valor pedido pelo cliente para equipar: `Ok(None)` = tirar; `Ok(Some(id))` = equipar.
 /// "none", "default" e vazio tiram o item.
@@ -472,14 +479,14 @@ pub fn check_equip(acc: &Account, kind: Kind, requested: &str) -> Result<Option<
         if !NAME_FONTS.contains(&font) || NAME_FONTS.contains(&effect) {
             return Err("Escolha uma fonte e um efeito válidos para o nome.");
         }
-        let font = find(kind, font).ok_or("Esta fonte não existe no catálogo do Sancord.")?;
-        let effect = find(kind, effect).ok_or("Este efeito de nome não existe no catálogo do Sancord.")?;
+        let font = find(kind, font).ok_or("Esta fonte não existe no catálogo do Sanvo.")?;
+        let effect = find(kind, effect).ok_or("Este efeito de nome não existe no catálogo do Sanvo.")?;
         if !owns(acc, font) || !owns(acc, effect) {
             return Err("Você ainda não possui este item.");
         }
         return Ok(Some(id.to_string()));
     }
-    let item = find(kind, id).ok_or("Este item não existe no catálogo do Sancord.")?;
+    let item = find(kind, id).ok_or("Este item não existe no catálogo do Sanvo.")?;
     if !owns(acc, item) {
         return Err("Você ainda não possui este item.");
     }

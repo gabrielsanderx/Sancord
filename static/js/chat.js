@@ -282,8 +282,8 @@ function renderMarkdown(src, msg = null) {
     ph(`<div class="dm-server-invite-card" data-invite-code="${code}"><div class="dm-invite-eyebrow">Convite para entrar no servidor</div><div class="dm-invite-main"><div class="avatar dm-invite-icon">${srvName.slice(0, 2).toUpperCase()}</div><div class="dm-server-invite-meta"><strong class="dm-invite-name">${srvName}</strong><span class="dm-invite-stats">Código: <code>${code}</code></span></div><button type="button" class="btn-primary small-btn dm-join-invite-btn" data-join-invite="${code}">Entrar no servidor</button></div></div>`)
   );
 
-  // Convites e referências abrem no aplicativo, sem uma página pública.
-  html = html.replace(/sancord:\/\/open\/\?[^\s<\u0000]+/g, raw =>
+  // Convites e referências abrem no aplicativo, sem uma página pública (aceita sanvo:// e legado sancord://).
+  html = html.replace(/(?:sanvo|sancord):\/\/open\/\?[^\s<\u0000]+/g, raw =>
     ph(`<a href="${raw}" class="chat-link">${raw}</a>`)
   );
   // Links externos (o texto já está escapado; só http/https viram link).
@@ -1485,6 +1485,7 @@ function serverUnreadInfo(srv) {
 }
 
 function onWelcomeReadStates(list) {
+  const prevUnread = new Map(state.unreadDms || []);
   state.readStates = new Map();
   state.unreadDms.clear();
   for (const rs of list || []) {
@@ -1494,7 +1495,11 @@ function onWelcomeReadStates(list) {
       else state.unreadDms.delete(rs.channel_id);
     }
   }
+  if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.onWelcomeSync === "function") {
+    SancordNotifications.onWelcomeSync(prevUnread, state.unreadDms);
+  }
   updateHomeNotificationBadges?.();
+  if (typeof updateDocumentTitle === "function") updateDocumentTitle();
 }
 
 function onReadStateUpdated(payload) {
@@ -1503,6 +1508,9 @@ function onReadStateUpdated(payload) {
   const prev = getReadState(s.channel_id);
   const movedBack = s.last_read_at < prev.last_read_at;
   state.readStates.set(s.channel_id, { last_read_at: s.last_read_at, mention_count: s.mention_count });
+  if (!s.mention_count && typeof SancordNotifications !== "undefined" && typeof SancordNotifications.clearTrackedUnreadForChannel === "function") {
+    SancordNotifications.clearTrackedUnreadForChannel(s.channel_id);
+  }
   if (isPrivateTextId(s.channel_id)) {
     if (s.mention_count > 0) state.unreadDms.set(s.channel_id, s.mention_count);
     else state.unreadDms.delete(s.channel_id);
@@ -1515,6 +1523,7 @@ function onReadStateUpdated(payload) {
     placeUnreadDivider(s.channel_id);
     renderChatMessagesV2({ preserveScroll: true });
   }
+  if (typeof updateDocumentTitle === "function") updateDocumentTitle();
   refreshUnreadIndicators();
 }
 
@@ -1573,10 +1582,14 @@ function maybeAckActiveChannel() {
   lastAckSent.set(chId, now);
   rs.last_read_at = Math.max(rs.last_read_at, last.created_at || 0);
   rs.mention_count = 0;
+  if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.clearTrackedUnreadForChannel === "function") {
+    SancordNotifications.clearTrackedUnreadForChannel(chId);
+  }
   if (isPrivateTextId(chId)) {
     state.unreadDms.delete(chId);
     renderDmList();
   }
+  if (typeof updateDocumentTitle === "function") updateDocumentTitle();
   refreshUnreadIndicators();
 }
 
@@ -1601,16 +1614,31 @@ function refreshUnreadIndicators() {
 }
 
 function updateDocumentTitle() {
-  let mentions = 0;
-  if (state.audioSettings?.notifTitleBadge !== false) {
-    for (const rs of state.readStates?.values?.() || []) mentions += rs.mention_count || 0;
-  }
-  document.title = mentions > 0 ? `(${mentions}) Sancord` : "Sancord";
-  // No .exe a janela não usa o título da página: avisa o app nativo (só quando muda).
-  if (state.lastBadgeSent !== mentions) {
-    state.lastBadgeSent = mentions;
+  const totalUnread = (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.getGlobalUnreadNotificationCount === "function")
+    ? SancordNotifications.getGlobalUnreadNotificationCount()
+    : (() => {
+        if (!state.selfUser?.username) return 0;
+        let sum = 0;
+        for (const rs of state.readStates?.values?.() || []) sum += rs.mention_count || 0;
+        return sum;
+      })();
+
+  const titleMentions = state.audioSettings?.notifTitleBadge !== false ? totalUnread : 0;
+  const taskbarMentions = state.audioSettings?.notifTaskbarBadge !== false ? totalUnread : 0;
+
+  document.title = titleMentions > 0 ? `(${titleMentions}) Sanvo` : "Sanvo";
+
+  // No .exe a janela usa o título nativo (badge:N) e o overlay icon da barra de tarefas (taskbar-badge:N).
+  if (state.lastBadgeSent !== titleMentions) {
+    state.lastBadgeSent = titleMentions;
     try {
-      window.ipc?.postMessage(`badge:${mentions}`);
+      window.ipc?.postMessage(`badge:${titleMentions}`);
+    } catch (_) {}
+  }
+  if (state.lastTaskbarBadgeSent !== taskbarMentions) {
+    state.lastTaskbarBadgeSent = taskbarMentions;
+    try {
+      window.ipc?.postMessage(`taskbar-badge:${taskbarMentions}`);
     } catch (_) {}
   }
 }
@@ -1622,19 +1650,48 @@ function onNewMessageForUnread(message) {
   const own = isOwnMessage(message);
   const active = chId === getActiveTextChannelId() && !(state.activeView === "home" && !state.activeDmId);
   const hs = getHistoryState(chId);
+  const hasMgr = typeof SancordNotifications !== "undefined";
+  if (hasMgr && message.id && typeof SancordNotifications.hasProcessedMessage === "function" && SancordNotifications.hasProcessedMessage(message.id)) {
+    return false;
+  }
+  if (isPrivateTextId(chId) && hasMgr) {
+    SancordNotifications.noteDmActivity(chId, message.created_at || Date.now());
+  }
   if (own) {
+    if (hasMgr && message.id && typeof SancordNotifications.rememberProcessedId === "function") {
+      SancordNotifications.rememberProcessedId(message.id);
+    }
     rs.last_read_at = Math.max(rs.last_read_at, message.created_at || 0);
   } else {
-    const mentioned = messageMentionsMe(message) || (isPrivateTextId(chId) && !isMessageRequest(chId));
-    const willSee = active && !document.hidden && document.hasFocus() && isNearBottom(160) && !hs.hasNewer && state.suppressAckFor !== chId;
-    if (mentioned && !willSee) {
+    const blocked = hasMgr && SancordNotifications.isBlockedAuthor(message.author_name);
+    const mentioned = !blocked && (messageMentionsMe(message) || (isPrivateTextId(chId) && !isMessageRequest(chId)));
+    const willSee = hasMgr
+      ? SancordNotifications.isConversationOpenAndViewed(chId)
+      : (active && !document.hidden && document.hasFocus() && isNearBottom(160) && !hs.hasNewer && state.suppressAckFor !== chId);
+    const shouldInc = hasMgr ? SancordNotifications.shouldIncrementUnread(message) : (mentioned && !willSee);
+    if (hasMgr && message.id && typeof SancordNotifications.rememberProcessedId === "function") {
+      SancordNotifications.rememberProcessedId(message.id);
+    }
+    if (shouldInc) {
       rs.mention_count = (rs.mention_count || 0) + 1;
+      if (hasMgr && message.id && typeof SancordNotifications.trackUnreadMessageId === "function") {
+        SancordNotifications.trackUnreadMessageId(chId, message.id);
+      }
     }
     // Notificação e aviso na barra de tarefas seguem o nível do canal/servidor.
-    const policy = typeof notificationPolicy === "function" ? notificationPolicy(message) : { notify: mentioned };
-    if (policy.notify && !willSee) {
+    const shouldDesk = hasMgr
+      ? SancordNotifications.shouldShowDesktopNotification(message)
+      : ((typeof notificationPolicy === "function" ? notificationPolicy(message).notify : mentioned) && !willSee);
+    const canFlash = hasMgr && typeof SancordNotifications.shouldFlashTaskbar === "function"
+      ? SancordNotifications.shouldFlashTaskbar()
+      : (state.selfUser?.status_kind !== "dnd");
+    if (shouldDesk) {
       maybeDesktopNotify(message);
-      if (typeof requestWindowAttention === "function") requestWindowAttention();
+      if (canFlash && typeof requestWindowAttention === "function") requestWindowAttention();
+    } else if (!blocked && !willSee && (typeof notificationPolicy === "function" ? notificationPolicy(message).notify : mentioned)) {
+      if (canFlash && typeof requestWindowAttention === "function" && !(isPrivateTextId(chId) && typeof isMutedId === "function" && isMutedId(chId))) {
+        requestWindowAttention();
+      }
     }
   }
   if (!own && active && state.audioSettings?.ttsEnabled && typeof speakSettingsTts === "function" && message.content) {
@@ -1644,7 +1701,9 @@ function onNewMessageForUnread(message) {
     if (rs.mention_count > 0) state.unreadDms.set(chId, rs.mention_count);
     else state.unreadDms.delete(chId);
     renderDmList();
+    updateHomeNotificationBadges?.();
   }
+  if (typeof updateDocumentTitle === "function") updateDocumentTitle();
   refreshUnreadIndicators();
   // Numa janela antiga, não emenda a mensagem (criaria um buraco no histórico).
   return !hs.hasNewer;
@@ -1652,12 +1711,14 @@ function onNewMessageForUnread(message) {
 
 function maybeDesktopNotify(message) {
   if (!state.audioSettings?.desktopNotif) return;
+  if (state.selfUser?.status_kind === "dnd") return;
   const focused = document.hasFocus();
   if (focused && (!state.audioSettings?.notifWhenFocused || message.channel_id === getActiveTextChannelId())) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const srv = serverForChannel(message.channel_id);
   const muted = typeof isChannelMuted === "function" ? isChannelMuted(message.channel_id) : srv && isServerMuted(srv.id);
   if (muted && !(message.mentions?.users || []).includes(myLower())) return;
+  if (isPrivateTextId(message.channel_id) && typeof isMutedId === "function" && isMutedId(message.channel_id)) return;
   try {
     const chObj = srv ? [...(srv.text_channels || []), ...(srv.voice_channels || [])].find((c) => c.id === message.channel_id) : null;
     const where = srv ? `${srv.name} • ${chObj?.kind === "voice" ? "🔊" : "#"}${chObj?.name || ""}` : "Mensagem direta";
@@ -1671,7 +1732,15 @@ function maybeDesktopNotify(message) {
     });
     n.onclick = () => {
       window.focus();
-      jumpToMessage(message.channel_id, message.id);
+      if (isPrivateTextId(message.channel_id)) {
+        if (message.channel_id.startsWith("gdm:") && typeof openGroupConversation === "function") {
+          openGroupConversation(message.channel_id);
+        } else if (message.author_name && typeof sendWs === "function") {
+          sendWs("OpenDm", { target_username: message.author_name });
+        }
+      } else {
+        jumpToMessage(message.channel_id, message.id);
+      }
       n.close();
     };
   } catch (_) {}
@@ -1822,7 +1891,7 @@ function renderAutocomplete(trigger) {
   autocompleteEl.innerHTML = "";
   const title = document.createElement("div");
   title.className = "composer-autocomplete-title";
-  title.textContent = trigger === "@" ? "Membros e cargos" : trigger === "#" ? "Canais" : trigger === "/" ? "Comandos do Sancord" : "Emojis";
+  title.textContent = trigger === "@" ? "Membros e cargos" : trigger === "#" ? "Canais" : trigger === "/" ? "Comandos do Sanvo" : "Emojis";
   autocompleteEl.appendChild(title);
   ac.items.forEach((item, i) => {
     const row = document.createElement("div");

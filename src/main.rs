@@ -9,11 +9,12 @@ async fn main() {
 
     // Logs técnicos: console + arquivo diário em `logs/` (separados da interface).
     let _ = std::fs::create_dir_all(&config.log_dir);
-    let file_appender = tracing_appender::rolling::daily(&config.log_dir, "sancord.log");
+    let file_appender = tracing_appender::rolling::daily(&config.log_dir, "sanvo.log");
     let (file_writer, _log_guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_env("SANCORD_LOG")
+            tracing_subscriber::EnvFilter::try_from_env("SANVO_LOG")
+                .or_else(|_| tracing_subscriber::EnvFilter::try_from_env("SANCORD_LOG")) // LEGACY COMPATIBILITY
                 .or_else(|_| tracing_subscriber::EnvFilter::try_from_default_env())
                 .unwrap_or_else(|_| "sancord=info,tower_http=warn".into()),
         )
@@ -63,11 +64,11 @@ async fn main() {
     let listener = match tokio::net::TcpListener::bind(bind).await {
         Ok(l) => l,
         Err(e) => {
-            error!("Falha ao abrir {bind}: {e} (outra instância do Sancord já está rodando?)");
+            error!("Falha ao abrir {bind}: {e} (outra instância do Sanvo já está rodando?)");
             std::process::exit(1);
         }
     };
-    info!("🦀 Servidor Sancord rodando em http://localhost:{}", bind.port());
+    info!("🦀 Servidor Sanvo rodando em http://localhost:{}", bind.port());
 
     // Anuncia (assinada) a URL do túnel Cloudflare para o app desktop dos amigos.
     sancord::discovery::spawn_publisher(data_dir);
@@ -88,5 +89,5 @@ async fn main() {
 
     // Garante que toda escrita enfileirada chegue ao disco.
     let _ = tokio::task::spawn_blocking(move || db.shutdown()).await;
-    info!("Sancord encerrado.");
+    info!("Sanvo encerrado.");
 }

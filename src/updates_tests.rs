@@ -101,3 +101,31 @@ fn modified_download_or_downgrade_never_installs_or_launches() {
     assert!(install(&cfg, &job, |_| panic!("must not execute")).is_err());
     assert_eq!(fs::read(job.target).unwrap(), b"old-client");
 }
+#[test]
+fn transition_accepts_sanvo_and_sancord_manifests_with_same_ed25519_key() {
+    let signing = SigningKey::from_bytes(&[7; 32]);
+    let cfg_sancord = UpdateConfig {
+        repository: "gabrielsanderx/Sancord".into(),
+        public_key: hex::encode(signing.verifying_key().as_bytes()),
+    };
+    let cfg_sanvo = UpdateConfig {
+        repository: "gabrielsanderx/Sanvo".into(),
+        public_key: cfg_sancord.public_key.clone(),
+    };
+    let bytes = b"MZ-sanvo-transition-binary".to_vec();
+    let sanvo_manifest = Manifest {
+        schema: 1,
+        repository: "gabrielsanderx/Sanvo".into(),
+        version: "0.2.8".into(),
+        target: TARGET.into(),
+        asset: SANVO_ASSET.into(),
+        size: bytes.len() as u64,
+        sha256: hex::encode(Sha256::digest(&bytes)),
+        notes: "Sancord agora é Sanvo".into(),
+    };
+    let raw = serde_json::to_vec(&sanvo_manifest).unwrap();
+    let sig = hex::encode(signing.sign(&raw).to_bytes());
+    // Ambos os clientes (legado e novo) aceitam o manifesto durante a transição.
+    assert!(verify_manifest(&cfg_sancord, &raw, &sig).is_ok());
+    assert!(verify_manifest(&cfg_sanvo, &raw, &sig).is_ok());
+}

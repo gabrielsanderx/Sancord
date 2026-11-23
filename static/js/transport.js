@@ -14,10 +14,15 @@ const SancordNet = (() => {
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("URL de recurso inválida.");
     return url.href;
   };
-  const INVITE_BASE_URL = "sancord://open/";
+  const INVITE_BASE_URL = "sancord://open/"; // LEGACY COMPATIBILITY: protocolo mantido para clientes antigos; Sanvo aceita sanvo:// e sancord://
+  const SANVO_INVITE_BASE_URL = "sanvo://open/";
   function inviteUrl(code, endpoint = origin) {
     const clean = String(code || "").trim();
     return `${INVITE_BASE_URL}?${new URLSearchParams({ endpoint, invite: clean })}`;
+  }
+  function sanvoInviteUrl(code, endpoint = origin) {
+    const clean = String(code || "").trim();
+    return `${SANVO_INVITE_BASE_URL}?${new URLSearchParams({ endpoint, invite: clean })}`;
   }
   function extractInviteCode(raw) {
     const txt = String(raw || "").trim();
@@ -34,6 +39,11 @@ const SancordNet = (() => {
     if (pathIdx !== -1) {
       return txt.slice(pathIdx + 8).split(/[?#/\s]/)[0].trim();
     }
+    const sanvoShortIdx = txt.indexOf("sanvo.gg/");
+    if (sanvoShortIdx !== -1) {
+      return txt.slice(sanvoShortIdx + 9).split(/[?#/\s]/)[0].trim();
+    }
+    // LEGACY COMPATIBILITY: aceita links curtos legados sancord.gg/
     const shortIdx = txt.indexOf("sancord.gg/");
     if (shortIdx !== -1) {
       return txt.slice(shortIdx + 11).split(/[?#/\s]/)[0].trim();
@@ -63,6 +73,7 @@ const SancordNet = (() => {
     origin,
     secureForAuth,
     INVITE_BASE_URL,
+    SANVO_INVITE_BASE_URL,
     url: backendUrl,
     imageUrl(path) {
       if (/^data:image\/(?:png|jpe?g|gif|webp|bmp|avif);base64,[a-zA-Z0-9+/=]+$/.test(path)) return path;
@@ -73,9 +84,18 @@ const SancordNet = (() => {
     websocketUrl() { return `${origin.replace(/^http/, "ws")}/ws`; },
     sessionKey(name) { return `${name}:${origin}`; },
     inviteUrl,
+    sanvoInviteUrl,
     extractInviteCode,
     link(values, endpoint = origin) {
       return `${INVITE_BASE_URL}?${new URLSearchParams({ endpoint, ...values })}`;
     },
+    sanvoLink(values, endpoint = origin) {
+      return `${SANVO_INVITE_BASE_URL}?${new URLSearchParams({ endpoint, ...values })}`;
+    },
   });
 })();
+const SanvoNet = SancordNet;
+if (typeof globalThis !== "undefined") {
+  globalThis.SanvoNet = SancordNet;
+  globalThis.SancordNet = SancordNet; // LEGACY COMPATIBILITY
+}

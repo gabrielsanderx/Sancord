@@ -1049,4 +1049,5 @@
     describeInviteSummary,
     _state: inviteState,
   };
+  window.SanvoInvites = window.SancordInvites;
 })();

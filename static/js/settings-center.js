@@ -648,11 +648,84 @@
     state.audioSettings.notifWhenFocused = Boolean(e.target.checked);
     saveAudioSettings();
   });
+  document.getElementById("notif-taskbar-badge")?.addEventListener("change", (e) => {
+    state.audioSettings.notifTaskbarBadge = Boolean(e.target.checked);
+    saveAudioSettings();
+    if (typeof updateDocumentTitle === "function") updateDocumentTitle();
+  });
   document.getElementById("notif-title-badge")?.addEventListener("change", (e) => {
     state.audioSettings.notifTitleBadge = Boolean(e.target.checked);
     saveAudioSettings();
     if (typeof updateDocumentTitle === "function") updateDocumentTitle();
   });
+  document.getElementById("notif-dm-rail-badge")?.addEventListener("change", (e) => {
+    state.audioSettings.notifDmBadges = Boolean(e.target.checked);
+    saveAudioSettings();
+    if (typeof updateHomeNotificationBadges === "function") updateHomeNotificationBadges();
+  });
+
+  // Controles dedicados de "Sons de chamadas" (SancordVoiceSounds)
+  function syncCallSoundsControls() {
+    if (typeof SancordVoiceSounds === "undefined") return;
+    const p = SancordVoiceSounds.getPrefs();
+    const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
+    setChk("call-sounds-master", p.enabled);
+    setChk("call-sound-join", p.join);
+    setChk("call-sound-leave", p.leave);
+    setChk("call-sound-stream-start", p.streamStart);
+    setChk("call-sound-stream-stop", p.streamStop);
+    setChk("call-sound-camera", p.camera);
+    setChk("call-sound-controls", p.controls);
+    setChk("call-sound-incoming", p.incoming);
+    const vol = document.getElementById("call-sounds-volume");
+    const volVal = document.getElementById("call-sounds-volume-value");
+    if (vol) vol.value = String(p.volume);
+    if (volVal) volVal.textContent = `${p.volume}%`;
+    const rVol = document.getElementById("call-ringtone-volume");
+    const rVolVal = document.getElementById("call-ringtone-volume-value");
+    if (rVol) rVol.value = String(p.ringtoneVolume);
+    if (rVolVal) rVolVal.textContent = `${p.ringtoneVolume}%`;
+  }
+
+  const callSoundToggleBindings = [
+    ["call-sounds-master", "enabled"],
+    ["call-sound-join", "join"],
+    ["call-sound-leave", "leave"],
+    ["call-sound-stream-start", "streamStart"],
+    ["call-sound-stream-stop", "streamStop"],
+    ["call-sound-camera", "camera"],
+    ["call-sound-controls", "controls"],
+    ["call-sound-incoming", "incoming"],
+  ];
+  for (const [elId, key] of callSoundToggleBindings) {
+    document.getElementById(elId)?.addEventListener("change", (e) => {
+      if (typeof SancordVoiceSounds === "undefined") return;
+      SancordVoiceSounds.updatePrefs({ [key]: Boolean(e.target.checked) });
+    });
+  }
+  document.getElementById("call-sounds-volume")?.addEventListener("input", (e) => {
+    if (typeof SancordVoiceSounds === "undefined") return;
+    const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+    const lbl = document.getElementById("call-sounds-volume-value");
+    if (lbl) lbl.textContent = `${v}%`;
+    SancordVoiceSounds.updatePrefs({ volume: v });
+  });
+  document.getElementById("call-ringtone-volume")?.addEventListener("input", (e) => {
+    if (typeof SancordVoiceSounds === "undefined") return;
+    const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+    const lbl = document.getElementById("call-ringtone-volume-value");
+    if (lbl) lbl.textContent = `${v}%`;
+    SancordVoiceSounds.updatePrefs({ ringtoneVolume: v });
+  });
+  document.querySelectorAll("[data-call-cue-preview]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const cue = btn.getAttribute("data-call-cue-preview");
+      if (cue && typeof SancordVoiceSounds !== "undefined") {
+        SancordVoiceSounds.playLocal(cue, { forcePreview: true });
+      }
+    });
+  });
+  syncCallSoundsControls();
 
   // -------------------------------------------------------------------------
   // 6. Aparência, Acessibilidade (TTS, Saturação, Cargos) & Chat
@@ -759,7 +832,7 @@
     saveAudioSettings();
   });
   document.getElementById("accessibility-tts-test-btn")?.addEventListener("click", () => {
-    if (!speakSettingsTts("Teste de leitura em voz alta do Sancord.")) {
+    if (!speakSettingsTts("Teste de leitura em voz alta do Sanvo.")) {
       showUiToast("Síntese de voz não disponível neste ambiente.");
     }
   });
@@ -986,18 +1059,18 @@
     const advOpenBtn = document.getElementById("advanced-open-data-dir-btn");
     const advDirDesc = document.getElementById("advanced-data-dir-desc");
 
-    if (badge) badge.textContent = isDesktop ? "Sancord Desktop (Windows)" : "Modo Navegador";
+    if (badge) badge.textContent = isDesktop ? "Sanvo Desktop (Windows)" : "Modo Navegador";
     if (note) {
       note.textContent = isDesktop
-        ? "Controles nativos conectados diretamente ao aplicativo Windows Sancord Desktop."
-        : "Você está usando o Sancord no navegador. Inicialização com o Windows e pasta local ficam ativos no executável Sancord Desktop.";
+        ? "Controles nativos conectados diretamente ao aplicativo Windows Sanvo Desktop."
+        : "Você está usando o Sanvo no navegador. Inicialização com o Windows e pasta local ficam ativos no executável Sanvo Desktop.";
     }
     if (autoToggle) { autoToggle.checked = Boolean(desktopState.autostart); autoToggle.disabled = !isDesktop; }
     if (minToggle) { minToggle.checked = Boolean(desktopState.startMinimized); minToggle.disabled = !isDesktop; }
     if (closeToggle) { closeToggle.checked = Boolean(desktopState.minimizeOnClose); closeToggle.disabled = !isDesktop; }
     if (notifToggle) notifToggle.checked = Boolean(state.audioSettings?.desktopNotif);
-    if (dirLabel) dirLabel.textContent = desktopState.dataDir || (isDesktop ? "Pasta de dados local do Sancord Desktop" : "Disponível no aplicativo desktop instalado.");
-    if (advDirDesc) advDirDesc.textContent = desktopState.dataDir || "Disponível no aplicativo Sancord Desktop.";
+    if (dirLabel) dirLabel.textContent = desktopState.dataDir || (isDesktop ? "Pasta de dados local do Sanvo Desktop" : "Disponível no aplicativo desktop instalado.");
+    if (advDirDesc) advDirDesc.textContent = desktopState.dataDir || "Disponível no aplicativo Sanvo Desktop.";
     if (openDirBtn) openDirBtn.disabled = !isDesktop;
     if (advOpenBtn) advOpenBtn.disabled = !isDesktop;
   }
@@ -1188,8 +1261,8 @@
     }
 
     const lines = [
-      `Sancord Diagnóstico (${new Date().toISOString()})`,
-      `Versão: ${desktopState.version || "0.2.3"} | Ambiente: ${desktopState.isDesktop ? "Desktop Windows" : "Navegador"}`,
+      `Sanvo Diagnóstico (${new Date().toISOString()})`,
+      `Versão: ${desktopState.version || "0.2.7"} | Ambiente: ${desktopState.isDesktop ? "Desktop Windows" : "Navegador"}`,
       ...checks.map((c) => `- ${c.name}: ${c.value}`),
     ];
     lastDiagnosticsReport = sanitizeDiagnosticReport(lines.join("\n"));
@@ -1205,8 +1278,8 @@
     const verEl = document.getElementById("about-version-line");
     const rtEl = document.getElementById("about-runtime-line");
     const licEl = document.getElementById("about-licenses-list");
-    if (verEl) verEl.textContent = `Versão ${desktopState.version || "0.2.3"} • Canal Estável`;
-    if (rtEl) rtEl.textContent = `Arquitetura ${desktopState.arch || "x86_64"} • ${desktopState.isDesktop ? "Sancord Desktop (Windows / WebView2)" : "Cliente Web"} • Rust + Axum + SQLite + WebRTC P2P`;
+    if (verEl) verEl.textContent = `Versão ${desktopState.version || "0.2.7"} • Canal Estável`;
+    if (rtEl) rtEl.textContent = `Arquitetura ${desktopState.arch || "x86_64"} • ${desktopState.isDesktop ? "Sanvo Desktop (Windows / WebView2)" : "Cliente Web"} • Rust + Axum + SQLite + WebRTC P2P`;
     if (licEl && !licEl.childElementCount) {
       for (const lib of OPEN_SOURCE_LICENSES) {
         const chip = document.createElement("div");
@@ -1234,6 +1307,7 @@
 
     setCheck("notif-show-preview", s.notifShowPreview !== false);
     setCheck("notif-when-focused", Boolean(s.notifWhenFocused));
+    setCheck("notif-taskbar-badge", s.notifTaskbarBadge !== false);
     setCheck("notif-title-badge", s.notifTitleBadge !== false);
 
     setVal("appearance-custom-accent-color", s.customAccentColor && /^#[0-9a-f]{6}$/i.test(s.customAccentColor) ? s.customAccentColor : "#5865f2");

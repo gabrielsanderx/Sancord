@@ -9,7 +9,7 @@
 const VOLUME_KEY = "sancord_voice_volumes";
 const LOCAL_MUTE_KEY = "sancord_voice_local_mutes";
 const RING_TIMEOUT_MS = 30000;
-const UNANSWERED_TIMEOUT_MS = 45000;
+const CALL_RING_DURATION_MS = 30000;
 
 function readJsonStore(key, fallback) {
   try {
@@ -428,6 +428,7 @@ function resumeVoiceAfterReconnect() {
   recovery.timer = setTimeout(() => {
     if (state.voiceRecovery !== recovery) return;
     leaveVoiceChannel({ silent: true });
+    if (typeof SancordVoiceSounds !== "undefined") SancordVoiceSounds.playLocal("voice_error");
     showUiToast("Não foi possível recuperar a chamada. Você pode entrar novamente.");
   }, 8000);
 }
@@ -438,38 +439,321 @@ function confirmVoiceRecovery() {
   cancelVoiceRecovery();
   syncVoiceStateWithServer();
   startVoicePingMonitor();
+  if (typeof SancordVoiceSounds !== "undefined") {
+    SancordVoiceSounds.onEnteredVoiceSession(recovery.channel, { isReconnect: true });
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Chamadas privadas: toque, recusa, fim e "ninguém atendeu"
+// Chamadas privadas: máquina de estados autoritativa (RINGING ≠ CALL SESSION),
+// toque real, ringback, recusa, cancelamento, entrada tardia e multi-dispositivo
 // ---------------------------------------------------------------------------
 
-function startIncomingRing(channelId) {
+function ensureActiveCallsMap() {
+  if (!(state.activeCalls instanceof Map)) {
+    state.activeCalls = new Map();
+  }
+  return state.activeCalls;
+}
+
+function computeRemainingRingMs(ringExpiresAt, serverNow) {
+  if (typeof ringExpiresAt === "number" && Number.isFinite(ringExpiresAt)) {
+    const base = typeof serverNow === "number" && Number.isFinite(serverNow) ? serverNow : Date.now();
+    return Math.max(0, ringExpiresAt - base);
+  }
+  return CALL_RING_DURATION_MS;
+}
+
+function startIncomingRing(channelId, { timeoutMs = RING_TIMEOUT_MS, dmId = null } = {}) {
   stopIncomingRing();
-  playUiSound("mention");
-  state.ringInterval = setInterval(() => playUiSound("mention"), 2500);
-  state.ringTimeout = setTimeout(() => {
+  const safeTimeout = Math.max(250, Number(timeoutMs) || RING_TIMEOUT_MS);
+  const expire = () => {
     if (state.pendingIncomingCall?.voice_channel_id === channelId) {
       dmCallToast?.classList.add("hidden");
       state.pendingIncomingCall = null;
     }
     stopIncomingRing();
-  }, RING_TIMEOUT_MS);
+    if (typeof renderPrivateCallBanner === "function") renderPrivateCallBanner();
+  };
+  if (typeof SancordVoiceSounds !== "undefined") {
+    const started = SancordVoiceSounds.startIncomingRing(channelId, {
+      timeoutMs: safeTimeout,
+      onTimeout: expire,
+      dmId,
+    });
+    // Mesmo quando o som está silenciado (ex.: DND), ainda encerramos o toast visual no fim do timeout.
+    if (!started) {
+      state.ringTimeout = setTimeout(expire, safeTimeout);
+    }
+    return;
+  }
+  playUiSound("mention");
+  state.ringInterval = setInterval(() => playUiSound("mention"), 2200);
+  state.ringTimeout = setTimeout(expire, safeTimeout);
 }
 
 function stopIncomingRing() {
+  if (typeof SancordVoiceSounds !== "undefined") SancordVoiceSounds.stopIncomingRing();
+  if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.clearIncomingCallAttention === "function") {
+    SancordNotifications.clearIncomingCallAttention();
+  }
   clearInterval(state.ringInterval);
   clearTimeout(state.ringTimeout);
   state.ringInterval = null;
   state.ringTimeout = null;
 }
 
-function onCallEnded({ channel_id }) {
-  if (state.pendingIncomingCall?.voice_channel_id === channel_id) {
-    dmCallToast?.classList.add("hidden");
-    state.pendingIncomingCall = null;
-    stopIncomingRing();
+function clearIncomingCallToast(channelId = null) {
+  if (channelId && state.pendingIncomingCall?.voice_channel_id !== channelId) return;
+  dmCallToast?.classList.add("hidden");
+  state.pendingIncomingCall = null;
+  stopIncomingRing();
+}
+
+function showIncomingCallToast(info) {
+  if (!info || !info.voice_channel_id) return;
+  if (state.currentVoiceChannel === info.voice_channel_id) {
+    clearIncomingCallToast(info.voice_channel_id);
+    return;
   }
+  const remainingMs = computeRemainingRingMs(info.ring_expires_at, info.server_now);
+  if (remainingMs <= 0) {
+    clearIncomingCallToast(info.voice_channel_id);
+    return;
+  }
+
+  const prev = state.pendingIncomingCall;
+  const sameRing =
+    prev &&
+    prev.voice_channel_id === info.voice_channel_id &&
+    prev.call_id &&
+    prev.call_id === info.call_id &&
+    prev.ring_started_at === info.ring_started_at;
+
+  const callGroup = info.dm_id?.startsWith("gdm:") && typeof findGroupDm === "function" ? findGroupDm(info.dm_id) : null;
+  const groupName = callGroup && typeof groupDisplayName === "function" ? groupDisplayName(callGroup) : null;
+  const displayFrom = info.from_display_name || info.from_username || "Alguém";
+
+  state.pendingIncomingCall = {
+    call_id: info.call_id || null,
+    dm_id: info.dm_id,
+    voice_channel_id: info.voice_channel_id,
+    from_username: info.from_username,
+    from_display_name: displayFrom,
+    from_color: info.from_color,
+    from_avatar: info.from_avatar,
+    ring_started_at: info.ring_started_at || null,
+    ring_expires_at: info.ring_expires_at || null,
+    server_now: info.server_now || Date.now(),
+  };
+
+  if (typeof dmCallToastAvatar !== "undefined" && dmCallToastAvatar) {
+    dmCallToastAvatar.style.background = info.from_color || "#5865f2";
+    dmCallToastAvatar.innerHTML = renderAvatarInner(info.from_username, info.from_avatar);
+  }
+  if (typeof dmCallToastName !== "undefined" && dmCallToastName) {
+    dmCallToastName.textContent = groupName ? `${displayFrom} • ${groupName}` : displayFrom;
+  }
+  const subEl = document.getElementById("dm-call-toast-sub");
+  if (subEl) {
+    subEl.textContent = groupName ? "está ligando no grupo..." : "está ligando...";
+  }
+  const warnEl = document.getElementById("dm-call-toast-warn");
+  if (warnEl) {
+    const inOtherCall = Boolean(state.currentVoiceChannel && state.currentVoiceChannel !== info.voice_channel_id);
+    const streaming = Boolean(state.localScreenStream || state.localCameraStream);
+    if (inOtherCall && streaming) {
+      warnEl.textContent = "Você está transmitindo — atender vai trocar de chamada.";
+      warnEl.classList.remove("hidden");
+    } else if (inOtherCall) {
+      warnEl.textContent = "Você está em outra chamada — atender vai trocar de sala.";
+      warnEl.classList.remove("hidden");
+    } else {
+      warnEl.textContent = "";
+      warnEl.classList.add("hidden");
+    }
+  }
+  dmCallToast?.classList.remove("hidden");
+
+  if (!sameRing) {
+    startIncomingRing(info.voice_channel_id, { timeoutMs: remainingMs, dmId: info.dm_id });
+    if (typeof SancordNotifications !== "undefined" && typeof SancordNotifications.notifyIncomingCall === "function") {
+      SancordNotifications.notifyIncomingCall({
+        call_id: info.call_id,
+        dm_id: info.dm_id,
+        voice_channel_id: info.voice_channel_id,
+        from_username: info.from_username,
+        caller_display_name: displayFrom,
+        group_name: groupName,
+      });
+    }
+  }
+}
+
+async function answerIncomingCall(pending) {
+  if (!pending || !pending.voice_channel_id) return;
+  const inOtherCall = Boolean(state.currentVoiceChannel && state.currentVoiceChannel !== pending.voice_channel_id);
+  const streaming = Boolean(state.localScreenStream || state.localCameraStream);
+  if (inOtherCall && streaming && typeof SancordUI !== "undefined" && typeof SancordUI.confirm === "function") {
+    const ok = await SancordUI.confirm({
+      title: "Trocar de chamada?",
+      message: "Você está com câmera ou compartilhamento de tela ativo em outra chamada. Deseja encerrá-la e atender esta ligação?",
+      confirmLabel: "Atender e trocar",
+    });
+    if (!ok) return;
+  }
+
+  clearIncomingCallToast(pending.voice_channel_id);
+  try {
+    window.ipc?.postMessage("window:focus");
+  } catch (_) {}
+
+  if (pending.dm_id?.startsWith("gdm:")) {
+    if (typeof openGroupConversation === "function") openGroupConversation(pending.dm_id);
+    joinVoiceChannel(pending.voice_channel_id, getFriendlyVoiceName(pending.voice_channel_id));
+    return;
+  }
+  sendWs("OpenDm", { target_username: pending.from_username });
+  joinVoiceChannel(pending.voice_channel_id, `Call privada: @${pending.from_username}`);
+}
+
+function declineIncomingCall(pending) {
+  const target = pending || state.pendingIncomingCall;
+  clearIncomingCallToast(target?.voice_channel_id || null);
+  if (target?.voice_channel_id) {
+    sendWs("DeclineCall", { channel_id: target.voice_channel_id });
+  }
+  renderPrivateCallBanner();
+}
+
+function onCallStateUpdated({ call }) {
+  if (!call || !call.voice_channel_id) return;
+  const map = ensureActiveCallsMap();
+  const chId = call.voice_channel_id;
+  const meLower = state.selfUser?.username?.toLowerCase() || "";
+
+  if (call.state === "ENDED") {
+    map.delete(chId);
+    clearIncomingCallToast(chId);
+    if (state.currentVoiceChannel === chId && typeof SancordVoiceSounds !== "undefined") {
+      SancordVoiceSounds.stopOutgoingRing();
+    }
+    renderPrivateCallBanner();
+    if (typeof updateDmCallButtonUI === "function") updateDmCallButtonUI();
+    return;
+  }
+
+  map.set(chId, call);
+  const amInCall = state.currentVoiceChannel === chId;
+  const ringingTargets = Array.isArray(call.ringing_targets) ? call.ringing_targets : [];
+  const amRingingTarget = Boolean(meLower && !amInCall && ringingTargets.some((u) => String(u).toLowerCase() === meLower));
+
+  if (amRingingTarget) {
+    showIncomingCallToast({
+      call_id: call.call_id,
+      dm_id: call.dm_id,
+      voice_channel_id: chId,
+      from_username: call.caller_username,
+      from_display_name: call.caller_display_name,
+      from_color: call.caller_color,
+      from_avatar: call.caller_avatar,
+      ring_started_at: call.ring_started_at,
+      ring_expires_at: call.ring_expires_at,
+      server_now: call.server_now,
+    });
+  } else if (state.pendingIncomingCall?.voice_channel_id === chId) {
+    clearIncomingCallToast(chId);
+  }
+
+  if (amInCall) {
+    if (typeof SancordVoiceSounds !== "undefined") {
+      const remaining = computeRemainingRingMs(call.ring_expires_at, call.server_now);
+      if (call.state === "RINGING" && ringingTargets.length > 0 && remaining > 0) {
+        if (typeof SancordSoundManager === "undefined" || !SancordSoundManager.isLoopActive("outgoing")) {
+          SancordVoiceSounds.startOutgoingRing(chId, { timeoutMs: remaining });
+        }
+      } else {
+        SancordVoiceSounds.stopOutgoingRing();
+      }
+    }
+    if (call.state === "CONNECTED" && typeof call.connected_at === "number") {
+      const skew = typeof call.server_now === "number" ? Date.now() - call.server_now : 0;
+      state.voiceCallStartedAt = call.connected_at + skew;
+    }
+    if (typeof updateVoiceCallTimer === "function") updateVoiceCallTimer();
+  }
+
+  renderPrivateCallBanner();
+  if (typeof updateDmCallButtonUI === "function") updateDmCallButtonUI();
+}
+
+function onActiveCallsSync({ calls }) {
+  const map = ensureActiveCallsMap();
+  const nextIds = new Set();
+  for (const call of Array.isArray(calls) ? calls : []) {
+    if (call?.voice_channel_id) nextIds.add(call.voice_channel_id);
+  }
+  for (const prevId of [...map.keys()]) {
+    if (!nextIds.has(prevId)) {
+      map.delete(prevId);
+      clearIncomingCallToast(prevId);
+    }
+  }
+  for (const call of Array.isArray(calls) ? calls : []) {
+    onCallStateUpdated({ call });
+  }
+  renderPrivateCallBanner();
+  if (typeof updateDmCallButtonUI === "function") updateDmCallButtonUI();
+}
+
+function onCallAnswered({ channel_id, by_username }) {
+  // Multi-device: se minha conta atendeu em outro aparelho, para imediatamente o ringtone aqui.
+  clearIncomingCallToast(channel_id);
+  if (state.currentVoiceChannel === channel_id && typeof SancordVoiceSounds !== "undefined") {
+    SancordVoiceSounds.stopOutgoingRing();
+  }
+  renderPrivateCallBanner();
+  if (typeof updateDmCallButtonUI === "function") updateDmCallButtonUI();
+}
+
+function onCallRingTimeout({ channel_id }) {
+  clearIncomingCallToast(channel_id);
+  if (state.currentVoiceChannel === channel_id && typeof SancordVoiceSounds !== "undefined") {
+    SancordVoiceSounds.stopOutgoingRing();
+  }
+  const call = ensureActiveCallsMap().get(channel_id);
+  if (call) {
+    call.ringing_targets = [];
+    call.ring_expires_at = null;
+    if (call.state === "RINGING") call.state = "WAITING_ACTIVE";
+  }
+  renderPrivateCallBanner();
+  if (typeof updateDmCallButtonUI === "function") updateDmCallButtonUI();
+}
+
+function onCallCanceled({ channel_id }) {
+  clearIncomingCallToast(channel_id);
+  if (state.currentVoiceChannel === channel_id && typeof SancordVoiceSounds !== "undefined") {
+    SancordVoiceSounds.stopOutgoingRing();
+  }
+  const call = ensureActiveCallsMap().get(channel_id);
+  if (call) {
+    call.ringing_targets = [];
+    call.ring_expires_at = null;
+    if (call.state === "RINGING") call.state = "WAITING_ACTIVE";
+  }
+  renderPrivateCallBanner();
+  if (typeof updateDmCallButtonUI === "function") updateDmCallButtonUI();
+}
+
+function onCallEnded({ channel_id }) {
+  ensureActiveCallsMap().delete(channel_id);
+  clearIncomingCallToast(channel_id);
+  if (state.currentVoiceChannel === channel_id && typeof SancordVoiceSounds !== "undefined") {
+    SancordVoiceSounds.stopOutgoingRing();
+  }
+  renderPrivateCallBanner();
+  if (typeof updateDmCallButtonUI === "function") updateDmCallButtonUI();
 }
 
 function aloneInCall(channelId) {
@@ -478,23 +762,144 @@ function aloneInCall(channelId) {
 }
 
 function onCallDeclined({ channel_id, by_username }) {
-  showUiToast(`${by_username} recusou a chamada.`);
-  // Numa DM 1:1, se ninguém mais está na chamada, encerra.
-  if (state.currentVoiceChannel === channel_id && channel_id.startsWith("dmvoice:") && aloneInCall(channel_id)) {
-    leaveVoiceChannel();
+  const meLower = state.selfUser?.username?.toLowerCase() || "";
+  if (by_username && by_username.toLowerCase() === meLower) {
+    // Recusado em outro dispositivo da mesma conta: silencia o toque imediatamente aqui.
+    clearIncomingCallToast(channel_id);
+    renderPrivateCallBanner();
+    return;
   }
+  if (typeof SancordVoiceSounds !== "undefined") SancordVoiceSounds.stopOutgoingRing();
+  // O chamador recebe feedback claro, mas a sessão continua aberta (WAITING_ACTIVE) se ele quiser permanecer.
+  showUiToast(`${by_username} recusou a chamada.`);
+  renderPrivateCallBanner();
 }
 
-/** Quem liga numa DM 1:1 desiste sozinho se ninguém atender. */
-function startUnansweredCallTimer(channelId) {
-  clearUnansweredCallTimer();
-  if (!channelId.startsWith("dmvoice:")) return;
-  state.unansweredTimer = setTimeout(() => {
-    if (state.currentVoiceChannel === channelId && aloneInCall(channelId)) {
-      leaveVoiceChannel();
-      showUiToast("Ninguém atendeu a chamada.");
+function renderPrivateCallBanner() {
+  const banner = document.getElementById("dm-active-call-banner");
+  if (!banner) return;
+  const inDm = state.activeView === "home" && Boolean(state.activeDmId);
+  if (!inDm) {
+    banner.classList.add("hidden");
+    banner.replaceChildren();
+    return;
+  }
+  const voiceId = typeof getDmVoiceIdFromDmId === "function" ? getDmVoiceIdFromDmId(state.activeDmId) : null;
+  const call = voiceId ? ensureActiveCallsMap().get(voiceId) : null;
+  if (!call || call.state === "ENDED") {
+    banner.classList.add("hidden");
+    banner.replaceChildren();
+    return;
+  }
+
+  const meLower = state.selfUser?.username?.toLowerCase() || "";
+  const amInCall = state.currentVoiceChannel === voiceId;
+  const ringingTargets = Array.isArray(call.ringing_targets) ? call.ringing_targets : [];
+  const activeNames = Array.isArray(call.active_participants) ? call.active_participants : [];
+  const declinedNames = Array.isArray(call.declined_by) ? call.declined_by : [];
+  const amRingingTarget = Boolean(meLower && !amInCall && ringingTargets.some((u) => String(u).toLowerCase() === meLower));
+
+  // Se já estamos na call e conectados com outras pessoas sem toque pendente, o palco já exibe tudo.
+  if (amInCall && call.state === "CONNECTED" && ringingTargets.length === 0) {
+    banner.classList.add("hidden");
+    banner.replaceChildren();
+    return;
+  }
+
+  const info = document.createElement("div");
+  info.className = "dm-call-banner-info";
+  const dot = document.createElement("span");
+  dot.className = `dm-call-banner-dot${call.state === "RINGING" ? " is-ringing" : ""}`;
+  const textWrap = document.createElement("div");
+  textWrap.className = "dm-call-banner-text";
+  const title = document.createElement("strong");
+  const sub = document.createElement("span");
+
+  const actions = document.createElement("div");
+  actions.className = "dm-call-banner-actions";
+
+  if (amInCall) {
+    if (ringingTargets.length > 0) {
+      title.textContent = `Chamando ${ringingTargets.join(", ")}...`;
+      sub.textContent = "Aguardando resposta · você pode cancelar o toque e manter a sala aberta.";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn-secondary small-btn";
+      cancelBtn.dataset.callAction = "cancel-ring";
+      cancelBtn.textContent = "Cancelar toque";
+      cancelBtn.addEventListener("click", () => sendWs("CancelCall", { channel_id: voiceId }));
+      actions.append(cancelBtn);
+    } else {
+      if (declinedNames.length > 0) {
+        title.textContent = `${declinedNames.join(", ")} recusou a chamada`;
+      } else {
+        title.textContent = "Sem resposta no momento";
+      }
+      sub.textContent = "A chamada continua aberta — a outra pessoa ainda pode entrar.";
+      const reRingBtn = document.createElement("button");
+      reRingBtn.type = "button";
+      reRingBtn.className = "btn-secondary small-btn";
+      reRingBtn.dataset.callAction = "re-ring";
+      reRingBtn.textContent = "Chamar novamente";
+      reRingBtn.addEventListener("click", () => sendWs("RingCall", { channel_id: voiceId }));
+      actions.append(reRingBtn);
     }
-  }, UNANSWERED_TIMEOUT_MS);
+    const leaveBtn = document.createElement("button");
+    leaveBtn.type = "button";
+    leaveBtn.className = "btn-decline-call small-btn";
+    leaveBtn.dataset.callAction = "leave";
+    leaveBtn.textContent = "Desligar";
+    leaveBtn.addEventListener("click", () => leaveVoiceChannel());
+    actions.append(leaveBtn);
+  } else if (amRingingTarget) {
+    title.textContent = `${call.caller_display_name || call.caller_username} está ligando...`;
+    sub.textContent = "Chamada privada recebida";
+    const acceptBtn = document.createElement("button");
+    acceptBtn.type = "button";
+    acceptBtn.className = "btn-accept-call small-btn";
+    acceptBtn.dataset.callAction = "answer";
+    acceptBtn.textContent = "📞 Atender";
+    acceptBtn.addEventListener("click", () =>
+      answerIncomingCall({
+        call_id: call.call_id,
+        dm_id: call.dm_id,
+        voice_channel_id: voiceId,
+        from_username: call.caller_username,
+        from_display_name: call.caller_display_name,
+      })
+    );
+    const declineBtn = document.createElement("button");
+    declineBtn.type = "button";
+    declineBtn.className = "btn-decline-call small-btn";
+    declineBtn.dataset.callAction = "decline";
+    declineBtn.textContent = "Recusar";
+    declineBtn.addEventListener("click", () => declineIncomingCall({ voice_channel_id: voiceId }));
+    actions.append(acceptBtn, declineBtn);
+  } else {
+    // Entrada tardia (WAITING_ACTIVE após timeout ou CONNECTED em grupo/DM)
+    title.textContent = activeNames.length > 0 ? "Chamada em andamento" : "Chamada disponível";
+    sub.textContent =
+      activeNames.length > 0
+        ? `${activeNames.join(", ")} ${activeNames.length === 1 ? "está" : "estão"} na chamada`
+        : `${call.caller_display_name || call.caller_username} iniciou uma chamada recentemente`;
+    const joinBtn = document.createElement("button");
+    joinBtn.type = "button";
+    joinBtn.className = "btn-accept-call small-btn";
+    joinBtn.dataset.callAction = "late-join";
+    joinBtn.textContent = "Entrar na chamada";
+    joinBtn.addEventListener("click", () => joinVoiceChannel(voiceId, getFriendlyVoiceName(voiceId)));
+    actions.append(joinBtn);
+  }
+
+  textWrap.append(title, sub);
+  info.append(dot, textWrap);
+  banner.replaceChildren(info, actions);
+  banner.classList.remove("hidden");
+}
+
+/** Mantida por compatibilidade: timeouts agora são autoritativos no servidor (RINGING ≠ CALL SESSION). */
+function startUnansweredCallTimer(_channelId) {
+  clearUnansweredCallTimer();
 }
 
 function clearUnansweredCallTimer() {

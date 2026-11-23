@@ -293,3 +293,231 @@ async fn voice_moderation_survives_username_change_and_restart() {
     let flags = moderation.get("voznova").expect("moderação deve sobreviver ao reinício");
     assert!(flags.muted && flags.deafened);
 }
+
+#[tokio::test]
+async fn private_call_ring_timeout_keeps_session_open_and_allows_late_join() {
+    let srv = start_server().await;
+    {
+        let mut st = srv.state.write().await;
+        st.call_timing.ring_duration_ms = 140;
+        st.call_timing.idle_grace_ms = 5_000;
+    }
+    let (mut ana, ana_id) = user(&srv, "AnaLate").await;
+    let (mut beto, beto_id) = user(&srv, "BetoLate").await;
+    befriend(&mut ana, &mut beto, "AnaLate", "BetoLate").await;
+    let dm = ServerState::make_dm_id("analate", "betolate");
+    let call = dm.replacen("dm:", "dmvoice:", 1);
+
+    // 1. Ana inicia chamada -> Beto recebe DmCallIncoming com call_id e ring_expires_at
+    send(&mut ana, json!({"type":"JoinVoice","payload":{"channel_id":call}})).await;
+    let incoming = wait_for(&mut beto, "DmCallIncoming").await;
+    let call_id = incoming["call_id"].as_str().expect("call_id obrigatório").to_string();
+    assert!(incoming["ring_expires_at"].as_i64().is_some());
+
+    // 2. Beto não atende -> após ring_duration_ms, ambos recebem CallRingTimeout
+    let timeout_ev = wait_for(&mut beto, "CallRingTimeout").await;
+    assert_eq!(timeout_ev["call_id"], call_id);
+    assert_eq!(timeout_ev["channel_id"], call);
+
+    // 3. CRÍTICO: Ana CONTINUA na chamada em estado WAITING_ACTIVE (não foi expulsa!)
+    assert_eq!(voice_of(&srv, &ana_id).await.as_deref(), Some(call.as_str()));
+    {
+        let st = srv.state.read().await;
+        let active = st.active_calls.get(&call).expect("sessão deve continuar aberta após ring timeout");
+        assert_eq!(active.call_id, call_id);
+        assert_eq!(active.state, crate::models::CallState::WaitingActive);
+        assert!(active.ringing_targets.is_empty());
+        assert!(active.session_expires_at.is_none(), "não expira por ociosidade enquanto chamador está na sala");
+    }
+
+    // 4. Mais tarde Beto volta e clica em Entrar na chamada -> entra no MESMO call_id e vira CONNECTED
+    send(&mut beto, json!({"type":"JoinVoice","payload":{"channel_id":call}})).await;
+    let answered = wait_for(&mut ana, "CallAnswered").await;
+    assert_eq!(answered["call_id"], call_id);
+    assert_eq!(answered["by_username"], "BetoLate");
+    assert_eq!(voice_of(&srv, &beto_id).await.as_deref(), Some(call.as_str()));
+    {
+        let st = srv.state.read().await;
+        let active = st.active_calls.get(&call).unwrap();
+        assert_eq!(active.call_id, call_id);
+        assert_eq!(active.state, crate::models::CallState::Connected);
+        assert!(active.answered);
+        assert!(active.connected_at.is_some());
+    }
+
+    // 5. Ambos saem -> registra "Chamada encerrada", NÃO "Chamada perdida"
+    send(&mut beto, json!({"type":"LeaveVoice"})).await;
+    send(&mut ana, json!({"type":"LeaveVoice"})).await;
+    eventually(&srv, |st| {
+        let h = st.chat_history.get(&dm).cloned().unwrap_or_default();
+        h.iter().any(|m| m.content.contains("Chamada encerrada"))
+            && !h.iter().any(|m| m.content.contains("Chamada perdida"))
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn private_call_idle_grace_expires_when_empty_and_logs_missed_call() {
+    let srv = start_server().await;
+    {
+        let mut st = srv.state.write().await;
+        st.call_timing.ring_duration_ms = 5_000;
+        st.call_timing.idle_grace_ms = 160;
+    }
+    let (mut ana, _) = user(&srv, "AnaGrace").await;
+    let (mut beto, _) = user(&srv, "BetoGrace").await;
+    befriend(&mut ana, &mut beto, "AnaGrace", "BetoGrace").await;
+    let dm = ServerState::make_dm_id("anagrace", "betograce");
+    let call = dm.replacen("dm:", "dmvoice:", 1);
+
+    send(&mut ana, json!({"type":"JoinVoice","payload":{"channel_id":call}})).await;
+    let incoming = wait_for(&mut beto, "DmCallIncoming").await;
+    let call_id = incoming["call_id"].as_str().unwrap().to_string();
+
+    // Ana sai antes de Beto atender (sem recusa): toque para imediatamente (CallCanceled),
+    // mas a sessão fica em WAITING_ACTIVE durante idle_grace_ms e depois expira (CallEnded).
+    send(&mut ana, json!({"type":"LeaveVoice"})).await;
+    let canceled = wait_for(&mut beto, "CallCanceled").await;
+    assert_eq!(canceled["call_id"], call_id);
+    {
+        let st = srv.state.read().await;
+        let active = st.active_calls.get(&call).expect("sessão deve aguardar grace period");
+        assert_eq!(active.state, crate::models::CallState::WaitingActive);
+        assert!(active.session_expires_at.is_some());
+    }
+
+    let ended = wait_for(&mut beto, "CallEnded").await;
+    assert_eq!(ended["call_id"], call_id);
+    assert_eq!(ended["reason"], "expired");
+    eventually(&srv, |st| {
+        !st.active_calls.contains_key(&call)
+            && st.chat_history.get(&dm).is_some_and(|h| h.iter().any(|m| m.content.contains("Chamada perdida")))
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn private_call_cancel_ring_and_re_ring_respect_cooldown() {
+    let srv = start_server().await;
+    {
+        let mut st = srv.state.write().await;
+        st.call_timing.ring_duration_ms = 5_000;
+        st.call_timing.ring_cooldown_ms = 400;
+    }
+    let (mut ana, ana_id) = user(&srv, "AnaCancel").await;
+    let (mut beto, _) = user(&srv, "BetoCancel").await;
+    befriend(&mut ana, &mut beto, "AnaCancel", "BetoCancel").await;
+    let call = ServerState::make_dm_id("anacancel", "betocancel").replacen("dm:", "dmvoice:", 1);
+
+    send(&mut ana, json!({"type":"JoinVoice","payload":{"channel_id":call}})).await;
+    let incoming = wait_for(&mut beto, "DmCallIncoming").await;
+    let call_id = incoming["call_id"].as_str().unwrap().to_string();
+
+    // Ana cancela o toque durante ringing: Beto para de tocar imediatamente, Ana continua na sala
+    send(&mut ana, json!({"type":"CancelCall","payload":{"channel_id":call}})).await;
+    let canceled = wait_for(&mut beto, "CallCanceled").await;
+    assert_eq!(canceled["call_id"], call_id);
+    assert_eq!(voice_of(&srv, &ana_id).await.as_deref(), Some(call.as_str()));
+
+    // Tentar chamar novamente antes do cooldown falha com feedback de rate limit
+    send(&mut ana, json!({"type":"RingCall","payload":{"channel_id":call}})).await;
+    assert_eq!(feedback(&mut ana, "ring_call").await["ok"], false);
+
+    // Após o cooldown, RingCall funciona no mesmo call_id
+    tokio::time::sleep(std::time::Duration::from_millis(420)).await;
+    send(&mut ana, json!({"type":"RingCall","payload":{"channel_id":call}})).await;
+    let incoming2 = wait_for(&mut beto, "DmCallIncoming").await;
+    assert_eq!(incoming2["call_id"], call_id);
+}
+
+#[tokio::test]
+async fn private_call_multi_device_answer_and_reconnect_preserve_ring_expiry() {
+    let srv = start_server().await;
+    {
+        let mut st = srv.state.write().await;
+        st.call_timing.ring_duration_ms = 1_500;
+    }
+    let (mut ana, _) = user(&srv, "AnaMulti").await;
+    let token_beto = register(&srv, "BetoMulti").await;
+    let mut beto_pc1 = connect(&srv, &token_beto).await;
+    let _ = wait_for(&mut beto_pc1, "Welcome").await;
+    let mut beto_pc2 = connect(&srv, &token_beto).await;
+    let _ = wait_for(&mut beto_pc2, "Welcome").await;
+    befriend(&mut ana, &mut beto_pc1, "AnaMulti", "BetoMulti").await;
+    let call = ServerState::make_dm_id("anamulti", "betomulti").replacen("dm:", "dmvoice:", 1);
+
+    // Ana liga -> ambos os dispositivos de Beto recebem DmCallIncoming
+    send(&mut ana, json!({"type":"JoinVoice","payload":{"channel_id":call}})).await;
+    let r1 = wait_for(&mut beto_pc1, "DmCallIncoming").await;
+    let r2 = wait_for(&mut beto_pc2, "DmCallIncoming").await;
+    let call_id = r1["call_id"].as_str().unwrap().to_string();
+    let orig_expires = r1["ring_expires_at"].as_i64().unwrap();
+    assert_eq!(r2["call_id"], call_id);
+
+    // Um 3o dispositivo de Beto reconecta durante o ringing: recebe ActiveCallsSync com o MESMO ring_expires_at (sem reiniciar!)
+    let mut beto_pc3 = connect(&srv, &token_beto).await;
+    let sync = wait_for(&mut beto_pc3, "ActiveCallsSync").await;
+    let synced_call = sync["calls"].as_array().unwrap().iter().find(|c| c["call_id"] == call_id).expect("call ativa no sync");
+    assert_eq!(synced_call["ring_expires_at"].as_i64(), Some(orig_expires));
+
+    // Beto atende no PC1 -> PC2 e PC3 recebem CallAnswered imediatamente para parar o toque
+    send(&mut beto_pc1, json!({"type":"JoinVoice","payload":{"channel_id":call}})).await;
+    let ans2 = wait_for(&mut beto_pc2, "CallAnswered").await;
+    let ans3 = wait_for(&mut beto_pc3, "CallAnswered").await;
+    assert_eq!(ans2["call_id"], call_id);
+    assert_eq!(ans3["call_id"], call_id);
+}
+
+#[tokio::test]
+async fn group_dm_call_rings_all_keeps_connected_after_timeout_and_allows_late_join() {
+    let srv = start_server().await;
+    {
+        let mut st = srv.state.write().await;
+        st.call_timing.ring_duration_ms = 160;
+    }
+    let (mut a, _) = user(&srv, "GrpA").await;
+    let (mut b, _) = user(&srv, "GrpB").await;
+    let (mut c, c_id) = user(&srv, "GrpC").await;
+    let (mut d, _) = user(&srv, "GrpD").await;
+    befriend(&mut a, &mut b, "GrpA", "GrpB").await;
+    befriend(&mut a, &mut c, "GrpA", "GrpC").await;
+    befriend(&mut a, &mut d, "GrpA", "GrpD").await;
+
+    send(&mut a, json!({"type":"CreateGroupDm","payload":{"name":"Squad","usernames":["GrpB","GrpC","GrpD"]}})).await;
+    let opened = wait_for(&mut a, "GroupDmOpened").await;
+    let gdm = opened["group_id"].as_str().unwrap().to_string();
+    let call = gdm.replacen("gdm:", "gdmvoice:", 1);
+
+    // A inicia call de grupo -> B, C e D tocam
+    send(&mut a, json!({"type":"JoinVoice","payload":{"channel_id":call}})).await;
+    let rb = wait_for(&mut b, "DmCallIncoming").await;
+    let rc = wait_for(&mut c, "DmCallIncoming").await;
+    let rd = wait_for(&mut d, "DmCallIncoming").await;
+    let call_id = rb["call_id"].as_str().unwrap().to_string();
+    assert_eq!(rc["call_id"], call_id);
+    assert_eq!(rd["call_id"], call_id);
+
+    // B atende imediatamente; C e D não atendem
+    send(&mut b, json!({"type":"JoinVoice","payload":{"channel_id":call}})).await;
+    let _ = wait_for(&mut a, "CallAnswered").await;
+
+    // Ring timeout expira para C e D -> ambos recebem CallRingTimeout, enquanto A+B seguem CONNECTED
+    assert_eq!(wait_for(&mut c, "CallRingTimeout").await["call_id"], call_id);
+    assert_eq!(wait_for(&mut d, "CallRingTimeout").await["call_id"], call_id);
+    {
+        let st = srv.state.read().await;
+        let active = st.active_calls.get(&call).expect("call do grupo segue ativa com A+B");
+        assert_eq!(active.state, crate::models::CallState::Connected);
+        assert!(active.ringing_targets.is_empty());
+    }
+
+    // C entra tarde na chamada ativa sem reiniciar ringtone para A ou B
+    send(&mut c, json!({"type":"JoinVoice","payload":{"channel_id":call}})).await;
+    eventually(&srv, |st| st.users.get(&c_id).and_then(|u| u.voice_channel_id.as_deref()) == Some(call.as_str())).await;
+    {
+        let st = srv.state.read().await;
+        let active = st.active_calls.get(&call).unwrap();
+        assert_eq!(active.call_id, call_id);
+        assert!(active.ringing_targets.is_empty());
+    }
+}

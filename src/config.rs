@@ -31,6 +31,8 @@ pub struct Config {
     pub legacy_hub: bool,
     /// Indica indisponibilidade programada para clientes em reconexão.
     pub maintenance_mode: bool,
+    /// Habilita consulta externa de metadados de jogos (desligado em testes unitários).
+    pub game_api_enabled: bool,
 }
 
 pub const DEFAULT_STUN_URLS: &[&str] = &[
@@ -74,20 +76,19 @@ pub fn ice_servers_from(
 
 impl Config {
     pub fn from_env() -> Self {
-        let bind = std::env::var("SANCORD_BIND")
-            .ok()
+        use crate::legacy_sancord_migration::env_var_compat;
+        let bind = env_var_compat("SANVO_BIND", "SANCORD_BIND")
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 3000)));
-        let data_dir = env_path("SANCORD_DATA_DIR", "data");
-        let log_dir = env_path("SANCORD_LOG_DIR", "logs");
-        let session_days_remember = env_num("SANCORD_SESSION_DAYS", 30).clamp(1, 365);
-        let session_hours_short = env_num("SANCORD_SESSION_HOURS", 24).clamp(1, 24 * 30);
-        let var = |k: &str| std::env::var(k).ok();
+        let data_dir = env_path("SANVO_DATA_DIR", "SANCORD_DATA_DIR", "data");
+        let log_dir = env_path("SANVO_LOG_DIR", "SANCORD_LOG_DIR", "logs");
+        let session_days_remember = env_num("SANVO_SESSION_DAYS", "SANCORD_SESSION_DAYS", 30).clamp(1, 365);
+        let session_hours_short = env_num("SANVO_SESSION_HOURS", "SANCORD_SESSION_HOURS", 24).clamp(1, 24 * 30);
         let ice_servers = ice_servers_from(
-            var("SANCORD_STUN_URLS").as_deref(),
-            var("SANCORD_TURN_URLS").as_deref(),
-            var("SANCORD_TURN_USERNAME").as_deref(),
-            var("SANCORD_TURN_CREDENTIAL").as_deref(),
+            env_var_compat("SANVO_STUN_URLS", "SANCORD_STUN_URLS").as_deref(),
+            env_var_compat("SANVO_TURN_URLS", "SANCORD_TURN_URLS").as_deref(),
+            env_var_compat("SANVO_TURN_USERNAME", "SANCORD_TURN_USERNAME").as_deref(),
+            env_var_compat("SANVO_TURN_CREDENTIAL", "SANCORD_TURN_CREDENTIAL").as_deref(),
         );
         Self {
             bind,
@@ -97,7 +98,8 @@ impl Config {
             session_hours_short,
             ice_servers,
             legacy_hub: false,
-            maintenance_mode: var("SANCORD_MAINTENANCE_MODE").as_deref() == Some("1"),
+            maintenance_mode: env_var_compat("SANVO_MAINTENANCE_MODE", "SANCORD_MAINTENANCE_MODE").as_deref() == Some("1"),
+            game_api_enabled: env_var_compat("SANVO_DISABLE_GAME_API", "SANCORD_DISABLE_GAME_API").as_deref() != Some("1"),
         }
     }
 
@@ -112,6 +114,7 @@ impl Config {
             ice_servers: ice_servers_from(None, None, None, None),
             legacy_hub: true,
             maintenance_mode: false,
+            game_api_enabled: false,
         }
     }
 
@@ -134,17 +137,14 @@ impl Config {
     }
 }
 
-fn env_path(key: &str, default: &str) -> PathBuf {
-    std::env::var(key)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
+fn env_path(sanvo_key: &str, legacy_key: &str, default: &str) -> PathBuf {
+    crate::legacy_sancord_migration::env_var_compat(sanvo_key, legacy_key)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(default))
 }
 
-fn env_num(key: &str, default: i64) -> i64 {
-    std::env::var(key)
-        .ok()
+fn env_num(sanvo_key: &str, legacy_key: &str, default: i64) -> i64 {
+    crate::legacy_sancord_migration::env_var_compat(sanvo_key, legacy_key)
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(default)
 }

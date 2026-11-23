@@ -1,4 +1,6 @@
-# Auditoria de paridade — Sancord × Discord Desktop
+# Auditoria de paridade — Sanvo (legado: Sancord) × Discord Desktop
+
+> **Nome atual do projeto:** **Sanvo** (`Sanvo Desktop`) · **Nome legado:** `Sancord`.
 
 Documento vivo. Atualize as linhas quando um item mudar de estado e anote a data no histórico, no fim do arquivo.
 
@@ -973,3 +975,88 @@ Também corrigidos nesta rodada: truncamento com reticências (`overflow: hidden
 | Badge Customization | ✅ | Novo subeditor dedicado em **Configurações → Perfis → Perfil principal → Insígnias** (`static/js/profile-editor.js`), recolhido na lateral até clique, listando somente badges realmente possuídas, com prévia ao vivo no cartão central, ativar/ocultar (respeitando `can_hide`), reordenação por botões `↑`/`↓` e drag-and-drop, *Restaurar padrão*, *Cancelar/Aplicar* no subeditor e persistência validada no servidor (`UpdateProfile` com interseção estrita `requested ∩ owned`). |
 
 Validação local: **237/237** testes de frontend (`node --test tests/frontend-*.test.cjs`) e **194/194** testes Rust (`cargo test --locked --all-targets --target-dir target-dev`) aprovados; binários de QA recompilados em `target-dev/debug`.
+
+### 23/11/2026 · Refatoração Profunda de Cosméticos v3 (Qualidade Visual, Camadas e Timeline)
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| Avatar Decorations | ✅ | Motor `SancordCosmetics` v3 (`static/cosmetics/cosmetics-engine.js`, `cosmetics.css`) com composição real em camadas (`BACK_LAYER` + `AVATAR` + `FRONT_LAYER` + partículas/highlights), 8 peças flagship ilustradas (6 `IDLE_WITH_EVENTS` com eventos secundários/raros orgânicos — piscar, estrela cadente, pétala solta, orelha mexendo, brilho especular — e 2 estáticas detalhadas `static-royal-crown`/`static-emerald`) + upgrade dos clássicos de 1 círculo. Itens legados restantes preservam IDs para migração progressiva. |
+| Profile Frames | ✅ | 8 molduras arquitetônicas SVG (`core-pulse`, `cosmic-drift`, `sakura-wind`, `royal`, `frost-glint`, `cyber-corners`, `ember-trail`, `liquid`) envolvendo cantos, crista superior, selo inferior e trilhos laterais, responsivas por contexto (`FULL_PROFILE`, `EDITOR_PREVIEW`, `PROFILE_POPOUT`, `SELF_PROFILE_MENU`, `MINI`), mesclando peças estáticas gravadas e animações localizadas. |
+| Profile Effects | ✅ | Engine de timeline multi-estágio (`init → entrance → main → climax → dissipate`) com planos de profundidade `back` + `front` em 6 efeitos flagship (`core-signal`, `star-trail`, `petal-drift`, `circuit-boot`, `polar-ribbon`, `embers`, `2,3–2,8 s`), tocando uma vez ao abrir (sem loop infinito) e com botão *Reproduzir novamente*. |
+| Nameplates | ✅ | 8 placas gráficas compostas em SVG (`.np-art-layer`, `starlit-silt`, `twilight-garden`, `core-stripe`, `circuit-weave`, `gold-leaf`, `tide-glass`, `ember-line`, `frost-vein`) com leitura preservada em temas claro/escuro e aplicadas de forma unificada em Cartão, Editor, DMs, Amigos, Dock e Lista de Membros. |
+| Display Name Styles | ✅ | 10 fontes distintas (`modern`, `rounded`, `mono`, `gta`, `retro`, `gothic`, `editorial`, `bubble`, `cyber`, `fantasy`) combináveis com materiais ricos (`gummy`, `ink`, `cosmic`, `prism`, `holographic`, `chrome`, `fire`, `ice`, `neon`, `outline`, `custom-gradient`), animando apenas o material nos contextos apropriados e mantendo a Lista de Membros estática. |
+| Animated Previews | ✅ | Prévias ao vivo no editor com hover animado, aplicação imediata no rascunho sem salvar automaticamente, *Cancelar/Aplicar* e *Reproduzir novamente* para Profile Effects. |
+| Cosmetic Quality | 🟡 | Salto qualitativo nas 5 coleções principais (`sancord-core`, `cosmic`, `sakura`, `cyber`, `royal`, `frost`, `inferno`, `ocean`) sem emojis como arte; itens clássicos secundários permanecem mais simples até a próxima onda de ilustrações/WebP animados. |
+| Reduced Motion | ✅ | Respeito estrito a `reduceMotion`, `prefers-reduced-motion: reduce`, janela em segundo plano, offscreen (`IntersectionObserver`) e orçamento (`maxConcurrentIdleHosts = 6`, `0` na Member List), exibindo pose estática curada sem sumir com o cosmético. |
+
+### 23/11/2026 · Catálogo de Jogos, `GamePicker` Reutilizável e Widgets de Jogos no Mural
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| Game Catalog | ✅ | Catálogo central no backend (`src/games.rs`) com ~48 jogos populares curados (incluindo títulos fora da Steam), busca ao vivo intermediada pelo servidor (`/api/games/popular`, `/api/games/search`, `/api/games/resolve`, `/api/games/:id`), cache em memória (`6h`) + disco (`data/game-catalog-cache.json`), allowlist segura de URLs de capa e zero chaves de API no cliente desktop. |
+| Game Picker | ✅ | Componente único `SancordGamePicker` (`static/js/game-picker.js`) reutilizado por *Jogo favorito*, *Quero jogar*, *Jogando agora* e *Lista de desejos*, com busca com debounce + `AbortController`, skeleton, *Recentes*, *Jogos detectados no seu PC*, *Populares*, prévia com nota opcional, modo offline, retry em erro e fallback secundário *"Não encontrou seu jogo? Adicionar manualmente"*. |
+| Favorite Game Widget | ✅ | Escolha direta no catálogo com capa automática (`object-fit: cover` ou fallback limpo sem imagem quebrada), metadados (ano/plataformas), nota opcional, modal compacto de detalhes e escolha fixa independente do jogo aberto. |
+| Want to Play / Wishlist | ✅ | Unificado ao mesmo `GamePicker` central (tanto no Mural quanto na aba *Lista de desejos*), com capas automáticas, metadados e persistência retrocompatível no `ProfileBoard`. |
+| Playing Now Widget | ✅ | Integrado à fonte única `SancordActivity`: modo automático *"Atualizar automaticamente com minha atividade"* ativo por padrão, capa resolvida do catálogo, tempo real de sessão (`started_at`), transição automática para *"Nenhum jogo no momento"* ao fechar o jogo sem perder o widget e opção de modo fixo manual. |
+| Activity Integration | ✅ | `SancordActivity` estendido com `getDetectedGame`, `getLocalGames` e `subscribe`, sincronizando em tempo real Activity + Popout + Perfil completo + Member List + Mural (`Jogando agora`) respeitando `ProfilePrivacy.activity`. |
+| Founder Badge | ✅ | Insígnia `"founder"` (*Fundador do Sancord*) concedida exclusivamente à conta `Swag` via `data/badges.json` e ativa no servidor local. |
+
+### 23/11/2026 · Notificações de DM na Barra Lateral, Som Original do Sancord e Densidade da Lista de DMs
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| DM Unread Badge | ✅ | Avatares dedicados de DMs e Group DMs não lidas na barra lateral (`#rail-unread-dms` abaixo do botão Início), com badge vermelha numerada (`1–99`, `99+`) sobreposta ao avatar, pílula branca, 1 item por conversa, ícone real para Group DM, atualização ao vivo do avatar, tooltip, clique abrindo a DM e clique direito no `DmContextMenu`. Toggle independente em Configurações → Notificações (`#notif-dm-rail-badge`). |
+| DM Notification Sound | ✅ | Chime original do Sancord sintetizado via Web Audio API (`synthesizeSancordDmChime` em `static/js/notification-manager.js`) com envelope suave, filtro lowpass, controle de volume, cooldown anti-clipping em rajadas (`1100ms`/`450ms`), silêncio em DND/mute/conversa aberta em foco/bloqueado/Message Request e proteção contra sons retroativos após reconnect. |
+| Read State | ✅ | Fonte de verdade mantida no SQLite (`read_states`: `last_read_at` + `mention_count`), com `AckChannel`, *Marcar como lida*, sincronia multi-device em tempo real (`ReadStateUpdated` ao ler ou responder em outra sessão) e reconciliação completa no `Welcome` após reconexão. |
+| Desktop Notifications | ✅ | Integradas ao `SancordNotifications` (`shouldShowDesktopNotification`), respeitando DND, mute, bloqueados, Message Requests e foco da janela, com clique focando o Sancord e abrindo diretamente a DM ou Group DM correspondente. |
+| DM List Visual Density | ✅ | Lista de Mensagens Diretas refinada em escopo isolado (`.dm-list` em `static/ui.css`): itens compactos (`42px`), avatar `28px` com status `9px`, contenção de *Display Name Styles* e *Nameplates*, linha secundária discreta (`11.5px`), badge `99+` e chip `APP` compacto. |
+
+### 23/11/2026 · Efeitos Sonoros Compartilhados de Voz, Chamadas, Stream e Câmera
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| Voice Event Sounds | ✅ | Eventos compartilhados autoritativos (`ServerMessage::VoiceCueEvent` com `event_id`, `actor_user_id`, `voice_session_id` e rate limit) + `SancordSoundManager` + `SancordVoiceSounds` com deduplicação, isolamento por canal, política de deafen, polifonia controlada, coalescing e 16 assets WAV originais embutidos (`static/assets/sounds/`). |
+| Call Sounds | ✅ | Sons distintos para `voice_join`, `voice_leave`, `call_connected`, `call_disconnected`, `voice_reconnected` e `voice_error`, além de controles locais `mute_on`/`mute_off` e `deafen_on`/`deafen_off` (com arquitetura pronta para `sharedMute`). |
+| Stream Sounds | ✅ | `stream_start` e `stream_stop` compartilhados com todos os participantes elegíveis da call somente em transições reais confirmadas pelo servidor (troca de qualidade/janela não repete o som). |
+| Camera Sounds | ✅ | `camera_on` e `camera_off` digitais curtos e discretos (sem efeito de obturador mecânico) compartilhados na call com cooldown anti-spam no servidor e cliente. |
+| Ringtone | ✅ | Toques originais do Sancord em loop para chamada recebida (`incoming.wav`) e chamada sendo realizada (`outgoing.wav`), encerrados imediatamente ao atender (`call_connected`), recusar, cancelar ou expirar. |
+| Voice Sound Settings | ✅ | Seção dedicada **Sons de chamadas** em Configurações → Notificações com master toggle, volume próprio (`0–100%` independente do volume das pessoas), preview `▶` e toggles por evento, respeitando o dispositivo de saída (`setSinkId`). |
+
+### 23/11/2026 · Supressor de Ruído DSP (`AudioWorklet`) e Polimento Visual do Cabeçalho de Perfil
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| Noise Suppression | ✅ | Pipeline DSP híbrido em `AudioWorklet` (`static/js/voice-dsp-core.js` + `static/js/voice-dsp-worklet.js`, STFT `256` amostras, hop `128` = `2,67 ms` a `48 kHz`, `~0,02 ms` CPU/hop, zero alocações por frame): estimador adaptativo de PSD de ruído + ganho Decision-Directed Wiener (`alpha = 0,90–0,96`) + suavização entre bins vizinhos (evita voz metálica/underwater) + proteção de fricativas (`1,8–6,5 kHz`). Desativa `noiseSuppression` nativo do browser quando o worklet está ativo para evitar dupla supressão e mantém fallback seguro para WebRTC nativo. |
+| Voice Preservation / VAD | ✅ | VAD suave multi-característica (SNR na banda de voz + tonalidade harmônica) com ataque rápido (`~6 ms`), hangover (`~220 ms`) e piso dinâmico de ganho durante a fala, preservando sílabas iniciais (*"porta"*, *"fala"*) e consoantes finais (*"s"*, *"f"*, *"ch"*). |
+| Keyboard Noise Reduction | ✅ | Detector de transientes impulsivos curtos (alto crest factor + salto abrupto `> 2 kHz` + baixa tonalidade) que atenua cliques secos de teclado/mouse fora da fala e recua automaticamente durante fala simultânea, somado ao filtro passa-alta de `70 Hz` contra impacto na mesa. |
+| Voice Processing Modes | ✅ | 5 modos reais selecionáveis ao vivo sem reiniciar a call e sem clicks/pops (`Automático`, `Leve`, `Padrão`, `Forte` com aviso contextual, e `Desligado` com bypass verdadeiro), além de atalho rápido no painel de voz (`#voice-ns-quick-btn`), toggles independentes de **AEC** e **AGC**, comparação A/B ao vivo no **Teste do microfone**, detector de clipping e diagnóstico DSP no Modo Desenvolvedor. |
+| Profile Header Layout | ✅ | Polimento visual unificado nos 4 contextos (`Self Profile Menu`, `Profile Popout`, `Full Profile`, `Editor/Preview`): remoção total da tarja/caixa retangular atrás do Display Name em `.profile-card .profile-nameplate-wrap`, escala tipográfica equilibrada (`20px` / `19px` / `18.5px`), contenção de sombras/escala em *Display Name Styles* (`.name-style-gta` a `1.05em`), `@username` secundário (`13px`) com pronomes discretos (`12px`) e insígnias refinadas como acessórios delicados (`15.5px–16px`) em pílula única sutil na mesma linha do `@username`. |
+
+### 23/11/2026 · Renomeação Oficial e Migração Compatível `Sancord` → `Sanvo`
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| Brand & UI Rename (`Sanvo`) | ✅ | Todas as ocorrências visíveis ao usuário atualizadas de `Sancord` para `Sanvo` / `Sanvo Desktop` (barra nativa `SANVO DESKTOP`, loader, login, configurações `SANVO` / `Sobre o Sanvo` / `ID DA CONTA SANVO`, cartões de perfil, coleção `Sanvo Core` e insígnias como `Fundador do Sanvo`). |
+| `LegacySancordMigration` | ✅ | Módulo centralizado em Rust (`src/legacy_sancord_migration.rs`) e JS (`static/js/auth-storage.js`): migra `%LOCALAPPDATA%\SancordDesktopData` → `%LOCALAPPDATA%\Sanvo` sem apagar a pasta antiga (criando apenas `Sanvo` em instalação limpa), abre tokens DPAPI legados (`Sancord desktop auth v1:`) e sela novos com `Sanvo desktop auth v1:`, migra chaves `sancord_*` ↔ `sanvo_*`, aceita `sanvo://` + `sancord://` e `SANVO_*` + `SANCORD_*`. |
+| Windows Metadata & Transition Updater | ✅ | `VERSIONINFO` em `icon.rc` (`ProductName: "Sanvo"`, `FileDescription: "Sanvo Desktop"`, `OriginalFilename: "Sanvo.exe"`), geração e assinatura Ed25519 simultânea de `Sanvo.exe` (`sanvo-update.json`) e cópias de transição `Sancord.exe` (`sancord-update.json`). |
+
+### 23/11/2026 · Som `message_received.wav`, Contador Global de Não Lidas e Badge na Barra de Tarefas do Windows
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| Message Notification Sound | ✅ | Asset WAV original embutido (`static/assets/sounds/notifications/message_received.wav`, 48 kHz 16-bit mono PCM a `-8 dBFS`) integrado ao `SancordSoundManager` (categoria `NOTIFICATION`) e `SancordNotifications.handleIncomingSound`, com volume independente (`#notif-ui-volume-slider`), cooldown anti-spam (`1100 ms` canal / `450 ms` global), supressão em histórico/própria mensagem/mute/DND/reconnect e respeito aos níveis de notificação por servidor/canal (`all`, `mentions`, `none`). |
+| Taskbar Unread Badge | ✅ | Overlay icon nativo na barra de tarefas do Windows via COM `ITaskbarList3::SetOverlayIcon` (`src/bin/desktop_taskbar.rs` + IPC `taskbar-badge:N` em `src/bin/SancordApp.rs`), renderizando em memória um `HICON` 32-bit ARGB supersampled `4×4` (`1..99`, `99+`, removido quando `0`) escalado automaticamente por DPI (`100%` 16px, `125%` 20px, `150%` 24px, `200%` 32px) com anel de contraste para temas claro e escuro do Windows e toggle próprio (`#notif-taskbar-badge`). |
+| Global Unread Count | ✅ | Fonte única `SancordNotifications.getGlobalUnreadNotificationCount()` derivada de `read_states` + `unreadDms` (apenas DMs relevantes, Group DMs e menções/respostas em servidores; exclui Message Requests e bloqueados), com deduplicação por `message.id`, recálculo imediato ao ler, *Marcar como lida*, *Marcar tudo como lido*, apagar mensagem não lida (`MessageDeleted` no cliente e `decrement_mentions_on_delete` no servidor), multi-device `ReadStateUpdated`, reconnect, logout e troca de conta. |
+| Windows Notifications | ✅ | Decisão centralizada no `SancordNotifications` unificando unread state, som `message_received`, badge de DM na barra lateral, badge numérica na taskbar do Windows, toast nativo e flash moderado da janela (`shouldFlashTaskbar` com cooldown de 15s). |
+
+### 23/11/2026 · Tooltips em Portal + Ciclo de Vida Completo de Chamadas Privadas (DM & Group DM)
+
+| Recurso | Estado real | Resumo técnico e escopo |
+|---|---|---|
+| Incoming Call Ringing | ✅ | Ringtone original do Sanvo (`incoming.wav`) controlado por máquina de estados autoritativa no backend (`RINGING`, `ring_expires_at` de 30s configurável via `CallTimingConfig`), silenciado em DND/conversa silenciada (mantendo aviso visual), com notificação nativa do Windows, flash discreto na barra de tarefas (`FlashWindowEx`, 3 pulsos) e volume próprio (`#call-ringtone-volume`). |
+| Outgoing Ringback | ✅ | Feedback visual (**Chamando...** + botão *Cancelar toque*) e sonoro (`outgoing.wav`) em chamadas privadas 1:1 e Group DM, interrompido imediatamente ao atender, recusar, cancelar ou expirar o timeout de toque. |
+| Call Answer / Decline | ✅ | Botões **Atender** e **Recusar** no toast (`#dm-call-toast`) e no banner da conversa (`#dm-active-call-banner`), com parada instantânea do áudio sem sobreposição (`SancordSoundManager.stopLoop`), sincronização multi-dispositivo (`CallAnswered` / `CallDeclined`), restauração da janela (`window:focus`) e proteção/confirmação ao atender durante transmissão ativa. |
+| Missed Calls | ✅ | Registrada no histórico da DM/Grupo (`📞 Chamada perdida de ...`) somente quando a sessão realmente encerra sem nenhum participante ter atendido (após recusa unânime ou expiração de `CALL_IDLE_GRACE_PERIOD`); se houver entrada tardia na mesma sessão, registra duração real a partir de `connected_at`. |
+| Late Join | ✅ | Separação real entre `RINGING` e `CALL SESSION`: após o timeout de 30s do ringtone, o chamador permanece na sala (`WAITING_ACTIVE`, com *Chamar novamente* protegido por cooldown) e destinatários/membros de grupo veem **Chamada em andamento · [Entrar na chamada]** podendo entrar minutos depois no mesmo `call_id` (inclusive durante `CALL_IDLE_GRACE_PERIOD` de 5 min se a sala ficar temporariamente vazia). |
+| Call Session Lifecycle | ✅ | Autoridade integral no backend (`src/voice.rs` + `src/ws.rs`): `call_id` idempotente, `ActiveCallsSync` no `Welcome` preservando `ring_expires_at` após reconexão sem reiniciar o toque, `CancelCall`, `RingCall` com anti-spam, limpeza automática de sessões ociosas e isolamento completo em canais de voz de servidor (que continuam join manual). |
+| Portal Tooltips & Z-Index | ✅ | Motor central de tooltips em portal (`static/js/ui-kit.js`) com hierarquia de `z-index` unificada (`--z-tooltip: 110000` > `--z-titlebar: 9000`), detecção automática da barra superior, flip em 4 direções, shift/clamp na viewport e seta direcional ancorada. |

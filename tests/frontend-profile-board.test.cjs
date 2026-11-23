@@ -63,6 +63,9 @@ test('capa enviada pelo editor entra no rascunho e conflito conserva o trabalho 
   d.getElementById('open-board-editor').click();
   await h.run('receive("ProfileBoardState", {board:{revision:0,audience:"everyone",widgets:[]}})');
   d.getElementById('board-add-widget').click();
+  await h.flush();
+  d.querySelector('[data-gp-manual="1"]').click();
+  await h.flush();
   const dlg = d.querySelector('.sancord-dialog');
   const named = name => dlg.querySelector(`[id^="f-${name}-"]`);
   named('name').value = 'Jogo da Ana';

@@ -3,7 +3,7 @@
   const panel = document.createElement('section');
   panel.className = 'sancord-update-toast hidden';
   panel.setAttribute('role', 'dialog');
-  panel.setAttribute('aria-label', 'Atualização do Sancord');
+  panel.setAttribute('aria-label', 'Atualização do Sanvo');
   panel.innerHTML = `<strong id="sancord-update-title">Atualização disponível</strong>
     <p data-update-status role="status" aria-live="polite"></p>
     <pre class="sancord-update-notes" data-update-notes></pre>
@@ -29,15 +29,15 @@
     noticeKey = `${phase}:${state.version || ''}`;
     const messages = {
       idle: 'Verifique se há uma nova versão disponível.', checking: 'Verificando atualizações…',
-      available: `Sancord v${state.version} está disponível.`, downloading: `Baixando atualização… ${state.percent || 0}%`,
+      available: `Sanvo v${state.version} está disponível.`, downloading: `Baixando atualização… ${state.percent || 0}%`,
       ready: 'Download verificado. Reinicie para instalar a atualização.', up_to_date: 'Você já está na versão mais recente.',
       error: state.message || 'Não foi possível verificar as atualizações.',
       not_configured: state.message || 'Atualizações automáticas ainda não disponíveis nesta versão.',
-      updated: `Sancord atualizado para v${state.version}.`,
+      updated: `Sanvo atualizado para v${state.version}.`,
     };
     const actionable = phase === 'available' || phase === 'ready';
     const title = { available:'Atualização disponível', downloading:'Baixando atualização', ready:'Pronto para instalar', updated:'Atualização concluída', error:'Não foi possível atualizar' };
-    document.getElementById('sancord-update-title').textContent = title[phase] || 'Atualizações do Sancord';
+    document.getElementById('sancord-update-title').textContent = title[phase] || 'Atualizações do Sanvo';
     document.querySelectorAll('[data-update-current]').forEach(el => { el.textContent = state.current || '…'; });
     document.querySelectorAll('[data-update-status]').forEach(el => { el.textContent = messages[phase] || ''; });
     if (state.notes !== undefined) document.querySelectorAll('[data-update-notes]').forEach(el => { el.textContent = state.notes; });

@@ -1069,5 +1069,10 @@ if (typeof document !== "undefined") {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { SancordSearch };
+  module.exports = { SancordSearch, SanvoSearch: SancordSearch };
+}
+const SanvoSearch = SancordSearch;
+if (typeof globalThis !== "undefined") {
+  globalThis.SanvoSearch = SancordSearch;
+  globalThis.SancordSearch = SancordSearch; // LEGACY COMPATIBILITY
 }

@@ -127,8 +127,9 @@ fn publish(topic: &str, body: &str) -> bool {
 /// `SANCORD_DISCOVERY_LEGACY=0` deixa de publicar também a URL crua (formato
 /// antigo, só necessário enquanto houver amigos com o Sancord.exe antigo).
 pub fn spawn_publisher(data_dir: std::path::PathBuf) {
-    if std::env::var("SANCORD_DISCOVERY").ok().as_deref() == Some("0") {
-        info!("Publicação de descoberta desativada (SANCORD_DISCOVERY=0).");
+    use crate::legacy_sancord_migration::env_var_compat;
+    if env_var_compat("SANVO_DISCOVERY", "SANCORD_DISCOVERY").as_deref() == Some("0") {
+        info!("Publicação de descoberta desativada (SANVO_DISCOVERY=0).");
         return;
     }
     let key = match load_or_create_key(&data_dir) {
@@ -138,8 +139,9 @@ pub fn spawn_publisher(data_dir: std::path::PathBuf) {
             return;
         }
     };
-    let topic = std::env::var("SANCORD_DISCOVERY_TOPIC").unwrap_or_else(|_| DEFAULT_TOPIC.to_string());
-    let legacy = std::env::var("SANCORD_DISCOVERY_LEGACY").ok().as_deref() != Some("0");
+    let topic = env_var_compat("SANVO_DISCOVERY_TOPIC", "SANCORD_DISCOVERY_TOPIC")
+        .unwrap_or_else(|| DEFAULT_TOPIC.to_string());
+    let legacy = env_var_compat("SANVO_DISCOVERY_LEGACY", "SANCORD_DISCOVERY_LEGACY").as_deref() != Some("0");
     let log_path = data_dir.join("tunnel.log");
 
     tokio::spawn(async move {
