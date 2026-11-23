@@ -640,14 +640,25 @@ window.addEventListener(
 // ---------------------------------------------------------------------------
 
 function applyReduceMotion() {
-  const on = Boolean(state.audioSettings?.reduceMotion);
+  const manual = Boolean(state.audioSettings?.reduceMotion);
+  const syncOs = Boolean(state.audioSettings?.syncReducedMotion);
+  const osReduced = typeof systemPrefersReducedMotion === "function" ? systemPrefersReducedMotion() : false;
+  const on = manual || (syncOs && osReduced);
   document.body.classList.toggle("reduce-motion", on);
   const box = document.getElementById("appearance-reduce-motion");
-  if (box) box.checked = on;
+  if (box) box.checked = manual;
+  const syncBox = document.getElementById("appearance-sync-reduce-motion");
+  if (syncBox) syncBox.checked = syncOs;
+  if (typeof applyProfileAnimPolicy === "function") applyProfileAnimPolicy();
 }
 
 document.getElementById("appearance-reduce-motion")?.addEventListener("change", (e) => {
   state.audioSettings.reduceMotion = Boolean(e.target.checked);
+  if (typeof saveAudioSettings === "function") saveAudioSettings();
+  applyReduceMotion();
+});
+document.getElementById("appearance-sync-reduce-motion")?.addEventListener("change", (e) => {
+  state.audioSettings.syncReducedMotion = Boolean(e.target.checked);
   if (typeof saveAudioSettings === "function") saveAudioSettings();
   applyReduceMotion();
 });

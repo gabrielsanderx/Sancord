@@ -41,8 +41,28 @@ const SOCIAL_PLATFORMS = {
   tiktok: { icon: "🎬", name: "TikTok" },
   linkedin: { icon: "💼", name: "LinkedIn" },
   reddit: { icon: "💬", name: "Reddit" },
-  website: { icon: "🌐", name: "Site" },
+  website: { icon: "🔗", name: "Site" },
 };
+
+function cleanConnectionHost(url) {
+  return (url?.hostname || "").toLowerCase().replace(/^www\./, "");
+}
+
+function resolveConnectionDisplayLabel(link, url, platKey) {
+  const custom = String(link?.display_name || link?.label || "").trim();
+  if (custom) return custom;
+  const plat = SOCIAL_PLATFORMS[platKey];
+  if (plat && platKey !== "website") return plat.name;
+  return cleanConnectionHost(url) || "Link";
+}
+
+function formatConnectionTooltip(url, displayLabel) {
+  const host = cleanConnectionHost(url);
+  if (!host) return displayLabel;
+  const rawPath = url?.pathname && url.pathname !== "/" ? url.pathname.replace(/\/$/, "") : "";
+  const compactUrl = rawPath && (host.length + rawPath.length) <= 44 ? `${host}${rawPath}` : host;
+  return displayLabel && displayLabel.length > 26 ? `${displayLabel} · ${compactUrl}` : compactUrl;
+}
 
 function detectSocialPlatform(url, explicit) {
   if (explicit && Object.hasOwn(SOCIAL_PLATFORMS, explicit)) return explicit;
@@ -179,7 +199,7 @@ async function editProfileLink(link) {
     title: link ? "Editar conexão" : "Adicionar link ao perfil",
     fields: [
       { name: "platform", label: "Plataforma", type: "select", value: link?.platform || "", options: platformOptions },
-      { name: "label", label: "Título", maxlength: 60, value: link?.label, required: true },
+      { name: "label", label: "Nome exibido no perfil", placeholder: "Ex: Meu GitHub, Meu portfólio", maxlength: 60, value: link?.label, required: true },
       { name: "url", label: "Endereço HTTP ou HTTPS", maxlength: 500, value: link?.url, required: true },
       { name: "visibility", label: "Exibição", type: "select", value: link?.visible ? "show" : "hide",
         options: [{value:"hide", label:"Ocultar do perfil"}, {value:"show", label:"Mostrar conforme a privacidade do perfil"}] },
@@ -208,21 +228,38 @@ function renderVisitedProfileLinks(links, wrap = document.getElementById("profil
   if (!wrap || !list) return;
   list.replaceChildren();
   for (const link of links || []) {
+    if (link?.visible === false) continue;
     const url = parseBoardLink(link.url);
     if (!url) continue;
     const platKey = detectSocialPlatform(url, link.platform);
     const plat = SOCIAL_PLATFORMS[platKey] || SOCIAL_PLATFORMS.website;
+    const displayLabel = resolveConnectionDisplayLabel(link, url, platKey);
+    const tipText = formatConnectionTooltip(url, displayLabel);
+
     const row = document.createElement("li");
-    const anchor = sharingText("a", `${plat.icon} ${link.label}`, "chat-link");
+    row.className = "profile-connection-row";
+
+    const anchor = document.createElement("a");
+    anchor.className = "chat-link profile-connection-link";
     anchor.href = url.href;
     anchor.target = "_blank";
     anchor.rel = "noopener noreferrer";
-    const meta = link.verified_github
-      ? "GitHub verificado"
-      : platKey !== "website"
-        ? `${plat.name} · Link manual`
-        : "Link manual";
-    row.append(anchor, sharingText("small", meta));
+    anchor.dataset.uiTooltip = tipText;
+    anchor.setAttribute("aria-label", `${displayLabel} (${cleanConnectionHost(url) || url.href})`);
+
+    const iconEl = sharingText("span", plat.icon, "profile-connection-icon");
+    iconEl.setAttribute("aria-hidden", "true");
+    const labelEl = sharingText("span", displayLabel, "profile-connection-label");
+    anchor.append(iconEl, labelEl);
+
+    if (link.verified_github) {
+      const badge = sharingText("span", "✓", "profile-connection-verified");
+      badge.setAttribute("aria-label", "GitHub verificado");
+      badge.dataset.uiTooltip = "GitHub verificado";
+      anchor.append(badge);
+    }
+
+    row.append(anchor);
     list.append(row);
   }
   wrap.classList.toggle("hidden", !list.childElementCount);
@@ -344,7 +381,7 @@ function positionCompactProfile() {
 function openCompactProfile(userId, fallback, anchor = document.activeElement) {
   const cached = state.users.get(userId) || findLiveUserByName(fallback?.author_name?.toLowerCase());
   const username = cached?.username || fallback?.author_name;
-  if (!username || username === "Sancord Bot") return;
+  if (!username || username === "Sanvo Bot" || username === "Sancord Bot") return;
   currentCompactProfile = { userId, username, fallback, serverId: compactServerId(fallback), trigger: document.activeElement, anchor, effectPlayed: false };
   profilePopoverModal?.classList.add("hidden");
   compactProfileModal.classList.remove("hidden");
@@ -359,6 +396,10 @@ function openCompactProfile(userId, fallback, anchor = document.activeElement) {
   note.querySelector("textarea").value = self ? "" : getUserProfileNote(username);
   positionCompactProfile();
   compactFullProfile.focus({ preventScroll: true });
+  if (typeof queueProfileMotion === "function") queueProfileMotion();
+  if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.reconcileIdleBudget === "function") {
+    SancordCosmetics.reconcileIdleBudget();
+  }
   sendWs("GetUserProfile", { username, server_id: currentCompactProfile.serverId });
 }
 

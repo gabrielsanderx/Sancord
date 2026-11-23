@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sanvo</title>
   <link rel="icon" type="image/svg+xml" href="/sancord-icon.svg" />
-  <link rel="stylesheet" href="/styles.css?v=22" />
+  <link rel="stylesheet" href="/styles.css?v=23" />
   <!-- Design system e refatoração visual: camada final, depois de styles.css. -->
-  <link rel="stylesheet" href="/ui.css?v=18" />
-  <link rel="stylesheet" href="/cosmetics/cosmetics.css?v=1" />
+  <link rel="stylesheet" href="/ui.css?v=19" />
+  <link rel="stylesheet" href="/cosmetics/cosmetics.css?v=2" />
 </head>
 <body data-auth-pending>
   <div id="connection-banner" class="connection-banner hidden" role="status" aria-live="polite">
@@ -37,17 +37,31 @@
 
       <form id="login-form" novalidate>
         <div class="auth-fields">
-          <div class="auth-field">
-            <label for="username-input" data-i18n="auth.username">Nome de usuário</label>
+          <div class="auth-field" data-auth-only="login register recovery">
+            <label id="auth-username-label" for="username-input" data-i18n="auth.identifier">E-mail ou nome de usuário</label>
             <input id="username-input" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="96" aria-describedby="auth-username-error" required />
             <p id="auth-username-error" class="auth-field-error hidden" aria-live="polite"></p>
+          </div>
+          <div class="auth-field hidden" data-auth-only="register add-email">
+            <label for="auth-email-input" data-i18n="auth.email">E-mail</label>
+            <input id="auth-email-input" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="120" aria-describedby="auth-email-error" />
+            <p id="auth-email-error" class="auth-field-error hidden" aria-live="polite"></p>
+          </div>
+          <div class="auth-field hidden" data-auth-only="verify">
+            <label for="auth-verify-input" data-i18n="auth.verifyCode">Código de confirmação</label>
+            <input id="auth-verify-input" name="verify_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000000" aria-describedby="auth-verify-error" />
+            <p id="auth-verify-error" class="auth-field-error hidden" aria-live="polite"></p>
+            <div class="auth-verify-actions">
+              <button type="button" id="auth-resend-btn" class="auth-link" data-i18n="auth.resend">Reenviar código</button>
+              <button type="button" id="auth-change-email-btn" class="auth-link" data-i18n="auth.changeEmail">Usar outro e-mail</button>
+            </div>
           </div>
           <div class="auth-field hidden" data-auth-only="recovery">
             <label for="auth-code-input" data-i18n="auth.code">Código de recuperação</label>
             <input id="auth-code-input" name="recovery_code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" placeholder="SANC-XXXX-XXXX-XXXX" aria-describedby="auth-code-error" />
             <p id="auth-code-error" class="auth-field-error hidden" aria-live="polite"></p>
           </div>
-          <div class="auth-field">
+          <div class="auth-field" data-auth-only="login register recovery">
             <label id="auth-password-label" for="password-input" data-i18n="auth.password">Senha</label>
             <div class="auth-password-wrap">
               <input id="password-input" name="password" type="password" autocomplete="current-password" maxlength="256" aria-describedby="auth-password-error" required />
@@ -64,7 +78,7 @@
         </div>
 
         <button type="button" id="open-recover-password-btn" class="auth-link auth-recover" data-auth-only="login" data-i18n="auth.forgot">Esqueceu sua senha?</button>
-        <label class="auth-remember"><input id="remember-me-input" type="checkbox" checked /><span data-i18n="auth.remember">Manter conectado neste dispositivo</span></label>
+        <label class="auth-remember" data-auth-only="login register recovery"><input id="remember-me-input" type="checkbox" checked /><span data-i18n="auth.remember">Manter conectado neste dispositivo</span></label>
         <div id="auth-error" class="auth-error hidden" role="alert"></div>
         <button type="button" id="auth-retry-btn" class="auth-link hidden" data-i18n="auth.retry">Tentar novamente</button>
         <button type="submit" id="auth-submit-btn" class="btn-primary auth-primary">
@@ -76,6 +90,7 @@
       <div class="auth-footer">
         <p data-auth-only="login"><span data-i18n="auth.needAccount">Precisa de uma conta?</span> <button type="button" id="tab-register" class="auth-link" data-i18n="auth.tab.register">Criar conta</button></p>
         <p class="hidden" data-auth-only="register recovery"><span class="hidden" data-auth-only="register" data-i18n="auth.haveAccount">Já tem uma conta?</span> <button type="button" id="tab-login" class="auth-link" data-i18n="auth.tab.login">Voltar ao login</button></p>
+        <p class="hidden" data-auth-only="verify add-email"><button type="button" id="auth-other-account-btn" class="auth-link" data-i18n="auth.otherAccount">Entrar com outra conta</button></p>
         <details id="auth-saved-accounts" class="auth-saved-accounts hidden" data-auth-only="login">
           <summary data-i18n="auth.saved">Usar uma conta salva</summary>
           <ul id="auth-account-list"></ul>
@@ -2490,9 +2505,16 @@
               <div class="settings-row">
                 <div class="settings-row-text">
                   <div class="settings-row-title">Reduzir movimento</div>
-                  <div class="settings-row-desc">Desativa transições e animações da interface (respeita também a configuração do Windows).</div>
+                  <div class="settings-row-desc">Desativa transições e animações de interface e cosméticos no Sanvo.</div>
                 </div>
                 <input type="checkbox" id="appearance-reduce-motion" />
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Sincronizar com o computador</div>
+                  <div class="settings-row-desc">Ativa automaticamente a redução de movimento quando os efeitos de animação estiverem desligados no Windows.</div>
+                </div>
+                <input type="checkbox" id="appearance-sync-reduce-motion" />
               </div>
               <div class="settings-row">
                 <div class="settings-row-text">
@@ -4136,7 +4158,7 @@
   <!-- Componentes reutilizáveis (menus, diálogos, tooltips) e módulo de servidores/canais.
        Carregados antes do app.js; só definem funções usadas em tempo de execução. -->
   <!-- Traduções (Fase 9): carregado primeiro, define t() e applyI18n(). -->
-  <script src="/js/i18n.js?v=2"></script>
+  <script src="/js/i18n.js?v=3"></script>
   <script src="/js/icons.js?v=3"></script>
   <script src="/js/ui-kit.js?v=22"></script>
   <script src="/js/transport.js?v=20"></script>
@@ -4145,8 +4167,8 @@
   <script src="/js/invites.js?v=1"></script>
   <script src="/js/member-list.js?v=1"></script>
   <script src="/js/permissions.js?v=19"></script>
-  <script src="/app.js?v=38"></script>
-  <script src="/js/connection.js?v=1"></script>
+  <script src="/app.js?v=40"></script>
+  <script src="/js/connection.js?v=2"></script>
   <script src="/js/outbox.js?v=1"></script>
   <script src="/js/offline-cache.js?v=1"></script>
   <!-- Chat (mensagens, composer, anexos, não lidas): depende dos elementos do app.js. -->
@@ -4169,21 +4191,22 @@
   <script src="/js/threads.js?v=3"></script>
   <!-- Polimento (Fase 9): notificações por canal, navegação rápida, atalhos e acessibilidade. -->
   <script src="/js/polish.js?v=4"></script>
-  <script src="/js/profile-motion.js?v=4"></script>
-  <script src="/cosmetics/cosmetics-engine.js?v=1"></script>
+  <script src="/js/profile-motion.js?v=5"></script>
+  <script src="/cosmetics/cosmetics-vfx.js?v=1"></script>
+  <script src="/cosmetics/cosmetics-engine.js?v=2"></script>
   <script src="/js/profile-card.js?v=2"></script>
   <script src="/js/profile.js?v=11"></script>
   <script src="/js/game-picker.js?v=1"></script>
   <script src="/js/profile-board.js?v=4"></script>
   <script src="/js/profile-collection.js?v=3"></script>
-  <script src="/js/profile-sharing.js?v=4"></script>
+  <script src="/js/profile-sharing.js?v=5"></script>
   <script src="/js/settings-center.js?v=2"></script>
   <!-- Editor visual de perfil: lateral com subeditores e perfil completo ao vivo. -->
   <script src="/js/profile-editor.js?v=2"></script>
   <script src="/js/self-profile-menu.js?v=3"></script>
   <script src="/js/dm-context-menu.js?v=1"></script>
   <script src="/js/activity.js?v=1"></script>
-  <script src="/js/auth-screen.js?v=1"></script>
+  <script src="/js/auth-screen.js?v=2"></script>
   <script src="/js/updater.js?v=1"></script>
   <script src="/js/composer.js?v=1"></script>
   <script src="/js/stickers.js?v=1"></script>

@@ -109,6 +109,10 @@ pub struct ServerState {
     pub events: HashMap<String, Vec<crate::models::ServerEvent>>,
     pub integrations: HashMap<String, crate::integrations::Integration>,
     pub game_catalog: Arc<RwLock<crate::games::GameCatalogCache>>,
+    /// account_id -> código de confirmação de e-mail pendente (só o hash, só em memória).
+    pub email_codes: HashMap<String, crate::email_verification::PendingCode>,
+    /// Envio dos e-mails (SMTP de `data/smtp.json`, log ou memória nos testes).
+    pub mailer: crate::mailer::Mailer,
     account_key_by_id: HashMap<String, String>,
     persisted_servers: HashMap<String, u64>,
     persisted_accounts: HashMap<String, u64>,
@@ -309,6 +313,7 @@ impl ServerState {
             .unwrap_or(0);
 
         let game_catalog = crate::games::GameCatalogCache::load(&config.data_dir, config.game_api_enabled);
+        let mailer = crate::mailer::Mailer::from_data_dir(&config.data_dir);
         let mut st = Self {
             config: Arc::new(config),
             scheduled_messages: db.load_scheduled()?.into_iter().map(|job| (job.id.clone(), job)).collect(),
@@ -349,6 +354,8 @@ impl ServerState {
             events: events_by_server,
             integrations,
             game_catalog,
+            email_codes: HashMap::new(),
+            mailer,
             account_key_by_id: HashMap::new(),
             persisted_servers: HashMap::new(),
             persisted_accounts: HashMap::new(),
@@ -417,7 +424,7 @@ impl ServerState {
                 id: Uuid::new_v4().to_string(),
                 channel_id: "geral".to_string(),
                 author_id: "system".to_string(),
-                author_name: "Sancord Bot".to_string(),
+                author_name: "Sanvo Bot".to_string(),
                 author_color: "#5865F2".to_string(),
                 author_avatar: Some("/logo.png".to_string()),
                 content: "Bem-vindo ao Sanvo! Sua conta fica salva automaticamente para você entrar direto nas próximas vezes.".to_string(),

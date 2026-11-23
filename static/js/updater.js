@@ -52,8 +52,10 @@
     }
     const check = document.getElementById('check-updates-btn');
     if (check) check.disabled = phase === 'checking' || phase === 'downloading';
+    const deferBtn = document.getElementById('defer-update-btn');
+    if (deferBtn) deferBtn.textContent = phase === 'updated' ? 'OK' : 'Depois';
     if (actionable && dismissed !== noticeKey) panel.classList.remove('hidden');
-    if (phase === 'updated') panel.classList.remove('hidden');
+    if (phase === 'updated' && dismissed !== noticeKey) panel.classList.remove('hidden');
     if (phase === 'downloading') panel.classList.remove('hidden');
     if (phase === 'error' && manual) panel.classList.remove('hidden');
     if (phase === 'up_to_date' || phase === 'not_configured') panel.classList.add('hidden');

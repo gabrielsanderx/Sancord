@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet('Install', 'Uninstall', 'Status')]
     [string]$Action = 'Status'
 )
@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path $PSScriptRoot -Parent
 $startScript = Join-Path $PSScriptRoot 'start-host.ps1'
 $runKeyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+# Nome do registro mantido do legado (Sancord) para não duplicar a inicialização.
 $valueName = 'SancordHost'
 $commandValue = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$startScript`""
 
@@ -15,14 +16,14 @@ switch ($Action) {
             throw "Script de inicializacao nao encontrado: $startScript"
         }
         Set-ItemProperty -Path $runKeyPath -Name $valueName -Value $commandValue
-        Write-Host "Autostart do Sancord instalado em $runKeyPath ($valueName)."
+        Write-Host "Autostart do Sanvo instalado em $runKeyPath ($valueName)."
     }
     'Uninstall' {
         if (Get-ItemProperty -Path $runKeyPath -Name $valueName -ErrorAction SilentlyContinue) {
             Remove-ItemProperty -Path $runKeyPath -Name $valueName
-            Write-Host "Autostart do Sancord removido de $runKeyPath."
+            Write-Host "Autostart do Sanvo removido de $runKeyPath."
         } else {
-            Write-Host "Autostart do Sancord nao estava instalado."
+            Write-Host "Autostart do Sanvo nao estava instalado."
         }
     }
     'Status' {

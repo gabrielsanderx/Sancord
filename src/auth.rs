@@ -89,7 +89,7 @@ pub fn hash_token(token: &str) -> String {
     hex::encode(Sha256::digest(token.trim().as_bytes()))
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

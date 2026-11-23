@@ -1,6 +1,6 @@
 [package]
 name = "sancord"
-version = "0.2.8"
+version = "0.2.9"
 edition = "2021"
 # BinÃƒÆ’Ã‚Â¡rios declarados explicitamente: `src/bin/capture_bridge.rs` ÃƒÆ’Ã‚Â© um mÃƒÆ’Ã‚Â³dulo do
 # SancordApp, nÃƒÆ’Ã‚Â£o um programa (a detecÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o automÃƒÆ’Ã‚Â¡tica o tratava como binÃƒÆ’Ã‚Â¡rio sem `main`).
@@ -43,6 +43,8 @@ sha2 = "0.10"
 hex = "0.4"
 semver = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+# Envio dos codigos de confirmacao de e-mail por SMTP (TLS nativo do Windows).
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "hostname", "native-tls"] }
 tracing-appender = "0.2"
 # Assinatura dos anÃƒÆ’Ã‚Âºncios de descoberta (host assina, app desktop verifica)
 ed25519-dalek = "2"
@@ -73,6 +75,7 @@ windows = { version = "0.58", features = [
     "Win32_Storage_Xps",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Threading",
     "Win32_System_Variant",
     "Win32_System_WinRT",

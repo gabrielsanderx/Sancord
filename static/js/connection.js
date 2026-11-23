@@ -235,6 +235,12 @@ const SancordConnection = (() => {
         if (state.ws !== ws) return;
         const { type, payload } = JSON.parse(event.data);
         if (type === "AuthFailed") { reject(payload?.message); return; }
+        if (type === "EmailVerificationRequired") {
+          // Sessão válida, mas sem e-mail confirmado: mantém a sessão salva e abre o passo de e-mail.
+          stop();
+          requireEmailStep(payload);
+          return;
+        }
         if (type === "Pong") {
           if (ready) { lastHeartbeat = Date.now(); heartbeat(ws); }
           return;

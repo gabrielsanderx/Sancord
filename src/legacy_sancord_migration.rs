@@ -32,14 +32,17 @@ pub const DPAPI_ENTROPY_PREFIX_SANVO: &str = "Sanvo desktop auth v1";
 /// LEGACY COMPATIBILITY: Prefixo antigo de entropia DPAPI para abrir sessões já salvas.
 pub const DPAPI_ENTROPY_PREFIX_LEGACY_SANCORD: &str = "Sancord desktop auth v1";
 
-/// Arquivos portáteis de configuração do cliente desktop migrados de `SancordDesktopData` para `Sanvo`.
+/// Arquivos portáteis persistentes do cliente desktop migrados de `SancordDesktopData` para `Sanvo`.
 pub const PORTABLE_DESKTOP_FILES: &[&str] = &[
     "desktop-prefs.json",
     "known_endpoints.json",
     "activity-config.json",
     "activity-games.json",
-    "updates/result.json",
 ];
+
+/// Arquivos efêmeros de uso único migrados apenas na primeira inicialização do Sanvo
+/// (nunca recopiados após serem consumidos/removidos).
+const ONE_SHOT_MIGRATION_FILES: &[&str] = &["updates/result.json"];
 
 /// Lê uma variável de ambiente priorizando `SANVO_*` com fallback para `SANCORD_*`.
 ///
@@ -122,9 +125,22 @@ pub fn migrate_legacy_desktop_dir(legacy_dir: &Path, sanvo_dir: &Path) -> io::Re
     }
 
     // Se a pasta Sanvo acabou de ser criada a partir de uma instalação existente do Sancord,
-    // também migra o Local Storage do WebView2 (EBWebView/Default/Local Storage/leveldb) se disponível,
-    // preservando tokens DPAPI, contas salvas e preferências locais do usuário.
+    // também migra arquivos efêmeros de uso único (como updates/result.json) e o Local Storage
+    // do WebView2 (EBWebView/Default/Local Storage/leveldb) se disponível, preservando tokens DPAPI,
+    // contas salvas e preferências locais do usuário.
     if first_time_sanvo {
+        for rel in ONE_SHOT_MIGRATION_FILES {
+            let src = legacy_dir.join(rel);
+            let dst = sanvo_dir.join(rel);
+            if src.is_file() && !dst.exists() {
+                if let Some(parent) = dst.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                if fs::copy(&src, &dst).is_ok() {
+                    copied_count += 1;
+                }
+            }
+        }
         let legacy_leveldb = legacy_dir
             .join("EBWebView")
             .join("Default")
@@ -229,6 +245,16 @@ mod tests {
         assert!(resolved.join(".migrated-from-sancord.json").is_file());
         // A pasta legada jamais deve ser apagada automaticamente.
         assert!(legacy.join("desktop-prefs.json").is_file());
+
+        // Após o Updater consumir/remover updates/result.json no Sanvo, aberturas seguintes
+        // não podem recopiar o aviso antigo de atualização concluída.
+        fs::remove_file(resolved.join("updates/result.json")).unwrap();
+        let resolved_again = resolve_desktop_data_dir_with(&root, None);
+        assert_eq!(resolved_again, resolved);
+        assert!(
+            !resolved_again.join("updates/result.json").exists(),
+            "updates/result.json não deve ser recopiado após já ter sido consumido"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }

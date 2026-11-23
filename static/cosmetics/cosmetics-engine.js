@@ -10,7 +10,7 @@
 (function (global) {
   "use strict";
 
-  const COSMETIC_ENGINE_VERSION = 3;
+  const COSMETIC_ENGINE_VERSION = 5;
 
   const CONTEXTS = Object.freeze({
     EDITOR_PREVIEW: "EDITOR_PREVIEW",
@@ -37,13 +37,408 @@
   const BUDGET = Object.freeze({
     maxConcurrentIdleHosts: 6,
     maxActiveProfileEffects: 1,
-    secondaryMinMs: 7500,
-    secondaryMaxMs: 14000,
-    secondaryDurationMs: 1800,
-    rareMinMs: 18000,
-    rareMaxMs: 28000,
+    firstSecondaryMinMs: 3200,
+    firstSecondaryMaxMs: 5600,
+    secondaryMinMs: 8000,
+    secondaryMaxMs: 14500,
+    secondaryDurationMs: 1850,
+    rareMinMs: 16500,
+    rareMaxMs: 26000,
     rareDurationMs: 2400,
   });
+
+  // Classificação canônica de animação de TODOS os cosméticos do catálogo (v1/v2/v3).
+  // Itens originalmente estáticos permanecem STATIC; nenhum item animado é rebaixado para estático
+  // e nem tudo vira LOOP robótico.
+  const COSMETIC_ANIMATION_MAP = Object.freeze({
+    avatar_decoration: Object.freeze({
+      // v4 Multi-camada + Canvas VFX (IDLE_WITH_EVENTS)
+      "galaxy-portal": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "sakura-glow": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "core-orbit": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "cat-gamer": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "frost-crown": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "dragon-fire": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "angel-wings": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "blood-moon": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "ocean-bubbles": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "electric-pulse": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "cyber-ring": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      lunar: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "eclipse-sovereign": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      // Legadas preservadas para compatibilidade (LOOP)
+      "flame-violet": ANIMATION_MODES.LOOP,
+      "devil-horns": ANIMATION_MODES.LOOP,
+      "cyber-cyan": ANIMATION_MODES.LOOP,
+      "golden-halo": ANIMATION_MODES.LOOP,
+      "crimson-vortex": ANIMATION_MODES.LOOP,
+      "rainbow-prism": ANIMATION_MODES.LOOP,
+      "electric-surge": ANIMATION_MODES.LOOP,
+      "heart-pixel": ANIMATION_MODES.LOOP,
+      "neon-glitch": ANIMATION_MODES.LOOP,
+      "nebula-orbit": ANIMATION_MODES.LOOP,
+      "sakura-fall": ANIMATION_MODES.LOOP,
+      ember: ANIMATION_MODES.LOOP,
+      snowfall: ANIMATION_MODES.LOOP,
+      "digital-rain": ANIMATION_MODES.LOOP,
+      "retro-pixels": ANIMATION_MODES.LOOP,
+      // Estáticas de alta definição (STATIC)
+      "static-royal-crown": ANIMATION_MODES.STATIC,
+      "static-gold": ANIMATION_MODES.STATIC,
+      "static-cyber-hud": ANIMATION_MODES.STATIC,
+      "static-crimson": ANIMATION_MODES.STATIC,
+      "static-diamond": ANIMATION_MODES.STATIC,
+      "static-blurple": ANIMATION_MODES.STATIC,
+      "static-emerald": ANIMATION_MODES.STATIC,
+      "static-angel": ANIMATION_MODES.STATIC,
+    }),
+    profile_frame: Object.freeze({
+      // v4 Arquitetônicas vivas + Canvas Ambient VFX (IDLE_WITH_EVENTS)
+      "core-pulse": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "cosmic-drift": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "sakura-wind": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "frost-glint": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "ember-trail": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      liquid: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      holographic: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "neon-pulse": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "arcane-grimoire": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "eclipse-crown": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "seraphim-arch": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "dream-sanctuary": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      founder: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      developer: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "sovereign-crest": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "winter-2026": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      // Reativas a presença/voz (REACTIVE)
+      "reactive-aura": ANIMATION_MODES.REACTIVE,
+      "voice-pulse": ANIMATION_MODES.REACTIVE,
+      // Estáticas de colecionador (STATIC)
+      minimal: ANIMATION_MODES.STATIC,
+      "cyber-corners": ANIMATION_MODES.STATIC,
+      royal: ANIMATION_MODES.STATIC,
+      "early-user": ANIMATION_MODES.STATIC,
+    }),
+    profile_effect: Object.freeze({
+      // v4 Coreografia cinematográfica em 4 atos (PLAY_ON_OPEN / ONE_SHOT)
+      "core-signal": ANIMATION_MODES.PLAY_ON_OPEN,
+      "star-trail": ANIMATION_MODES.PLAY_ON_OPEN,
+      "petal-drift": ANIMATION_MODES.PLAY_ON_OPEN,
+      "circuit-boot": ANIMATION_MODES.PLAY_ON_OPEN,
+      "polar-ribbon": ANIMATION_MODES.PLAY_ON_OPEN,
+      embers: ANIMATION_MODES.PLAY_ON_OPEN,
+      "arcane-sigil": ANIMATION_MODES.PLAY_ON_OPEN,
+      "eclipse-flare": ANIMATION_MODES.PLAY_ON_OPEN,
+      "abyssal-tide": ANIMATION_MODES.PLAY_ON_OPEN,
+      "seraphim-fall": ANIMATION_MODES.PLAY_ON_OPEN,
+      "synth-overdrive": ANIMATION_MODES.PLAY_ON_OPEN,
+      "dream-butterflies": ANIMATION_MODES.PLAY_ON_OPEN,
+    }),
+    nameplate: Object.freeze({
+      // v4 Ilustradas animadas (IDLE_WITH_EVENTS)
+      "starlit-silt": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "twilight-garden": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "core-stripe": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "tide-glass": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "ember-line": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "arcane-velvet": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "eclipse-gold": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      "dream-mist": ANIMATION_MODES.IDLE_WITH_EVENTS,
+      // Estáticas ilustradas (STATIC)
+      "circuit-weave": ANIMATION_MODES.STATIC,
+      "gold-leaf": ANIMATION_MODES.STATIC,
+      "frost-vein": ANIMATION_MODES.STATIC,
+    }),
+    name_style: Object.freeze({
+      // Materiais animados (apenas no preenchimento/brilho, texto nunca desloca)
+      gradient: ANIMATION_MODES.LOOP,
+      "custom-gradient": ANIMATION_MODES.LOOP,
+      prism: ANIMATION_MODES.LOOP,
+      holographic: ANIMATION_MODES.LOOP,
+      cosmic: ANIMATION_MODES.LOOP,
+      neon: ANIMATION_MODES.LOOP,
+      glow: ANIMATION_MODES.LOOP,
+      sakura: ANIMATION_MODES.LOOP,
+      chrome: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      royal: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      // Fontes e acabamentos estáticos (STATIC)
+      gta: ANIMATION_MODES.STATIC,
+      fire: ANIMATION_MODES.STATIC,
+      ice: ANIMATION_MODES.STATIC,
+      retro: ANIMATION_MODES.STATIC,
+      gothic: ANIMATION_MODES.STATIC,
+      toxic: ANIMATION_MODES.STATIC,
+      modern: ANIMATION_MODES.STATIC,
+      rounded: ANIMATION_MODES.STATIC,
+      mono: ANIMATION_MODES.STATIC,
+      editorial: ANIMATION_MODES.STATIC,
+      bubble: ANIMATION_MODES.STATIC,
+      cyber: ANIMATION_MODES.STATIC,
+      fantasy: ANIMATION_MODES.STATIC,
+      outline: ANIMATION_MODES.STATIC,
+      gummy: ANIMATION_MODES.STATIC,
+      ink: ANIMATION_MODES.STATIC,
+    }),
+  });
+
+  // Aliases transparentes de itens legados descartados → sucessores V5 Flagship pintados
+  // (preserva contas/presets salvos no banco sem poluir a vitrine com protótipos antigos).
+  const LEGACY_COSMETIC_ALIASES = Object.freeze({
+    avatar_decoration: Object.freeze({
+      "core-orbit": "galaxy-portal",
+      "electric-pulse": "cat-gamer",
+      "cyber-ring": "cat-gamer",
+      lunar: "blood-moon",
+      "flame-violet": "dragon-fire",
+      "devil-horns": "dragon-fire",
+      "cyber-cyan": "cat-gamer",
+      "golden-halo": "angel-wings",
+      "crimson-vortex": "blood-moon",
+      "rainbow-prism": "cat-gamer",
+      "electric-surge": "cat-gamer",
+      "heart-pixel": "sakura-glow",
+      "neon-glitch": "cat-gamer",
+      "nebula-orbit": "galaxy-portal",
+      "sakura-fall": "sakura-glow",
+      ember: "dragon-fire",
+      snowfall: "frost-crown",
+      "digital-rain": "cat-gamer",
+      "retro-pixels": "cat-gamer",
+      "static-gold": "static-royal-crown",
+      "static-crimson": "static-royal-crown",
+      "static-blurple": "static-cyber-hud",
+      "static-angel": "static-diamond",
+    }),
+    profile_frame: Object.freeze({
+      "core-pulse": "cosmic-drift",
+      "neon-pulse": "holographic",
+      "eclipse-crown": "arcane-grimoire",
+      "dream-sanctuary": "sakura-wind",
+      "reactive-aura": "holographic",
+      "voice-pulse": "holographic",
+      minimal: "holographic",
+      carbon: "cyber-corners",
+      "sakura-corners": "sakura-wind",
+      "retro-pixel": "holographic",
+      cosmic: "cosmic-drift",
+      inferno: "ember-trail",
+      frost: "frost-glint",
+      "prism-flow": "holographic",
+      electric: "holographic",
+      "digital-glitch": "holographic",
+      "bug-hunter": "developer",
+      community: "cosmic-drift",
+      "event-champion": "founder",
+    }),
+    profile_effect: Object.freeze({
+      "core-signal": "circuit-boot",
+      "eclipse-flare": "arcane-sigil",
+      "synth-overdrive": "circuit-boot",
+      "dream-butterflies": "petal-drift",
+      sparkles: "star-trail",
+      galaxy: "star-trail",
+      "gravity-well": "star-trail",
+      sakura: "petal-drift",
+      matrix: "circuit-boot",
+      cyber: "circuit-boot",
+      glitch: "circuit-boot",
+      "pixel-assembly": "circuit-boot",
+      lightning: "circuit-boot",
+      snow: "polar-ribbon",
+      aurora: "polar-ribbon",
+      confetti: "seraphim-fall",
+      hellfire: "embers",
+    }),
+    nameplate: Object.freeze({
+      "dream-mist": "twilight-garden",
+      "circuit-weave": "core-stripe",
+      crimson: "ember-line",
+      nebula: "starlit-silt",
+      aurora: "tide-glass",
+      sakura: "twilight-garden",
+      gold: "eclipse-gold",
+      cyber: "core-stripe",
+      hellfire: "ember-line",
+      frost: "frost-vein",
+      void: "arcane-velvet",
+      toxic: "core-stripe",
+      synthwave: "core-stripe",
+      "retro-horizon": "starlit-silt",
+    }),
+  });
+
+  // Assets pintados HiDPI WebP da Biblioteca Flagship V5 (gerados em 1024px / 640px com alfa real).
+  const V5_AVATAR_ART = Object.freeze({
+    "galaxy-portal": Object.freeze({
+      back: "/cosmetics/assets/deco_astral_back.webp",
+      front: "/cosmetics/assets/deco_astral_front.webp",
+      bleed: 24.5,
+      motion: "astral",
+    }),
+    "sakura-glow": Object.freeze({
+      back: "/cosmetics/assets/deco_sakura_back.webp",
+      front: "/cosmetics/assets/deco_sakura_front.webp",
+      bleed: 24.5,
+      motion: "sakura",
+    }),
+    "frost-crown": Object.freeze({
+      back: "/cosmetics/assets/deco_frost_back.webp",
+      front: "/cosmetics/assets/deco_frost_front.webp",
+      bleed: 24.5,
+      motion: "frost",
+    }),
+    "cat-gamer": Object.freeze({
+      back: "/cosmetics/assets/deco_cyber_back.webp",
+      front: "/cosmetics/assets/deco_cyber_front.webp",
+      blink: "/cosmetics/assets/deco_cyber_blink.webp",
+      bleed: 24.5,
+      motion: "cyber-cat",
+    }),
+    "dragon-fire": Object.freeze({
+      back: "/cosmetics/assets/deco_infernal_back.webp",
+      front: "/cosmetics/assets/deco_infernal_front.webp",
+      bleed: 24.5,
+      motion: "infernal",
+    }),
+    "blood-moon": Object.freeze({
+      back: "/cosmetics/assets/deco_arcane_back.webp",
+      front: "/cosmetics/assets/deco_arcane_front.webp",
+      bleed: 24.5,
+      motion: "arcane",
+    }),
+    "ocean-bubbles": Object.freeze({
+      back: "/cosmetics/assets/deco_abyssal_back.webp",
+      front: "/cosmetics/assets/deco_abyssal_front.webp",
+      bleed: 24.5,
+      motion: "abyssal",
+    }),
+    "angel-wings": Object.freeze({
+      back: "/cosmetics/assets/deco_seraph_back.webp",
+      front: "/cosmetics/assets/deco_seraph_front.webp",
+      bleed: 24.5,
+      motion: "seraph",
+    }),
+    "eclipse-sovereign": Object.freeze({
+      back: "/cosmetics/assets/deco_sovereign_back.webp",
+      front: "/cosmetics/assets/deco_sovereign_front.webp",
+      bleed: 24.5,
+      motion: "sovereign",
+    }),
+  });
+
+  const V5_FRAME_ART = Object.freeze({
+    "cosmic-drift": Object.freeze({
+      tl: "/cosmetics/assets/frame_astral_tl.webp",
+      tr: "/cosmetics/assets/frame_astral_tr.webp",
+      br: "/cosmetics/assets/frame_astral_br.webp",
+      theme: "cosmic",
+      motion: "astral",
+    }),
+    "sakura-wind": Object.freeze({
+      tl: "/cosmetics/assets/frame_sakura_tl.webp",
+      tr: "/cosmetics/assets/frame_sakura_tr.webp",
+      br: "/cosmetics/assets/frame_sakura_br.webp",
+      theme: "sakura",
+      motion: "sakura",
+    }),
+    "frost-glint": Object.freeze({
+      tl: "/cosmetics/assets/frame_frost_tl.webp",
+      tr: "/cosmetics/assets/frame_frost_tr.webp",
+      br: "/cosmetics/assets/frame_frost_br.webp",
+      theme: "frost",
+      motion: "frost",
+    }),
+    holographic: Object.freeze({
+      tl: "/cosmetics/assets/frame_cyber_tl.webp",
+      tr: "/cosmetics/assets/frame_cyber_tr.webp",
+      br: "/cosmetics/assets/frame_cyber_br.webp",
+      theme: "cyber",
+      motion: "cyber",
+    }),
+    "ember-trail": Object.freeze({
+      tl: "/cosmetics/assets/frame_infernal_tl.webp",
+      tr: "/cosmetics/assets/frame_infernal_tr.webp",
+      br: "/cosmetics/assets/frame_infernal_br.webp",
+      theme: "inferno",
+      motion: "infernal",
+    }),
+    "arcane-grimoire": Object.freeze({
+      tl: "/cosmetics/assets/frame_arcane_tl.webp",
+      tr: "/cosmetics/assets/frame_arcane_tr.webp",
+      br: "/cosmetics/assets/frame_arcane_br.webp",
+      theme: "arcane",
+      motion: "arcane",
+    }),
+    liquid: Object.freeze({
+      tl: "/cosmetics/assets/frame_abyssal_tl.webp",
+      tr: "/cosmetics/assets/frame_abyssal_tr.webp",
+      br: "/cosmetics/assets/frame_abyssal_br.webp",
+      theme: "abyssal",
+      motion: "abyssal",
+    }),
+    "seraphim-arch": Object.freeze({
+      tl: "/cosmetics/assets/frame_seraph_tl.webp",
+      tr: "/cosmetics/assets/frame_seraph_tr.webp",
+      br: "/cosmetics/assets/frame_seraph_br.webp",
+      theme: "seraphim",
+      motion: "seraph",
+    }),
+    "sovereign-crest": Object.freeze({
+      tl: "/cosmetics/assets/frame_sovereign_tl.webp",
+      tr: "/cosmetics/assets/frame_sovereign_tr.webp",
+      br: "/cosmetics/assets/frame_sovereign_br.webp",
+      theme: "founder",
+      motion: "sovereign",
+    }),
+    founder: Object.freeze({
+      tl: "/cosmetics/assets/frame_founder_tl.webp",
+      tr: "/cosmetics/assets/frame_astral_tr.webp",
+      br: "/cosmetics/assets/frame_astral_br.webp",
+      theme: "founder",
+      motion: "astral",
+    }),
+    developer: Object.freeze({
+      tl: "/cosmetics/assets/frame_dev_tl.webp",
+      tr: "/cosmetics/assets/frame_cyber_tr.webp",
+      br: "/cosmetics/assets/frame_cyber_br.webp",
+      theme: "developer",
+      motion: "cyber",
+    }),
+    "winter-2026": Object.freeze({
+      tl: "/cosmetics/assets/frame_frost_tl.webp",
+      tr: "/cosmetics/assets/frame_frost_tr.webp",
+      br: "/cosmetics/assets/frame_frost_br.webp",
+      theme: "frost",
+      motion: "frost",
+    }),
+    "early-user": Object.freeze({
+      tl: "/cosmetics/assets/frame_astral_tl.webp",
+      tr: "/cosmetics/assets/frame_astral_tr.webp",
+      br: "/cosmetics/assets/frame_astral_br.webp",
+      theme: "cosmic",
+      motion: "static",
+    }),
+  });
+
+  function resolveCosmeticId(kind, id) {
+    if (!id || id === "none") return null;
+    const aliases = LEGACY_COSMETIC_ALIASES[kind];
+    if (aliases && Object.hasOwn(aliases, id)) return aliases[id];
+    return id;
+  }
+
+  function getAnimationMode(kind, id) {
+    const table = Object.hasOwn(COSMETIC_ANIMATION_MAP, kind) ? COSMETIC_ANIMATION_MAP[kind] : null;
+    if (!table || !id || id === "none") return ANIMATION_MODES.STATIC;
+    // Preserva classificações explicitamente STATIC/REACTIVE mesmo quando aliasadas visualmente
+    if (Object.hasOwn(table, id) && (table[id] === ANIMATION_MODES.STATIC || table[id] === ANIMATION_MODES.REACTIVE)) {
+      return table[id];
+    }
+    const resolved = resolveCosmeticId(kind, id) || id;
+    if (Object.hasOwn(table, resolved)) return table[resolved];
+    if (Object.hasOwn(table, id)) return table[id];
+    return ANIMATION_MODES.STATIC;
+  }
 
   function normalizeContext(raw) {
     const s = String(raw || "").trim().toLowerCase();
@@ -75,8 +470,10 @@
 
   function isReducedMotionActive() {
     if (typeof profileAnimPolicy === "function" && profileAnimPolicy() === "never") return true;
+    if (typeof effectiveReduceMotion === "function" && effectiveReduceMotion()) return true;
     if (typeof state !== "undefined" && state?.audioSettings?.reduceMotion) return true;
-    if (typeof systemPrefersReducedMotion === "function" && systemPrefersReducedMotion()) return true;
+    if (typeof state !== "undefined" && state?.audioSettings?.syncReducedMotion &&
+        typeof systemPrefersReducedMotion === "function" && systemPrefersReducedMotion()) return true;
     return false;
   }
 
@@ -112,10 +509,10 @@
             <stop offset="100%" stop-color="#0f172a" stop-opacity="0"/>
           </radialGradient>
         </defs>
-        <circle cx="50" cy="50" r="48" fill="url(#cos-gp-neb)"/>
+        <circle cx="50" cy="50" r="48" fill="url(#cos-gp-neb)" class="cos-halo-breathe"/>
         <path class="cos-back-cloud" d="M8 58C4 34 22 10 48 9c20-1 37 11 43 29-9-16-24-21-41-20C28 19 14 35 8 58Z" fill="#312e81" opacity=".78"/>
-        <path d="M19 13a14 14 0 1 0 10 23a11.5 11.5 0 1 1-10-23Z" fill="#fde68a" stroke="#fef9c3" stroke-width=".6" opacity=".95"/>
-        <ellipse cx="50" cy="50" rx="46" ry="18" transform="rotate(-24 50 50)" fill="none" stroke="#818cf8" stroke-width="1.2" stroke-dasharray="4 3" opacity=".65"/>
+        <path d="M19 13a14 14 0 1 0 10 23a11.5 11.5 0 1 1-10-23Z" fill="#fde68a" stroke="#fef9c3" stroke-width=".6" opacity=".95" class="cos-halo-breathe"/>
+        <ellipse cx="50" cy="50" rx="46" ry="18" transform="rotate(-24 50 50)" fill="none" stroke="#818cf8" stroke-width="1.2" stroke-dasharray="4 3" opacity=".65" class="cos-dash-flow"/>
         <circle cx="13" cy="36" r="1.4" fill="#e0e7ff" class="cos-twinkle"/>
         <circle cx="88" cy="24" r="1.2" fill="#bae6fd" class="cos-twinkle cos-d2"/>
       `,
@@ -224,10 +621,10 @@
         rareEvent: "Pulso harmônico ilumina as facetas",
       },
       back: `
-        <path class="avatar-art-band" d="M4 64C12 45 33 27 61 21c16-3 30-1 35 7l-7 7c-5-5-16-6-29-3C37 37 18 50 4 68Z"/>
+        <path class="avatar-art-band cos-halo-breathe" d="M4 64C12 45 33 27 61 21c16-3 30-1 35 7l-7 7c-5-5-16-6-29-3C37 37 18 50 4 68Z"/>
         <path class="avatar-art-line" d="M5 62C22 39 71 14 95 29"/>
-        <path class="avatar-art-facet" d="m22 40 9-8 10 1-13 7zm51-21 12 1-6 6-12 1z"/>
-        <path d="M12 31l5-5m63-13 8 2" stroke="#57dbcf" stroke-width="1.2" stroke-linecap="round" opacity=".8"/>
+        <path class="avatar-art-facet cos-twinkle" d="m22 40 9-8 10 1-13 7zm51-21 12 1-6 6-12 1z"/>
+        <path d="M12 31l5-5m63-13 8 2" stroke="#57dbcf" stroke-width="1.2" stroke-linecap="round" opacity=".8" class="cos-led-breathe"/>
       `,
       front: `
         <path class="avatar-art-band" d="M4 66c-4 12 6 24 26 24 25 1 56-13 67-42l-2-9C83 62 52 77 27 79 14 80 6 75 4 66Z"/>
@@ -264,7 +661,7 @@
       },
       back: `
         <path d="M12 52C12 24 27 11 50 11s38 13 38 41" fill="none" stroke="#1e2436" stroke-width="6" stroke-linecap="round"/>
-        <path d="M14 48C15 24 29 13 50 13s35 11 36 35" fill="none" stroke="#22d3ee" stroke-width="1.2" stroke-dasharray="6 4" opacity=".75"/>
+        <path d="M14 48C15 24 29 13 50 13s35 11 36 35" fill="none" stroke="#22d3ee" stroke-width="1.2" stroke-dasharray="6 4" opacity=".75" class="cos-dash-flow"/>
       `,
       front: `
         <g class="cos-ear-twitch">
@@ -373,13 +770,15 @@
         rareEvent: "Cintilação de estrelas de neve",
       },
       back: `
-        <path d="M24 20l5-14 8 10 13-13 13 13 8-10 5 14" fill="#0ea5e9" fill-opacity=".35" stroke="#bae6fd" stroke-width="1.1" stroke-linejoin="round"/>
-        <circle cx="50" cy="50" r="44" fill="none" stroke="#38bdf8" stroke-width="2" opacity=".55"/>
+        <path d="M24 20l5-14 8 10 13-13 13 13 8-10 5 14" fill="#0ea5e9" fill-opacity=".35" stroke="#bae6fd" stroke-width="1.1" stroke-linejoin="round" class="cos-halo-breathe"/>
+        <circle cx="50" cy="50" r="44" fill="none" stroke="#38bdf8" stroke-width="2" opacity=".55" class="cos-led-breathe"/>
       `,
       front: `
         <g transform="translate(50 11)">
-          <path d="M0-9v18M-8-4.5l16 9M8-4.5l-16 9" stroke="#e0f2fe" stroke-width="1.6" stroke-linecap="round"/>
-          <polygon points="0,-5 4.3,-2.5 4.3,2.5 0,5 -4.3,2.5 -4.3,-2.5" fill="#7dd3fc" stroke="#ffffff" stroke-width=".8"/>
+          <g class="cos-crystal-shimmer">
+            <path d="M0-9v18M-8-4.5l16 9M8-4.5l-16 9" stroke="#e0f2fe" stroke-width="1.6" stroke-linecap="round"/>
+            <polygon points="0,-5 4.3,-2.5 4.3,2.5 0,5 -4.3,2.5 -4.3,-2.5" fill="#7dd3fc" stroke="#ffffff" stroke-width=".8"/>
+          </g>
         </g>
         <path d="M11 64c9 21 25 29 39 29s30-8 39-29" fill="none" stroke="#bae6fd" stroke-width="2" stroke-linecap="round"/>
         <polygon points="15,69 19,73 15,79 11,73" fill="#e0f2fe" stroke="#0284c7" stroke-width=".7"/>
@@ -414,8 +813,8 @@
         rareEvent: "Fagulhas extras sobem pela lateral",
       },
       back: `
-        <path d="M12 62C4 43 9 22 25 10c-3 10-1 18 4 24M88 62c8-19 3-40-13-52 3 10 1 18-4 24" fill="#9a3412" stroke="#fb923c" stroke-width="1.2" opacity=".88"/>
-        <path d="M22 24C26 11 38 4 50 3c12 1 24 8 28 21-9-8-18-11-28-11s-19 3-28 11Z" fill="#ea580c" opacity=".55"/>
+        <path class="cos-flame-breathe" d="M12 62C4 43 9 22 25 10c-3 10-1 18 4 24M88 62c8-19 3-40-13-52 3 10 1 18-4 24" fill="#9a3412" stroke="#fb923c" stroke-width="1.2" opacity=".88"/>
+        <path class="cos-halo-breathe" d="M22 24C26 11 38 4 50 3c12 1 24 8 28 21-9-8-18-11-28-11s-19 3-28 11Z" fill="#ea580c" opacity=".55"/>
       `,
       front: `
         <path d="M9 63c8 22 25 32 41 32s33-10 41-32c-10 14-24 22-41 22S19 77 9 63Z" fill="#431407" stroke="#fb923c" stroke-width="1.3"/>
@@ -428,6 +827,272 @@
           <circle cx="76" cy="84" r="1.4" fill="#fef08a" class="cos-twinkle cos-d1"/>
         </g>
         <path class="cos-glint-sweep" d="M16 80L84 68" stroke="#fef08a" stroke-width="2.4" stroke-linecap="round"/>
+      `,
+    },
+
+    "angel-wings": {
+      id: "angel-wings",
+      type: "avatar_decoration",
+      name: "Auréola Serafim",
+      collection: "seraphim",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "hover-loop",
+      theme: "seraphim",
+      bleed: 28,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      back: `
+        <defs>
+          <linearGradient id="cos-ser-w" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#ffffff"/>
+            <stop offset="55%" stop-color="#fef3c7"/>
+            <stop offset="100%" stop-color="#f59e0b"/>
+          </linearGradient>
+          <radialGradient id="cos-ser-glow" cx="50%" cy="28%" r="60%">
+            <stop offset="0%" stop-color="#fef08a" stop-opacity=".55"/>
+            <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle cx="50" cy="48" r="47" fill="url(#cos-ser-glow)" class="cos-halo-breathe"/>
+        <g class="cos-wing-sway-l">
+          <path d="M16 42C2 32-1 17 11 12c2 8 6 13 13 17C11 32 7 39 14 48c-8 1-10 9-3 14 4 2 9 2 14-1" fill="url(#cos-ser-w)" fill-opacity=".86" stroke="#fffbeb" stroke-width="1"/>
+          <path d="M9 22c3 7 8 11 14 14M6 36c4 4 9 7 15 8" stroke="#d97706" stroke-width=".75" opacity=".55"/>
+        </g>
+        <g class="cos-wing-sway-r">
+          <path d="M84 42c14-10 17-25 5-30-2 8-6 13-13 17 13 3 17 10 10 19 8 1 10 9 3 14-4 2-9 2-14-1" fill="url(#cos-ser-w)" fill-opacity=".86" stroke="#fffbeb" stroke-width="1"/>
+          <path d="M91 22c-3 7-8 11-14 14M94 36c-4 4-9 7-15 8" stroke="#d97706" stroke-width=".75" opacity=".55"/>
+        </g>
+      `,
+      front: `
+        <ellipse cx="50" cy="8.5" rx="23" ry="5.2" fill="none" stroke="#fde68a" stroke-width="2.6" class="cos-halo-breathe"/>
+        <ellipse cx="50" cy="8.5" rx="23" ry="5.2" fill="none" stroke="#ffffff" stroke-width=".95" opacity=".88"/>
+        <path d="M14 66c9 19 24 27 36 27s27-8 36-27" fill="none" stroke="#fde68a" stroke-width="1.8" stroke-linecap="round" opacity=".9"/>
+        <path d="M24 81c9 7 18 10 26 10s17-3 26-10" fill="none" stroke="#ffffff" stroke-width=".9" stroke-linecap="round" opacity=".75"/>
+        <polygon points="50,86 54.5,91.5 50,97 45.5,91.5" fill="#fef3c7" stroke="#d97706" stroke-width=".9"/>
+        <path class="cos-glint-sweep" d="M22 8L78 88" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round"/>
+      `,
+    },
+
+    "blood-moon": {
+      id: "blood-moon",
+      type: "avatar_decoration",
+      name: "Eclipse Escarlate",
+      collection: "eclipse",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "hover-loop",
+      theme: "eclipse",
+      bleed: 26,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      back: `
+        <defs>
+          <radialGradient id="cos-ecl-bg" cx="50%" cy="22%" r="64%">
+            <stop offset="0%" stop-color="#f43f5e" stop-opacity=".6"/>
+            <stop offset="55%" stop-color="#7f1d1d" stop-opacity=".35"/>
+            <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle cx="50" cy="48" r="48" fill="url(#cos-ecl-bg)" class="cos-halo-breathe"/>
+        <circle cx="50" cy="50" r="45.5" fill="none" stroke="#be123c" stroke-width="3.2" opacity=".82"/>
+        <path d="M16 24C24 10 37 4 50 4s26 6 34 20" fill="none" stroke="#fde68a" stroke-width="1.4" stroke-dasharray="5 3" class="cos-dash-flow"/>
+      `,
+      front: `
+        <g transform="translate(50 11)">
+          <circle cx="0" cy="0" r="9.5" fill="#0c0a12" stroke="#fde68a" stroke-width="1.6"/>
+          <path d="M-9.5 0a9.5 9.5 0 0 1 19 0" fill="none" stroke="#fb7185" stroke-width="1.8" class="cos-led-breathe"/>
+          <path d="M-16 2l6-2M16 2l-6-2M0-13v4" stroke="#fde68a" stroke-width="1.2" stroke-linecap="round"/>
+        </g>
+        <path d="M10 62c8 22 25 32 40 32s32-10 40-32c-10 15-24 23-40 23S20 77 10 62Z" fill="#180a10" fill-opacity=".86" stroke="#fb7185" stroke-width="1.2"/>
+        <path d="M22 81c10 7 20 9 28 9s18-2 28-9" fill="none" stroke="#fde68a" stroke-width="1.1" stroke-linecap="round"/>
+        <polygon points="50,84 54.5,90 50,96 45.5,90" fill="#f43f5e" stroke="#fef3c7" stroke-width=".9"/>
+        <path class="cos-glint-sweep" d="M16 74L84 22" stroke="#fef3c7" stroke-width="2.2" stroke-linecap="round"/>
+      `,
+    },
+
+    "ocean-bubbles": {
+      id: "ocean-bubbles",
+      type: "avatar_decoration",
+      name: "Abismo Nacarado",
+      collection: "ocean",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "hover-loop",
+      theme: "ocean",
+      bleed: 26,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      back: `
+        <defs>
+          <linearGradient id="cos-ocn-w" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#0ea5e9" stop-opacity=".42"/>
+            <stop offset="60%" stop-color="#14b8a6" stop-opacity=".68"/>
+            <stop offset="100%" stop-color="#0c4a6e" stop-opacity=".2"/>
+          </linearGradient>
+        </defs>
+        <path class="cos-halo-breathe" d="M6 58C4 28 24 8 50 8s46 20 44 50c-6-22-22-34-44-34S12 36 6 58Z" fill="url(#cos-ocn-w)"/>
+        <circle cx="50" cy="50" r="44.5" fill="none" stroke="#2dd4bf" stroke-width="1.8" opacity=".65"/>
+      `,
+      front: `
+        <path class="cos-scarf-sway" d="M8 62c9 22 25 32 42 32s33-10 42-32c-10 13-22 20-42 20S18 75 8 62Z" fill="#083344" fill-opacity=".84" stroke="#5eead4" stroke-width="1.3"/>
+        <path d="M16 74c12 10 24 14 34 14s22-4 34-14" fill="none" stroke="#e0f2fe" stroke-width="1.4" stroke-linecap="round" opacity=".88"/>
+        <circle cx="50" cy="89" r="4.4" fill="#ecfeff" stroke="#2dd4bf" stroke-width="1.2"/>
+        <circle cx="48.6" cy="87.6" r="1.4" fill="#ffffff"/>
+        <circle cx="24" cy="82" r="2.2" fill="#a5f3fc" class="cos-twinkle"/>
+        <circle cx="76" cy="82" r="2.2" fill="#a5f3fc" class="cos-twinkle cos-d2"/>
+        <path class="cos-glint-sweep" d="M14 70L86 38" stroke="#ecfeff" stroke-width="2.2" stroke-linecap="round"/>
+      `,
+    },
+
+    "electric-pulse": {
+      id: "electric-pulse",
+      type: "avatar_decoration",
+      name: "Selo Arcano",
+      collection: "arcane",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "hover-loop",
+      theme: "arcane",
+      bleed: 26,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      back: `
+        <defs>
+          <radialGradient id="cos-arc-g" cx="50%" cy="50%" r="52%">
+            <stop offset="68%" stop-color="#7c3aed" stop-opacity=".18"/>
+            <stop offset="92%" stop-color="#c084fc" stop-opacity=".46"/>
+            <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle cx="50" cy="50" r="49" fill="url(#cos-arc-g)" class="cos-halo-breathe"/>
+        <circle cx="50" cy="50" r="46.5" fill="none" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="8 4 2 4" class="cos-dash-flow"/>
+        <circle cx="50" cy="50" r="42.5" fill="none" stroke="#fde68a" stroke-width=".9" opacity=".7"/>
+      `,
+      front: `
+        <g class="cos-crystal-shimmer" transform="translate(50 8)">
+          <polygon points="0,-7 6,0 0,7 -6,0" fill="#a855f7" stroke="#fde68a" stroke-width="1.1"/>
+          <polygon points="0,-3.5 3,0 0,3.5 -3,0" fill="#fef9c3"/>
+        </g>
+        <path d="M12 64c9 21 25 29 38 29s29-8 38-29" fill="none" stroke="#c084fc" stroke-width="1.9" stroke-linecap="round"/>
+        <path d="M22 81l8-4 8 5 12-5 12 5 8-5 8 4" fill="none" stroke="#fde68a" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity=".88"/>
+        <polygon points="13,48 17,44 21,48 17,52" fill="#e9d5ff" stroke="#7c3aed" stroke-width=".7" class="cos-twinkle"/>
+        <polygon points="79,48 83,44 87,48 83,52" fill="#e9d5ff" stroke="#7c3aed" stroke-width=".7" class="cos-twinkle cos-d2"/>
+        <path class="cos-glint-sweep" d="M14 26L86 78" stroke="#fef9c3" stroke-width="2.2" stroke-linecap="round"/>
+      `,
+    },
+
+    "cyber-ring": {
+      id: "cyber-ring",
+      type: "avatar_decoration",
+      name: "Valsa Synthwave",
+      collection: "synth",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "hover-loop",
+      theme: "synth",
+      bleed: 24,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      back: `
+        <defs>
+          <linearGradient id="cos-syn-g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#f472b6"/>
+            <stop offset="50%" stop-color="#a855f7"/>
+            <stop offset="100%" stop-color="#22d3ee"/>
+          </linearGradient>
+        </defs>
+        <circle cx="50" cy="50" r="46" fill="none" stroke="url(#cos-syn-g)" stroke-width="3.2" stroke-dasharray="26 8 6 8" class="cos-dash-flow"/>
+        <circle cx="50" cy="50" r="49" fill="none" stroke="#22d3ee" stroke-width="1" stroke-dasharray="4 6" opacity=".68"/>
+      `,
+      front: `
+        <path d="M15 24l9-10h52l9 10" fill="none" stroke="#f472b6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 74l10 12h52l10-12" fill="none" stroke="#22d3ee" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="34" y="9" width="32" height="4.5" rx="2" fill="#181228" stroke="#22d3ee" stroke-width="1"/>
+        <path d="M38 11.2h24" stroke="#f472b6" stroke-width="1.8" stroke-linecap="round" class="cos-led-breathe"/>
+        <polygon points="50,86 55,91 50,96 45,91" fill="#22d3ee" stroke="#fdf4ff" stroke-width=".9"/>
+        <path class="cos-glint-sweep" d="M14 82L86 18" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>
+      `,
+    },
+
+    lunar: {
+      id: "lunar",
+      type: "avatar_decoration",
+      name: "Sonho Etéreo",
+      collection: "dream",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "hover-loop",
+      theme: "dream",
+      bleed: 26,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      back: `
+        <defs>
+          <linearGradient id="cos-drm-g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#c4b5fd" stop-opacity=".55"/>
+            <stop offset="50%" stop-color="#a7f3d0" stop-opacity=".4"/>
+            <stop offset="100%" stop-color="#fbcfe8" stop-opacity=".5"/>
+          </linearGradient>
+        </defs>
+        <circle cx="50" cy="50" r="46.5" fill="none" stroke="url(#cos-drm-g)" stroke-width="3.6" class="cos-halo-breathe"/>
+        <path d="M15 20a13 13 0 1 0 11 21a10.5 10.5 0 1 1-11-21Z" fill="#fef08a" stroke="#ffffff" stroke-width=".6"/>
+      `,
+      front: `
+        <path class="cos-scarf-sway" d="M10 66c8 18 23 26 40 26s32-8 40-26c-11 11-23 16-40 16S21 77 10 66Z" fill="#2e1065" fill-opacity=".68" stroke="#ddd6fe" stroke-width="1.2"/>
+        <path d="M22 81c10 6 19 8 28 8s18-2 28-8" fill="none" stroke="#a7f3d0" stroke-width="1.4" stroke-linecap="round"/>
+        <path d="M80 18l1.6-5 1.6 5 5 1.6-5 1.6-1.6 5-1.6-5-5-1.6Z" fill="#fef08a" class="cos-twinkle"/>
+        <circle cx="24" cy="84" r="1.8" fill="#fbcfe8" class="cos-twinkle cos-d1"/>
+        <circle cx="76" cy="84" r="1.8" fill="#a7f3d0" class="cos-twinkle cos-d3"/>
+        <path class="cos-glint-sweep" d="M16 20L84 82" stroke="#f5f3ff" stroke-width="2.2" stroke-linecap="round"/>
+      `,
+    },
+
+    "static-cyber-hud": {
+      id: "static-cyber-hud",
+      type: "avatar_decoration",
+      name: "Chassi Tático Ônix",
+      collection: "cyber",
+      animated: false,
+      animation_mode: ANIMATION_MODES.STATIC,
+      legacy_mode: "static",
+      theme: "cyber",
+      bleed: 24,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "static-native",
+      back: `
+        <circle cx="50" cy="50" r="45.5" fill="none" stroke="#0f172a" stroke-width="4.5"/>
+        <circle cx="50" cy="50" r="45.5" fill="none" stroke="#22d3ee" stroke-width="1.2" stroke-dasharray="16 6 4 6" opacity=".82"/>
+      `,
+      front: `
+        <path d="M14 26L22 14h14M86 26L78 14H64M14 74l8 12h14M86 74l-8 12H64" fill="none" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="42" y="7" width="16" height="4" rx="1.5" fill="#083344" stroke="#67e8f9" stroke-width="1"/>
+        <rect x="42" y="89" width="16" height="4" rx="1.5" fill="#083344" stroke="#67e8f9" stroke-width="1"/>
+      `,
+    },
+
+    "static-diamond": {
+      id: "static-diamond",
+      type: "avatar_decoration",
+      name: "Relíquia Diamante",
+      collection: "frost",
+      animated: false,
+      animation_mode: ANIMATION_MODES.STATIC,
+      legacy_mode: "static",
+      theme: "frost",
+      bleed: 24,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "static-native",
+      back: `
+        <circle cx="50" cy="50" r="44.5" fill="none" stroke="#0284c7" stroke-width="2.8" opacity=".75"/>
+        <circle cx="50" cy="50" r="47.5" fill="none" stroke="#bae6fd" stroke-width="1" stroke-dasharray="5 3"/>
+      `,
+      front: `
+        <polygon points="50,1 57,9 50,17 43,9" fill="#e0f2fe" stroke="#0284c7" stroke-width="1"/>
+        <polygon points="50,4 54,9 50,14 46,9" fill="#ffffff"/>
+        <polygon points="50,83 56,90 50,97 44,90" fill="#bae6fd" stroke="#0369a1" stroke-width="1"/>
+        <polygon points="2,50 9,44 16,50 9,56" fill="#7dd3fc" stroke="#e0f2fe" stroke-width=".9"/>
+        <polygon points="84,50 91,44 98,50 91,56" fill="#7dd3fc" stroke="#e0f2fe" stroke-width=".9"/>
       `,
     },
   };
@@ -689,6 +1354,288 @@
       `,
       bottomSealSvg: `<path d="M18 6C36 10 64 10 82 6" stroke="var(--art-edge)" stroke-width="1.1"/><circle cx="50" cy="7" r="2" class="frame-detail"/>`,
     },
+
+    holographic: {
+      id: "holographic",
+      type: "profile_frame",
+      name: "Prisma Holográfico",
+      collection: "cyber",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "loop",
+      theme: "synth",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M1 42V8l7-7h40l-12 9H18l-8 8v24Z"/>
+        <path d="M1 48V8l7-7h44M10 38V18l8-8h26M16 44V26l10-10h12"/>
+        <polygon points="15,15 24,11 20,20 11,24" class="frame-detail"/>
+        <circle cx="32" cy="8" r="1.8" class="frame-node"/>
+        <circle cx="8" cy="32" r="1.8" class="frame-node"/>
+      `,
+      crestSvg: `
+        <path class="frame-inlay" d="M10 2h80l-12 10H22Z"/>
+        <polygon points="50,1 58,7 50,13 42,7" class="frame-detail"/>
+        <path d="M18 6h22M60 6h22" stroke="var(--art-lit)" stroke-width="1.1"/>
+      `,
+      bottomSealSvg: `<path d="M16 6h68M38 2l12 8 12-8" stroke="var(--art-edge)" stroke-width="1.1"/><polygon points="50,2 54,6 50,10 46,6" class="frame-detail"/>`,
+    },
+
+    "neon-pulse": {
+      id: "neon-pulse",
+      type: "profile_frame",
+      name: "Horizonte Synthwave",
+      collection: "synth",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "loop",
+      theme: "synth",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M1 38V6l5-5h36l-8 7H14l-6 6v24Z"/>
+        <path d="M1 46V6l5-5h42M8 34V14l6-6h26M2 40h6M40 2v6"/>
+        <rect x="11" y="11" width="6" height="6" rx="1" class="frame-detail"/>
+        <circle cx="26" cy="11" r="1.6" class="frame-node"/>
+        <circle cx="11" cy="26" r="1.6" class="frame-node"/>
+      `,
+      crestSvg: `
+        <path d="M8 5h26l6 6h20l6-6h26" stroke="var(--art-edge)" stroke-width="1.4"/>
+        <rect x="40" y="4" width="20" height="4" rx="2" class="frame-detail"/>
+      `,
+      bottomSealSvg: `<path d="M18 6h64M32 3h36" stroke="var(--art-lit)" stroke-width="1.1"/>`,
+    },
+
+    "arcane-grimoire": {
+      id: "arcane-grimoire",
+      type: "profile_frame",
+      name: "Grimório Arcano",
+      collection: "arcane",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "loop",
+      theme: "arcane",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M2 44C4 16 18 4 46 2 28 10 16 22 10 44Z"/>
+        <path d="M2 48V10l8-8h38M10 40C12 20 20 12 40 10M16 16l10 10"/>
+        <polygon points="15,15 21,15 15,21 9,15" class="frame-detail"/>
+        <circle cx="28" cy="9" r="1.8" class="frame-node"/>
+        <circle cx="9" cy="28" r="1.8" class="frame-node"/>
+      `,
+      crestSvg: `
+        <path d="M10 6C28 1 72 1 90 6" stroke="var(--art-edge)" stroke-width="1.2"/>
+        <polygon points="50,1 56,7 50,14 44,7" class="frame-detail"/>
+        <circle cx="32" cy="6" r="1.8" class="frame-node"/>
+        <circle cx="68" cy="6" r="1.8" class="frame-node"/>
+      `,
+      bottomSealSvg: `<path d="M14 6h72M42 2l8 8 8-8" stroke="var(--art-lit)" stroke-width="1.1"/><polygon points="50,2 54,6 50,10 46,6" class="frame-detail"/>`,
+    },
+
+    "eclipse-crown": {
+      id: "eclipse-crown",
+      type: "profile_frame",
+      name: "Coroa do Eclipse",
+      collection: "eclipse",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "loop",
+      theme: "eclipse",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M1 42V8l7-7h34C26 9 14 20 8 42Z"/>
+        <path d="M1 48V8l7-7h42M8 38C12 20 20 12 38 8"/>
+        <path class="frame-detail" d="M14 10a7 7 0 1 0 7 11 5.5 5.5 0 1 1-7-11Z"/>
+        <circle cx="28" cy="8" r="1.7" class="frame-node"/>
+      `,
+      crestSvg: `
+        <path d="M8 7C26 2 74 2 92 7" stroke="var(--art-edge)" stroke-width="1.3"/>
+        <circle cx="50" cy="7" r="5" fill="#09070e" stroke="var(--art-lit)" stroke-width="1.4"/>
+        <path d="M36 7h8M56 7h8" stroke="var(--art-lit)" stroke-width="1.2"/>
+      `,
+      bottomSealSvg: `<path d="M18 6C36 10 64 10 82 6" stroke="var(--art-edge)" stroke-width="1.2"/><circle cx="50" cy="6" r="2.2" class="frame-detail"/>`,
+    },
+
+    "seraphim-arch": {
+      id: "seraphim-arch",
+      type: "profile_frame",
+      name: "Céu Serafim",
+      collection: "seraphim",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "loop",
+      theme: "seraphim",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M2 44C4 20 18 6 46 2c-16 10-26 22-34 42Z"/>
+        <path d="M2 48C4 18 18 4 50 2M8 40C12 22 22 12 40 8M14 34c4-10 10-16 20-20"/>
+        <path class="frame-detail" d="M12 26c0-10 8-16 18-16-6 6-10 10-12 18Z"/>
+        <circle cx="14" cy="14" r="1.8" class="frame-node"/>
+      `,
+      crestSvg: `
+        <path d="M8 8C26 2 74 2 92 8" stroke="var(--art-lit)" stroke-width="1.2"/>
+        <ellipse cx="50" cy="6" rx="14" ry="3.4" stroke="var(--art-lit)" stroke-width="1.4"/>
+        <polygon points="50,3 53,6 50,9 47,6" class="frame-detail"/>
+      `,
+      bottomSealSvg: `<path d="M20 6C38 10 62 10 80 6" stroke="var(--art-lit)" stroke-width="1.1"/><polygon points="50,2 54,6 50,10 46,6" class="frame-detail"/>`,
+    },
+
+    "dream-sanctuary": {
+      id: "dream-sanctuary",
+      type: "profile_frame",
+      name: "Reino Onírico",
+      collection: "dream",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "loop",
+      theme: "dream",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M2 40C6 16 18 6 44 2c-14 10-24 20-32 38Z"/>
+        <path d="M2 46C4 18 18 4 48 2M9 36C14 20 22 12 38 9"/>
+        <path class="frame-detail" d="M18 14l2-5 2 5 5 2-5 2-2 5-2-5-5-2Z"/>
+        <circle cx="28" cy="10" r="1.6" class="frame-node"/>
+        <circle cx="10" cy="28" r="1.6" class="frame-node"/>
+      `,
+      crestSvg: `
+        <path d="M12 6C30 2 70 2 88 6" stroke="var(--art-edge)" stroke-width="1.1"/>
+        <path d="M47 2a6 6 0 1 0 5 10 4.8 4.8 0 1 1-5-10Z" class="frame-detail"/>
+        <circle cx="32" cy="6" r="1.5" class="frame-node"/>
+        <circle cx="68" cy="6" r="1.5" class="frame-node"/>
+      `,
+      bottomSealSvg: `<path d="M20 6C38 9 62 9 80 6" stroke="var(--art-edge)" stroke-width="1"/><circle cx="50" cy="6" r="2" class="frame-detail"/>`,
+    },
+
+    "reactive-aura": {
+      id: "reactive-aura",
+      type: "profile_frame",
+      name: "Aura Reativa",
+      collection: "sancord-core",
+      animated: true,
+      animation_mode: ANIMATION_MODES.REACTIVE,
+      legacy_mode: "loop",
+      theme: "core",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M1 34V9l8-8h28l-8 8H16l-7 7v18Z"/>
+        <path d="M1 44V9l8-8h36M9 34V18l9-9h18"/>
+        <circle cx="14" cy="14" r="2.2" class="frame-node"/>
+      `,
+      crestSvg: `<path d="M18 6h64" stroke="var(--art-edge)" stroke-width="1.2"/><circle cx="50" cy="6" r="3" class="frame-detail"/>`,
+      bottomSealSvg: `<path d="M24 6h52" stroke="var(--art-edge)" stroke-width="1"/>`,
+    },
+
+    "voice-pulse": {
+      id: "voice-pulse",
+      type: "profile_frame",
+      name: "Pulso Acústico",
+      collection: "sancord-core",
+      animated: true,
+      animation_mode: ANIMATION_MODES.REACTIVE,
+      legacy_mode: "loop",
+      theme: "core",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M1 34V9l8-8h28l-8 8H16l-7 7v18Z"/>
+        <path d="M1 44V9l8-8h36M10 26v-8M14 28V14M18 24v-6"/>
+        <circle cx="24" cy="11" r="1.8" class="frame-node"/>
+      `,
+      crestSvg: `<path d="M18 6h18l4-3 4 6 6-7 6 7 4-6 4 3h18" stroke="var(--art-lit)" stroke-width="1.2"/>`,
+      bottomSealSvg: `<path d="M26 6h48" stroke="var(--art-edge)" stroke-width="1"/>`,
+    },
+
+    founder: {
+      id: "founder",
+      type: "profile_frame",
+      name: "Fundação Imperial",
+      collection: "conquistas",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "loop",
+      theme: "founder",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M2 44V8l6-6h36C28 9 16 19 8 44Z"/>
+        <path d="M2 48V6l4-4h44M8 38V14l6-6h26"/>
+        <polygon points="14,14 20,14 14,20 8,14" class="frame-detail"/>
+        <circle cx="28" cy="8" r="1.9" class="frame-node"/>
+        <circle cx="8" cy="28" r="1.9" class="frame-node"/>
+      `,
+      crestSvg: `
+        <path class="frame-inlay" d="M18 2h64l-10 10H28Z"/>
+        <path d="M35 11l4-9 11 6 11-6 4 9Z" class="frame-detail"/>
+      `,
+      bottomSealSvg: `<path d="M14 6h72" stroke="var(--art-lit)" stroke-width="1.3"/><polygon points="50,2 55,6 50,10 45,6" class="frame-detail"/>`,
+    },
+
+    developer: {
+      id: "developer",
+      type: "profile_frame",
+      name: "Arquitetura Dev",
+      collection: "conquistas",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "loop",
+      theme: "developer",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M1 34V7l6-6h27l-6 6H11l-4 4v17Z"/>
+        <path d="M1 44V7l6-6h38M9 32V14l5-5h20"/>
+        <path class="frame-detail" d="M14 17l-3 3 3 3m6-6l3 3-3 3"/>
+        <circle cx="28" cy="9" r="1.7" class="frame-node"/>
+      `,
+      crestSvg: `<path d="M14 6h26l4-4 4 8 4-8 4 4h26" stroke="var(--art-edge)" stroke-width="1.3"/>`,
+      bottomSealSvg: `<path d="M22 6h56" stroke="var(--art-edge)" stroke-width="1.1"/>`,
+    },
+
+    "early-user": {
+      id: "early-user",
+      type: "profile_frame",
+      name: "Pioneira Astral",
+      collection: "conquistas",
+      animated: false,
+      animation_mode: ANIMATION_MODES.STATIC,
+      legacy_mode: "static",
+      theme: "frost",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "static-native",
+      cornerSvg: `
+        <path class="frame-inlay" d="M2 38V8l6-6h30C24 9 14 19 8 38Z"/>
+        <path d="M2 46V6l4-4h40M9 34V14l5-5h20"/>
+        <polygon points="14,14 18,14 14,18 10,14" class="frame-detail"/>
+      `,
+      crestSvg: `<path d="M18 6h64" stroke="var(--art-edge)" stroke-width="1.1"/><path d="M50 1l2 4 4 2-4 2-2 4-2-4-4-2 4-2Z" class="frame-detail"/>`,
+      bottomSealSvg: `<path d="M24 6h52" stroke="var(--art-edge)" stroke-width="1"/>`,
+    },
+
+    "winter-2026": {
+      id: "winter-2026",
+      type: "profile_frame",
+      name: "Solstício Glacial",
+      collection: "temporada-inverno",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      legacy_mode: "loop",
+      theme: "frost",
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      cornerSvg: `
+        <path class="frame-inlay" d="M2 40L8 16l8-8L40 2 24 14 14 24Z"/>
+        <path d="M2 48V12l10-10h36M8 34l8-18 18-8"/>
+        <polygon points="12,12 19,9 15,15 9,19" class="frame-detail"/>
+        <circle cx="26" cy="8" r="1.8" class="frame-node"/>
+      `,
+      crestSvg: `<path d="M14 6h72" stroke="var(--art-lit)" stroke-width="1.1"/><polygon points="50,1 55,6 50,12 45,6" class="frame-detail"/>`,
+      bottomSealSvg: `<path d="M20 6h60" stroke="var(--art-edge)" stroke-width="1"/><polygon points="50,3 54,6 50,9 46,6" class="frame-detail"/>`,
+    },
   };
 
   // ===========================================================================
@@ -940,6 +1887,102 @@
         </g>
       `,
     },
+
+    "arcane-sigil": {
+      id: "arcane-sigil",
+      type: "profile_effect",
+      name: "Ritual Arcano",
+      collection: "arcane",
+      animated: true,
+      animation_mode: ANIMATION_MODES.PLAY_ON_OPEN,
+      theme: "arcane",
+      duration: 3400,
+      stages: { entrance: 150, main: 600, climax: 1500, dissipate: 2550 },
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "disabled-still",
+      backSvg: `<g class="ef-layer-wash"><rect x="0" y="0" width="100" height="100" fill="#7c3aed" fill-opacity=".18"/></g>`,
+      frontSvg: `<g class="ef-climax-burst"><circle cx="50" cy="28" r="18" fill="none" stroke="#fde68a" stroke-width=".55" stroke-dasharray="3 2"/></g>`,
+    },
+
+    "eclipse-flare": {
+      id: "eclipse-flare",
+      type: "profile_effect",
+      name: "Chama do Eclipse",
+      collection: "eclipse",
+      animated: true,
+      animation_mode: ANIMATION_MODES.PLAY_ON_OPEN,
+      theme: "eclipse",
+      duration: 3500,
+      stages: { entrance: 160, main: 640, climax: 1550, dissipate: 2650 },
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "disabled-still",
+      backSvg: `<g class="ef-layer-wash"><rect x="0" y="0" width="100" height="100" fill="#991b1b" fill-opacity=".22"/></g>`,
+      frontSvg: `<g class="ef-climax-burst"><circle cx="50" cy="26" r="14" fill="none" stroke="#fde68a" stroke-width=".7"/></g>`,
+    },
+
+    "abyssal-tide": {
+      id: "abyssal-tide",
+      type: "profile_effect",
+      name: "Maré Bioluminescente",
+      collection: "ocean",
+      animated: true,
+      animation_mode: ANIMATION_MODES.PLAY_ON_OPEN,
+      theme: "ocean",
+      duration: 3400,
+      stages: { entrance: 150, main: 620, climax: 1500, dissipate: 2550 },
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "disabled-still",
+      backSvg: `<g class="ef-layer-wash"><rect x="0" y="0" width="100" height="100" fill="#0d9488" fill-opacity=".18"/></g>`,
+      frontSvg: `<g class="ef-wind-ribbons" fill="none" stroke="#5eead4" stroke-width=".65"><path d="M-6 44C24 28 54 58 84 36s20 2 24 8"/></g>`,
+    },
+
+    "seraphim-fall": {
+      id: "seraphim-fall",
+      type: "profile_effect",
+      name: "Bênção Celestial",
+      collection: "seraphim",
+      animated: true,
+      animation_mode: ANIMATION_MODES.PLAY_ON_OPEN,
+      theme: "seraphim",
+      duration: 3600,
+      stages: { entrance: 160, main: 650, climax: 1600, dissipate: 2700 },
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "disabled-still",
+      backSvg: `<g class="ef-layer-wash"><rect x="0" y="0" width="100" height="100" fill="#f59e0b" fill-opacity=".16"/></g>`,
+      frontSvg: `<g class="ef-particles"><circle cx="50" cy="22" r="1.4" fill="#fef3c7"/></g>`,
+    },
+
+    "synth-overdrive": {
+      id: "synth-overdrive",
+      type: "profile_effect",
+      name: "Horizonte Synth",
+      collection: "synth",
+      animated: true,
+      animation_mode: ANIMATION_MODES.PLAY_ON_OPEN,
+      theme: "synth",
+      duration: 3200,
+      stages: { entrance: 120, main: 540, climax: 1400, dissipate: 2400 },
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "disabled-still",
+      backSvg: `<g class="ef-grid-trace" stroke="#f472b6" stroke-width=".3" opacity=".45"><path d="M0 24h100M0 54h100M0 84h100"/></g>`,
+      frontSvg: `<g class="ef-scan-beam"><rect x="0" y="-4" width="100" height="4" fill="#22d3ee" opacity=".5"/></g>`,
+    },
+
+    "dream-butterflies": {
+      id: "dream-butterflies",
+      type: "profile_effect",
+      name: "Sonho Etéreo",
+      collection: "dream",
+      animated: true,
+      animation_mode: ANIMATION_MODES.PLAY_ON_OPEN,
+      theme: "dream",
+      duration: 3600,
+      stages: { entrance: 160, main: 660, climax: 1620, dissipate: 2750 },
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "disabled-still",
+      backSvg: `<g class="ef-layer-wash"><rect x="0" y="0" width="100" height="100" fill="#a78bfa" fill-opacity=".16"/></g>`,
+      frontSvg: `<g class="ef-particles"><circle cx="38" cy="28" r="1.2" fill="#a7f3d0"/><circle cx="68" cy="34" r="1.3" fill="#fbcfe8"/></g>`,
+    },
   };
 
   // ===========================================================================
@@ -1160,6 +2203,81 @@
         <path d="M188 38l22-14 14 4 12-10M248 14v24M239 20l18 12M257 20l-18 12" stroke="#e0f2fe" stroke-width=".9" opacity=".82"/>
       `,
     },
+
+    "arcane-velvet": {
+      id: "arcane-velvet",
+      type: "nameplate",
+      name: "Veludo Arcano",
+      collection: "arcane",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      svg: `
+        <defs>
+          <linearGradient id="np-arc-bg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#2e1065" stop-opacity=".10"/>
+            <stop offset="52%" stop-color="#581c87" stop-opacity=".46"/>
+            <stop offset="100%" stop-color="#7c3aed" stop-opacity=".72"/>
+          </linearGradient>
+        </defs>
+        <rect width="280" height="52" fill="url(#np-arc-bg)"/>
+        <circle cx="250" cy="26" r="18" fill="none" stroke="#c084fc" stroke-width="1" stroke-dasharray="4 3" opacity=".72"/>
+        <polygon points="250,12 260,26 250,40 240,26" fill="#a855f7" fill-opacity=".35" stroke="#fde68a" stroke-width="1.1"/>
+        <circle cx="212" cy="18" r="1.6" fill="#fde68a" class="cos-twinkle"/>
+        <circle cx="228" cy="36" r="1.5" fill="#e9d5ff" class="cos-twinkle cos-d2"/>
+      `,
+    },
+
+    "eclipse-gold": {
+      id: "eclipse-gold",
+      type: "nameplate",
+      name: "Aurora do Eclipse",
+      collection: "eclipse",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      svg: `
+        <defs>
+          <linearGradient id="np-ecl-bg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#180a10" stop-opacity=".12"/>
+            <stop offset="54%" stop-color="#881337" stop-opacity=".46"/>
+            <stop offset="100%" stop-color="#be123c" stop-opacity=".72"/>
+          </linearGradient>
+        </defs>
+        <rect width="280" height="52" fill="url(#np-ecl-bg)"/>
+        <circle cx="252" cy="26" r="14" fill="#0c0a12" stroke="#fde68a" stroke-width="1.6"/>
+        <circle cx="252" cy="26" r="19" fill="none" stroke="#fb7185" stroke-width=".9" opacity=".62"/>
+        <circle cx="216" cy="20" r="1.6" fill="#fef08a" class="cos-twinkle"/>
+        <circle cx="226" cy="34" r="1.5" fill="#fda4af" class="cos-ember-float"/>
+      `,
+    },
+
+    "dream-mist": {
+      id: "dream-mist",
+      type: "nameplate",
+      name: "Névoa Onírica",
+      collection: "dream",
+      animated: true,
+      animation_mode: ANIMATION_MODES.IDLE_WITH_EVENTS,
+      version: COSMETIC_ENGINE_VERSION,
+      reduced_motion: "keyframe-still",
+      svg: `
+        <defs>
+          <linearGradient id="np-drm-bg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#312e81" stop-opacity=".08"/>
+            <stop offset="52%" stop-color="#6d28d9" stop-opacity=".34"/>
+            <stop offset="100%" stop-color="#0d9488" stop-opacity=".56"/>
+          </linearGradient>
+        </defs>
+        <rect width="280" height="52" fill="url(#np-drm-bg)"/>
+        <path d="M180 42C206 24 234 36 278 16" fill="none" stroke="#ddd6fe" stroke-width="1.1" opacity=".72"/>
+        <path d="M248 12a12 12 0 1 0 9 21 9.6 9.6 0 1 1-9-21Z" fill="#fef08a" opacity=".9"/>
+        <circle cx="212" cy="18" r="1.6" fill="#a7f3d0" class="cos-twinkle"/>
+        <circle cx="228" cy="34" r="1.5" fill="#fbcfe8" class="cos-twinkle cos-d2"/>
+      `,
+    },
   };
 
   // ===========================================================================
@@ -1168,15 +2286,47 @@
   const idleHosts = new Map();
   let idleObserver = null;
 
+  function isPrimaryContext(ctx) {
+    return (
+      ctx === CONTEXTS.EDITOR_PREVIEW ||
+      ctx === CONTEXTS.FULL_PROFILE ||
+      ctx === CONTEXTS.PROFILE_POPOUT ||
+      ctx === CONTEXTS.SELF_PROFILE_MENU
+    );
+  }
+
+  function isElementLikelyVisible(el) {
+    if (!el || !el.isConnected) return false;
+    if (el.closest(".hidden, [hidden]")) return false;
+    if (typeof el.getBoundingClientRect !== "function") return true;
+    const rect = el.getBoundingClientRect();
+    // Em ambientes headless/jsdom sem layout real, getBoundingClientRect() retorna 0×0.
+    if (!rect.width && !rect.height) {
+      if (typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent || "")) return true;
+      // Para wrappers inline/SVG dentro de superfícies primárias visíveis, verificar o card pai.
+      const card = el.closest(".profile-card, #self-profile-menu, #live-profile-preview-card, .compact-profile-dialog");
+      if (card && card !== el) {
+        const cr = card.getBoundingClientRect();
+        return cr.width > 0 && cr.height > 0 && cr.bottom > 0 && cr.top < (global.innerHeight || 1080) && cr.right > 0 && cr.left < (global.innerWidth || 1920);
+      }
+      return false;
+    }
+    const vw = global.innerWidth || 1920;
+    const vh = global.innerHeight || 1080;
+    return rect.bottom > 0 && rect.top < vh && rect.right > 0 && rect.left < vw;
+  }
+
   function ensureIdleObserver() {
     if (idleObserver || typeof IntersectionObserver !== "function") return;
     idleObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         const rec = idleHosts.get(entry.target);
-        if (rec) rec.visible = entry.isIntersecting;
+        if (rec) {
+          rec.visible = entry.isIntersecting || (isPrimaryContext(rec.context) && isElementLikelyVisible(entry.target));
+        }
       }
       reconcileIdleBudget();
-    }, { threshold: 0.05 });
+    }, { threshold: 0.01 });
   }
 
   function clearHostTimers(rec) {
@@ -1200,20 +2350,22 @@
     if (typeof profileWindowFocused !== "undefined" && !profileWindowFocused) return false;
     if (el.closest(".hidden, [hidden]")) return false;
     if (rec.context === CONTEXTS.MEMBER_LIST) return false;
-    if (rec.visible === false) return false;
+    if (rec.visible === false && !isElementLikelyVisible(el)) return false;
     return true;
   }
 
-  function scheduleSecondary(el, rec) {
+  function scheduleSecondary(el, rec, initial = false) {
     if (!rec.active) return;
+    const min = initial ? BUDGET.firstSecondaryMinMs : BUDGET.secondaryMinMs;
+    const max = initial ? BUDGET.firstSecondaryMaxMs : BUDGET.secondaryMaxMs;
     rec.secondaryTimer = setTimeout(() => {
       if (!rec.active || !canRunIdleEvents(el, rec)) return;
       el.classList.add("is-secondary-event");
       rec.secondaryEndTimer = setTimeout(() => {
         el.classList.remove("is-secondary-event");
-        if (rec.active) scheduleSecondary(el, rec);
+        if (rec.active) scheduleSecondary(el, rec, false);
       }, BUDGET.secondaryDurationMs);
-    }, jitterMs(BUDGET.secondaryMinMs, BUDGET.secondaryMaxMs));
+    }, jitterMs(min, max));
   }
 
   function scheduleRare(el, rec) {
@@ -1229,42 +2381,56 @@
   }
 
   function reconcileIdleBudget() {
-    let activeCount = 0;
-    for (const [el, rec] of [...idleHosts.entries()]) {
-      if (!el.isConnected) {
-        clearHostTimers(rec);
-        idleObserver?.unobserve(el);
-        idleHosts.delete(el);
-        continue;
-      }
-      rec.context = detectElementContext(el);
-      const eligible = canRunIdleEvents(el, rec) && activeCount < BUDGET.maxConcurrentIdleHosts;
-      if (eligible) {
-        activeCount++;
-        if (!rec.active) {
-          rec.active = true;
-          el.dataset.cosmeticIdleActive = "true";
-          scheduleSecondary(el, rec);
-          scheduleRare(el, rec);
+    try {
+      const entries = [...idleHosts.entries()];
+      // Prioriza superfícies primárias (Editor, Perfil Completo, Popout, Self Menu) sobre listas
+      // para que um perfil aberto nunca perca seu slot de budget para itens de fundo.
+      entries.sort(([, a], [, b]) => (isPrimaryContext(b.context) ? 1 : 0) - (isPrimaryContext(a.context) ? 1 : 0));
+
+      let activeCount = 0;
+      for (const [el, rec] of entries) {
+        if (!el.isConnected) {
+          clearHostTimers(rec);
+          idleObserver?.unobserve(el);
+          idleHosts.delete(el);
+          continue;
         }
-      } else if (rec.active) {
-        rec.active = false;
-        delete el.dataset.cosmeticIdleActive;
-        el.classList.remove("is-secondary-event", "is-rare-event");
-        clearHostTimers(rec);
+        rec.context = detectElementContext(el);
+        if (rec.visible === false && isPrimaryContext(rec.context) && isElementLikelyVisible(el)) {
+          rec.visible = true;
+        }
+        const eligible = canRunIdleEvents(el, rec) && activeCount < BUDGET.maxConcurrentIdleHosts;
+        if (eligible) {
+          activeCount++;
+          if (!rec.active) {
+            rec.active = true;
+            el.dataset.cosmeticIdleActive = "true";
+            scheduleSecondary(el, rec, true);
+            scheduleRare(el, rec);
+          }
+        } else if (rec.active) {
+          rec.active = false;
+          delete el.dataset.cosmeticIdleActive;
+          el.classList.remove("is-secondary-event", "is-rare-event");
+          clearHostTimers(rec);
+        }
       }
+    } catch (_) {
+      // Isolamento de erro: falha no scheduler nunca derruba a interface.
     }
   }
 
   function registerIdleHost(el) {
     if (!el) return;
     if (idleHosts.has(el)) {
+      const existing = idleHosts.get(el);
+      existing.visible = isElementLikelyVisible(el);
       reconcileIdleBudget();
       return;
     }
     ensureIdleObserver();
     const rec = {
-      visible: !idleObserver,
+      visible: isElementLikelyVisible(el),
       active: false,
       context: detectElementContext(el),
       secondaryTimer: null,
@@ -1302,87 +2468,175 @@
   }
 
   // ===========================================================================
-  // 6. RENDERERS COMPARTILHADOS
+  // 6. RENDERERS COMPARTILHADOS V5 (arte pintada WebP em camadas + VFX + fallback seguro)
   // ===========================================================================
   function avatarArtLayerHtml(id, depth) {
-    const def = Object.hasOwn(AVATAR_DECORATIONS_V3, id) ? AVATAR_DECORATIONS_V3[id] : null;
-    if (!def || !def[depth]) return "";
-    const modeAttr = def.legacy_mode || (def.animated ? "hover-loop" : "static");
-    return (
-      `<span class="deco-svg-layer avatar-art-${depth} profile-art-${def.theme} cos-v3-deco cos-deco-${def.id}"` +
-      ` data-art-version="${def.version}"` +
-      ` data-animation-mode="${modeAttr}"` +
-      ` data-cosmetic-mode="${def.animation_mode}"` +
-      ` data-cosmetic-id="${def.id}"` +
-      ` style="--avatar-art-bleed:${def.bleed}%" aria-hidden="true">` +
-      `<svg viewBox="0 0 100 100" overflow="visible">${def[depth]}</svg></span>`
-    );
+    try {
+      const resolved = resolveCosmeticId("avatar_decoration", id);
+      const v5 = resolved && Object.hasOwn(V5_AVATAR_ART, resolved) ? V5_AVATAR_ART[resolved] : null;
+      const def = resolved && Object.hasOwn(AVATAR_DECORATIONS_V3, resolved) ? AVATAR_DECORATIONS_V3[resolved] : null;
+      if (v5 && v5[depth]) {
+        const theme = def?.theme || v5.motion || "cosmic";
+        const animMode = def?.animation_mode || ANIMATION_MODES.IDLE_WITH_EVENTS;
+        const modeAttr = def?.legacy_mode || "hover-loop";
+        const blinkImg =
+          depth === "front" && v5.blink
+            ? `<img class="cos-v5-art-img cos-v5-blink-img" src="${v5.blink}" alt="" decoding="async" draggable="false" />`
+            : "";
+        return (
+          `<span class="deco-svg-layer avatar-art-${depth} profile-art-${theme} cos-v5-deco cos-v3-deco cos-deco-${resolved} cos-v5-motion-${v5.motion}"` +
+          ` data-art-version="5"` +
+          ` data-animation-mode="${modeAttr}"` +
+          ` data-cosmetic-mode="${animMode}"` +
+          ` data-cosmetic-id="${resolved}"` +
+          ` style="--avatar-art-bleed:${v5.bleed}%" aria-hidden="true">` +
+          `<img class="cos-v5-art-img cos-v5-art-${depth}" src="${v5[depth]}" alt="" decoding="async" draggable="false" />` +
+          blinkImg +
+          `</span>`
+        );
+      }
+      if (!def || !def[depth]) return "";
+      const modeAttr = def.legacy_mode || (def.animated ? "hover-loop" : "static");
+      return (
+        `<span class="deco-svg-layer avatar-art-${depth} profile-art-${def.theme} cos-v3-deco cos-deco-${def.id}"` +
+        ` data-art-version="${def.version}"` +
+        ` data-animation-mode="${modeAttr}"` +
+        ` data-cosmetic-mode="${def.animation_mode}"` +
+        ` data-cosmetic-id="${def.id}"` +
+        ` style="--avatar-art-bleed:${def.bleed}%" aria-hidden="true">` +
+        `<svg viewBox="0 0 100 100" overflow="visible">${def[depth]}</svg></span>`
+      );
+    } catch (_) {
+      return "";
+    }
   }
 
   function attachAvatarIdle(el, id) {
-    const def = Object.hasOwn(AVATAR_DECORATIONS_V3, id) ? AVATAR_DECORATIONS_V3[id] : null;
-    if (def && def.animation_mode === ANIMATION_MODES.IDLE_WITH_EVENTS) {
-      el.dataset.cosmeticMode = ANIMATION_MODES.IDLE_WITH_EVENTS;
-      registerIdleHost(el);
-    } else {
-      delete el.dataset.cosmeticMode;
-      unregisterIdleHost(el);
+    try {
+      const resolved = resolveCosmeticId("avatar_decoration", id);
+      const v5 = resolved && Object.hasOwn(V5_AVATAR_ART, resolved) ? V5_AVATAR_ART[resolved] : null;
+      const def = resolved && Object.hasOwn(AVATAR_DECORATIONS_V3, resolved) ? AVATAR_DECORATIONS_V3[resolved] : null;
+      const mode = def ? def.animation_mode : (v5 ? ANIMATION_MODES.IDLE_WITH_EVENTS : null);
+      if (resolved && mode === ANIMATION_MODES.IDLE_WITH_EVENTS) {
+        el.dataset.cosmeticMode = ANIMATION_MODES.IDLE_WITH_EVENTS;
+        registerIdleHost(el);
+        if (typeof SanvoCosmeticsVFX !== "undefined") SanvoCosmeticsVFX.attachAvatarVfx(el, resolved);
+      } else {
+        delete el.dataset.cosmeticMode;
+        unregisterIdleHost(el);
+        if (typeof SanvoCosmeticsVFX !== "undefined") SanvoCosmeticsVFX.detachAvatarVfx(el);
+      }
+    } catch (_) {
+      // Fallback estático silencioso
     }
   }
 
   function profileFrameArtHtml(id) {
-    const def = Object.hasOwn(PROFILE_FRAMES_V3, id) ? PROFILE_FRAMES_V3[id] : null;
-    if (!def) return "";
-    const extraSvgClass = id === "cyber-corners" ? " pf-corners" : "";
-    const corner = `<svg class="frame-corner-svg${extraSvgClass}" viewBox="0 0 56 56" aria-hidden="true">${def.cornerSvg}</svg>`;
-    const corners = ["top-left", "top-right", "bottom-left", "bottom-right"]
-      .map((side) => `<span class="frame-art-corner ${side}">${corner}</span>`)
-      .join("");
-    const crest = def.crestSvg
-      ? `<span class="frame-art-crest cos-frame-crest"><svg viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true">${def.crestSvg}</svg></span>`
-      : `<span class="frame-art-crest"></span>`;
-    const bottomSeal = def.bottomSealSvg
-      ? `<span class="frame-art-bottom-seal"><svg viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true">${def.bottomSealSvg}</svg></span>`
-      : "";
-    return (
-      `<span class="profile-frame-art profile-art-${def.theme} cos-v3-frame cos-frame-${def.id}"` +
-      ` data-art-version="${def.version}"` +
-      ` data-animation-mode="${def.legacy_mode || (def.animated ? "loop" : "static")}"` +
-      ` data-cosmetic-mode="${def.animation_mode}"` +
-      ` data-cosmetic-id="${def.id}">` +
-        `<span class="frame-art-under"></span>` +
-        corners +
-        `<span class="frame-art-rail left"></span><span class="frame-art-rail right"></span>` +
-        crest +
-        bottomSeal +
-        `<span class="frame-art-accent"></span>` +
-      `</span>`
-    );
+    try {
+      const resolved = resolveCosmeticId("profile_frame", id);
+      const v5 = resolved && Object.hasOwn(V5_FRAME_ART, resolved) ? V5_FRAME_ART[resolved] : null;
+      const def = resolved && Object.hasOwn(PROFILE_FRAMES_V3, resolved) ? PROFILE_FRAMES_V3[resolved] : null;
+      if (v5) {
+        const animMode = def?.animation_mode || (v5.motion === "static" ? ANIMATION_MODES.STATIC : ANIMATION_MODES.IDLE_WITH_EVENTS);
+        const isStatic = animMode === ANIMATION_MODES.STATIC || v5.motion === "static";
+        const glint = !isStatic ? `<span class="frame-art-glint" aria-hidden="true"></span>` : "";
+        return (
+          `<span class="profile-frame-art profile-art-${v5.theme} cos-v5-frame cos-v3-frame cos-frame-${resolved} cos-v5-frame-motion-${v5.motion}"` +
+          ` data-art-version="5"` +
+          ` data-animation-mode="${isStatic ? "static" : "loop"}"` +
+          ` data-cosmetic-mode="${animMode}"` +
+          ` data-cosmetic-id="${resolved}" aria-hidden="true">` +
+            `<span class="frame-v5-banner-wash"></span>` +
+            `<img class="frame-v5-orn frame-v5-tl" src="${v5.tl}" alt="" decoding="async" draggable="false" />` +
+            `<img class="frame-v5-orn frame-v5-tr" src="${v5.tr}" alt="" decoding="async" draggable="false" />` +
+            `<img class="frame-v5-orn frame-v5-br" src="${v5.br}" alt="" decoding="async" draggable="false" />` +
+            glint +
+          `</span>`
+        );
+      }
+      if (!def) return "";
+      const extraSvgClass = resolved === "cyber-corners" ? " pf-corners" : "";
+      const corner = `<svg class="frame-corner-svg${extraSvgClass}" viewBox="0 0 56 56" aria-hidden="true">${def.cornerSvg}</svg>`;
+      const corners = ["top-left", "top-right", "bottom-left", "bottom-right"]
+        .map((side) => `<span class="frame-art-corner ${side}">${corner}</span>`)
+        .join("");
+      const crest = def.crestSvg
+        ? `<span class="frame-art-crest cos-frame-crest"><svg viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true">${def.crestSvg}</svg></span>`
+        : `<span class="frame-art-crest"></span>`;
+      const bottomSeal = def.bottomSealSvg
+        ? `<span class="frame-art-bottom-seal"><svg viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true">${def.bottomSealSvg}</svg></span>`
+        : "";
+      const glint = def.animated ? `<span class="frame-art-glint" aria-hidden="true"></span>` : "";
+      return (
+        `<span class="profile-frame-art profile-art-${def.theme} cos-v3-frame cos-frame-${def.id}"` +
+        ` data-art-version="${def.version}"` +
+        ` data-animation-mode="${def.legacy_mode || (def.animated ? "loop" : "static")}"` +
+        ` data-cosmetic-mode="${def.animation_mode}"` +
+        ` data-cosmetic-id="${def.id}">` +
+          `<span class="frame-art-under"></span>` +
+          corners +
+          `<span class="frame-art-rail left"></span><span class="frame-art-rail right"></span>` +
+          crest +
+          bottomSeal +
+          glint +
+          `<span class="frame-art-accent"></span>` +
+        `</span>`
+      );
+    } catch (_) {
+      return "";
+    }
   }
 
   function attachFrameIdle(cardEl, id) {
-    const def = Object.hasOwn(PROFILE_FRAMES_V3, id) ? PROFILE_FRAMES_V3[id] : null;
-    if (def && def.animation_mode === ANIMATION_MODES.IDLE_WITH_EVENTS) {
-      registerIdleHost(cardEl);
-    } else if (!cardEl.dataset.cosmeticMode) {
-      unregisterIdleHost(cardEl);
+    try {
+      const resolved = resolveCosmeticId("profile_frame", id);
+      const v5 = resolved && Object.hasOwn(V5_FRAME_ART, resolved) ? V5_FRAME_ART[resolved] : null;
+      const def = resolved && Object.hasOwn(PROFILE_FRAMES_V3, resolved) ? PROFILE_FRAMES_V3[resolved] : null;
+      const mode = def ? def.animation_mode : (v5 && v5.motion !== "static" ? ANIMATION_MODES.IDLE_WITH_EVENTS : null);
+      if (resolved && (mode === ANIMATION_MODES.IDLE_WITH_EVENTS || mode === ANIMATION_MODES.REACTIVE)) {
+        registerIdleHost(cardEl);
+        if (typeof SanvoCosmeticsVFX !== "undefined") SanvoCosmeticsVFX.attachFrameVfx(cardEl, resolved);
+      } else {
+        if (!cardEl.dataset.cosmeticMode) unregisterIdleHost(cardEl);
+        if (typeof SanvoCosmeticsVFX !== "undefined") SanvoCosmeticsVFX.detachFrameVfx(cardEl);
+      }
+    } catch (_) {
+      // Fallback estático silencioso
     }
   }
 
   function profileEffectArtHtml(id) {
-    const def = Object.hasOwn(PROFILE_EFFECTS_V3, id) ? PROFILE_EFFECTS_V3[id] : null;
-    if (!def) return "";
-    return (
-      `<div class="profile-effect-timeline cos-v3-effect profile-art-${def.theme} cos-effect-${def.id}"` +
-      ` data-art-version="${def.version}" data-cosmetic-mode="${def.animation_mode}" data-cosmetic-id="${def.id}" aria-hidden="true">` +
-        `<svg class="profile-effect-art effect-plane-back" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">${def.backSvg}</svg>` +
-        `<svg class="profile-effect-art effect-plane-front" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">${def.frontSvg}</svg>` +
-      `</div>`
-    );
+    try {
+      const resolved = resolveCosmeticId("profile_effect", id);
+      const def = resolved && Object.hasOwn(PROFILE_EFFECTS_V3, resolved) ? PROFILE_EFFECTS_V3[resolved] : null;
+      if (!def) return "";
+      const isV5Flagship = [
+        "star-trail", "petal-drift", "polar-ribbon", "circuit-boot",
+        "embers", "arcane-sigil", "abyssal-tide", "seraphim-fall",
+      ].includes(def.id);
+      if (isV5Flagship) {
+        return (
+          `<div class="profile-effect-timeline cos-v5-effect cos-v3-effect profile-art-${def.theme} cos-effect-${def.id}"` +
+          ` data-art-version="5" data-cosmetic-mode="${def.animation_mode}" data-cosmetic-id="${def.id}" aria-hidden="true">` +
+            `<span class="cos-v5-effect-backdrop"></span>` +
+          `</div>`
+        );
+      }
+      return (
+        `<div class="profile-effect-timeline cos-v3-effect profile-art-${def.theme} cos-effect-${def.id}"` +
+        ` data-art-version="${def.version}" data-cosmetic-mode="${def.animation_mode}" data-cosmetic-id="${def.id}" aria-hidden="true">` +
+          `<svg class="profile-effect-art effect-plane-back" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">${def.backSvg}</svg>` +
+          `<svg class="profile-effect-art effect-plane-front" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">${def.frontSvg}</svg>` +
+        `</div>`
+      );
+    } catch (_) {
+      return "";
+    }
   }
 
   function getProfileEffectDuration(id) {
-    return Object.hasOwn(PROFILE_EFFECTS_V3, id) ? PROFILE_EFFECTS_V3[id].duration : null;
+    const resolved = resolveCosmeticId("profile_effect", id);
+    return resolved && Object.hasOwn(PROFILE_EFFECTS_V3, resolved) ? PROFILE_EFFECTS_V3[resolved].duration : null;
   }
 
   // Timeline multi-estágio: init -> entrance -> main -> climax -> dissipate -> cleanup
@@ -1394,6 +2648,7 @@
       for (const t of timers) clearTimeout(t);
       activeEffectTimers.delete(layer);
     }
+    if (typeof SanvoCosmeticsVFX !== "undefined") SanvoCosmeticsVFX.stopEffectVfx(layer);
     if (layer) {
       layer.classList.remove("ef-stage-init", "ef-stage-entrance", "ef-stage-main", "ef-stage-climax", "ef-stage-dissipate");
       delete layer.dataset.effectStage;
@@ -1401,52 +2656,66 @@
   }
 
   function startEffectTimeline(layer, id) {
-    clearEffectTimeline(layer);
-    const def = Object.hasOwn(PROFILE_EFFECTS_V3, id) ? PROFILE_EFFECTS_V3[id] : null;
-    if (!def || !layer) return null;
-    const setStage = (stage) => {
-      layer.classList.remove("ef-stage-init", "ef-stage-entrance", "ef-stage-main", "ef-stage-climax", "ef-stage-dissipate");
-      layer.classList.add(`ef-stage-${stage}`);
-      layer.dataset.effectStage = stage;
-    };
-    setStage("init");
-    const timers = [
-      setTimeout(() => setStage("entrance"), def.stages.entrance),
-      setTimeout(() => setStage("main"), def.stages.main),
-      setTimeout(() => setStage("climax"), def.stages.climax),
-      setTimeout(() => setStage("dissipate"), def.stages.dissipate),
-    ];
-    activeEffectTimers.set(layer, timers);
-    return def.duration;
+    try {
+      clearEffectTimeline(layer);
+      const resolved = resolveCosmeticId("profile_effect", id);
+      const def = resolved && Object.hasOwn(PROFILE_EFFECTS_V3, resolved) ? PROFILE_EFFECTS_V3[resolved] : null;
+      if (!def || !layer) return null;
+      const setStage = (stage) => {
+        layer.classList.remove("ef-stage-init", "ef-stage-entrance", "ef-stage-main", "ef-stage-climax", "ef-stage-dissipate");
+        layer.classList.add(`ef-stage-${stage}`);
+        layer.dataset.effectStage = stage;
+      };
+      setStage("init");
+      if (typeof SanvoCosmeticsVFX !== "undefined") {
+        SanvoCosmeticsVFX.startEffectVfx(layer, def.id, def.duration);
+      }
+      const timers = [
+        setTimeout(() => setStage("entrance"), def.stages.entrance),
+        setTimeout(() => setStage("main"), def.stages.main),
+        setTimeout(() => setStage("climax"), def.stages.climax),
+        setTimeout(() => setStage("dissipate"), def.stages.dissipate),
+      ];
+      activeEffectTimers.set(layer, timers);
+      return def.duration;
+    } catch (_) {
+      clearEffectTimeline(layer);
+      return null;
+    }
   }
 
   // NameplateRenderer: injeta camada gráfica SVG dedicada sem quebrar texto/filhos existentes
   function renderNameplateArt(el, id) {
-    if (!el) return;
-    const prevLayer = el.querySelector(":scope > .np-art-layer");
-    const def = id && Object.hasOwn(NAMEPLATES_V3, id) ? NAMEPLATES_V3[id] : null;
-    if (!def) {
+    try {
+      if (!el) return;
+      const prevLayer = el.querySelector(":scope > .np-art-layer");
+      const resolved = resolveCosmeticId("nameplate", id);
+      const def = resolved && Object.hasOwn(NAMEPLATES_V3, resolved) ? NAMEPLATES_V3[resolved] : null;
+      if (!def) {
+        if (prevLayer) prevLayer.remove();
+        el.classList.remove("has-np-art");
+        if (el.dataset.npArtId) delete el.dataset.npArtId;
+        unregisterIdleHost(el);
+        return;
+      }
+      if (el.dataset.npArtId === def.id && prevLayer) return;
       if (prevLayer) prevLayer.remove();
-      el.classList.remove("has-np-art");
-      if (el.dataset.npArtId) delete el.dataset.npArtId;
-      unregisterIdleHost(el);
-      return;
-    }
-    if (el.dataset.npArtId === def.id && prevLayer) return;
-    if (prevLayer) prevLayer.remove();
-    el.dataset.npArtId = def.id;
-    el.classList.add("has-np-art");
-    const layer = document.createElement("span");
-    layer.className = `np-art-layer cos-v3-nameplate np-art-${def.id}`;
-    layer.dataset.artVersion = String(def.version);
-    layer.dataset.cosmeticMode = def.animation_mode;
-    layer.setAttribute("aria-hidden", "true");
-    layer.innerHTML = `<svg viewBox="0 0 280 52" preserveAspectRatio="xMaxYMid slice">${def.svg}</svg>`;
-    el.prepend(layer);
-    if (def.animation_mode === ANIMATION_MODES.IDLE_WITH_EVENTS) {
-      registerIdleHost(el);
-    } else {
-      unregisterIdleHost(el);
+      el.dataset.npArtId = def.id;
+      el.classList.add("has-np-art");
+      const layer = document.createElement("span");
+      layer.className = `np-art-layer cos-v3-nameplate np-art-${def.id}`;
+      layer.dataset.artVersion = String(def.version);
+      layer.dataset.cosmeticMode = def.animation_mode;
+      layer.setAttribute("aria-hidden", "true");
+      layer.innerHTML = `<svg viewBox="0 0 280 52" preserveAspectRatio="xMaxYMid slice">${def.svg}</svg>`;
+      el.prepend(layer);
+      if (def.animation_mode === ANIMATION_MODES.IDLE_WITH_EVENTS) {
+        registerIdleHost(el);
+      } else {
+        unregisterIdleHost(el);
+      }
+    } catch (_) {
+      // Fallback limpo: texto da linha permanece 100% legível
     }
   }
 
@@ -1463,12 +2732,18 @@
     CONTEXTS,
     ANIMATION_MODES,
     BUDGET,
+    COSMETIC_ANIMATION_MAP,
+    LEGACY_COSMETIC_ALIASES,
+    V5_AVATAR_ART,
+    V5_FRAME_ART,
     registry: {
       avatar_decorations: AVATAR_DECORATIONS_V3,
       frames: PROFILE_FRAMES_V3,
       profile_effects: PROFILE_EFFECTS_V3,
       nameplates: NAMEPLATES_V3,
     },
+    resolveCosmeticId,
+    getAnimationMode,
     normalizeContext,
     detectElementContext,
     isReducedMotionActive,

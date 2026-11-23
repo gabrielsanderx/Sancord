@@ -792,6 +792,10 @@
     menuEl.classList.add("is-open");
     document.getElementById("self-profile-trigger")?.setAttribute("aria-expanded", "true");
     positionSelfProfileMenu();
+    if (typeof queueProfileMotion === "function") queueProfileMotion();
+    if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.reconcileIdleBudget === "function") {
+      SancordCosmetics.reconcileIdleBudget();
+    }
     const firstItem = menuEl.querySelector('[role="menuitem"]');
     firstItem?.focus({ preventScroll: true });
     return true;

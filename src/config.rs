@@ -33,6 +33,9 @@ pub struct Config {
     pub maintenance_mode: bool,
     /// Habilita consulta externa de metadados de jogos (desligado em testes unitários).
     pub game_api_enabled: bool,
+    /// Só entra no app quem confirmou o e-mail com o código enviado. Ligado em produção;
+    /// nos testes antigos fica desligado (eles não passam pela confirmação).
+    pub require_verified_email: bool,
 }
 
 pub const DEFAULT_STUN_URLS: &[&str] = &[
@@ -100,6 +103,7 @@ impl Config {
             legacy_hub: false,
             maintenance_mode: env_var_compat("SANVO_MAINTENANCE_MODE", "SANCORD_MAINTENANCE_MODE").as_deref() == Some("1"),
             game_api_enabled: env_var_compat("SANVO_DISABLE_GAME_API", "SANCORD_DISABLE_GAME_API").as_deref() != Some("1"),
+            require_verified_email: true,
         }
     }
 
@@ -115,7 +119,14 @@ impl Config {
             legacy_hub: true,
             maintenance_mode: false,
             game_api_enabled: false,
+            require_verified_email: false,
         }
+    }
+
+    /// Configuração de teste com a confirmação de e-mail obrigatória (como em produção).
+    #[cfg(test)]
+    pub fn for_tests_with_email_verification(data_dir: PathBuf) -> Self {
+        Self { require_verified_email: true, ..Self::for_tests(data_dir) }
     }
 
     /// Configuração de teste como em produção (sem hub público).

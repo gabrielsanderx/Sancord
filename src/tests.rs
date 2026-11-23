@@ -67,6 +67,8 @@ mod voice_chat;
 mod composer;
 #[path = "hub_removal_tests.rs"]
 mod hub_removal;
+#[path = "email_tests.rs"]
+mod email;
 
 struct TestServer {
     addr: std::net::SocketAddr,
@@ -138,7 +140,8 @@ async fn wait_for(ws: &mut Ws, kind: &str) -> Value {
 }
 
 async fn register(srv: &TestServer, name: &str) -> String {
-    let (status, body) = post(srv, "/api/register", json!({"username": name, "password": "senha-segura-1"})).await;
+    let email = format!("{}@sanvo.test", name.to_lowercase().replace(|c: char| !c.is_ascii_alphanumeric(), "_"));
+    let (status, body) = post(srv, "/api/register", json!({"username": name, "email": email, "password": "senha-segura-1"})).await;
     assert_eq!(status, 200, "cadastro falhou: {body}");
     body["token"].as_str().unwrap().to_string()
 }
@@ -172,7 +175,7 @@ async fn auth_http_rules() {
     assert_eq!(b["ok"], false);
 
     let token = register(&srv, "Ana").await;
-    let (s, _) = post(&srv, "/api/register", json!({"username": "ana", "password": "senha-segura-1"})).await;
+    let (s, _) = post(&srv, "/api/register", json!({"username": "ana", "email": "outra-ana@sanvo.test", "password": "senha-segura-1"})).await;
     assert_eq!(s, 409, "nome duplicado (sem diferenciar maiúsculas)");
 
     let (s_missing, missing) = post(&srv, "/api/login", json!({"username": "Inexistente", "password": "errada-123"})).await;

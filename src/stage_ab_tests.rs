@@ -48,8 +48,9 @@ async fn email_and_single_use_recovery_code_flow() {
     let token = register(&srv, "Recuperavel").await;
     let mut ws = connect(&srv, &token).await;
     wait_for(&mut ws, "Welcome").await;
+    // O cadastro já exige e-mail (o helper usa `<nome>@sanvo.test`).
     let initial_email = wait_for(&mut ws, "AccountEmailUpdated").await;
-    assert!(initial_email["email"].is_null());
+    assert_eq!(initial_email["email"], "recuperavel@sanvo.test");
 
     // Atualiza e-mail com senha correta.
     send(

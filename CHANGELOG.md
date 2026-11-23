@@ -1,5 +1,24 @@
 # Histórico de versões
 
+## 0.2.9
+
+### E-mail obrigatório e confirmado
+- **Cadastro com e-mail:** criar conta pede nome de usuário, e-mail e senha. O e-mail é único entre as contas (sem diferenciar maiúsculas) e é confirmado com um código de 6 dígitos enviado à caixa de entrada (válido por 15 minutos, 5 tentativas, reenvio após 60 s).
+- **Login por e-mail ou nome de usuário:** o mesmo campo aceita os dois; a recuperação de senha também.
+- **Contas antigas:** entram normalmente uma última vez e cadastram e confirmam o e-mail antes de continuar. O servidor só libera o app depois da confirmação.
+- **Configurações → E-mail:** o e-mail não pode ser removido; trocar exige confirmar o novo endereço com código (o atual vale até lá).
+- **Envio por SMTP:** configurado em `data/smtp.json` no servidor (modelo em `smtp.example.json`). Sem configuração, os códigos aparecem só no log do servidor.
+
+### Cosméticos de perfil pintados (V5) e motor vivo
+- Nova biblioteca de cosméticos pintados em alta resolução: decorações de avatar em camadas, molduras, efeitos de perfil e placas em coleções coesas, com animações orgânicas que respeitam o orçamento de movimento e o "Reduzir movimento".
+- Animações dos cosméticos voltam a funcionar mesmo com as animações do Windows desligadas (opção "Sincronizar com o computador" em Acessibilidade).
+
+### Correções
+- O app não abre mais um túnel público novo a cada vez que liga o servidor; só cria um se não houver outro rodando.
+- Scripts de inicialização usam `SanvoServer.exe` (com o nome antigo como reserva).
+- Mensagens do sistema e o bot aparecem como **Sanvo** / **Sanvo Bot**, inclusive as mensagens antigas.
+- Seletor de jogos do mural não sai mais da tela; os botões Ligar e Vídeo das DMs voltaram a funcionar; o aviso "Atualização concluída" não se repete a cada abertura.
+
 ## 0.2.8
 
 ### Sancord agora é Sanvo

@@ -15,6 +15,8 @@ pub mod community;
 pub mod config;
 pub mod db;
 pub mod discovery;
+pub mod email_verification;
+pub mod mailer;
 pub mod games;
 pub mod http;
 pub mod integrations;
@@ -78,6 +80,8 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/login", post(http::login_handler))
         .route("/api/recover-password", post(http::recover_password_handler))
         .route("/api/session", post(http::session_handler))
+        .route("/api/email/start", post(email_verification::start_handler))
+        .route("/api/email/verify", post(email_verification::verify_handler))
         .route("/api/logout", post(http::logout_handler))
         .route("/api/health", get(http::health_handler))
         .route("/api/public-url", get(http::public_url_handler))

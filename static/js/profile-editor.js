@@ -264,8 +264,13 @@ function renderPeList(mode) {
   if (!host) return;
   const kind = mode === "effect" ? "profile_effect" : "nameplate";
   const field = mode === "effect" ? "profile_effect" : "nameplate_style";
-  const list = (mode === "effect" ? PROFILE_EFFECTS : NAMEPLATES)
+  const baseList = (mode === "effect" ? PROFILE_EFFECTS : NAMEPLATES)
     .filter((item) => !item.requiresCatalog || cosmeticInfo(kind, item.id));
+  const seenIds = new Set(baseList.map((item) => item.id));
+  const catalogExtras = (state.cosmetics?.catalog || [])
+    .filter((item) => item.kind === kind && !seenIds.has(item.id))
+    .map((item) => ({ id: item.id, name: item.name, desc: item.description || "" }));
+  const list = [...baseList, ...catalogExtras];
   const active = profileDraft[field] || "none";
   const user = draftPreviewUser();
   const displayName = user.display_name || user.username || "Você";
@@ -805,6 +810,10 @@ function openPeContext() {
   peContextPopover?.classList.remove("hidden");
   peContextToggle?.setAttribute("aria-expanded", "true");
   renderProfileContextPreview();
+  if (typeof queueProfileMotion === "function") queueProfileMotion();
+  if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.reconcileIdleBudget === "function") {
+    SancordCosmetics.reconcileIdleBudget();
+  }
 }
 
 function closePeContext() {
@@ -930,6 +939,10 @@ function onProfileEditorShown() {
   }
   onBoardEditorChanged();
   peAfterRefresh();
+  if (typeof queueProfileMotion === "function") queueProfileMotion();
+  if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.reconcileIdleBudget === "function") {
+    SancordCosmetics.reconcileIdleBudget();
+  }
 };
 
 if (typeof SancordActivity !== "undefined" && typeof SancordActivity.subscribe === "function") {

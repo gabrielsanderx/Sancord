@@ -182,6 +182,7 @@ const SancordGamePicker = (() => {
   }
 
   function apiBaseUrl(path) {
+    if (typeof SancordNet !== "undefined" && typeof SancordNet.url === "function") return SancordNet.url(path);
     if (typeof apiUrl === "function") return apiUrl(path);
     return path;
   }
@@ -279,6 +280,10 @@ const SancordGamePicker = (() => {
     if (!clean) return fetchPopularGames(signal);
     try {
       const res = await fetch(apiBaseUrl(`/api/games/search?q=${encodeURIComponent(clean)}&limit=18`), { signal });
+      if (res.status === 404) {
+        const local = searchLocalGames(clean, 12);
+        return { games: local, degraded: true, error: false };
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list = Array.isArray(data?.games) ? data.games.map(sanitizeGame).filter(Boolean) : [];
@@ -443,7 +448,7 @@ const SancordGamePicker = (() => {
       let searchState = { loading: true, error: false, offline: false, results: [] };
 
       const overlay = document.createElement("div");
-      overlay.className = "sancord-dialog-backdrop gp-backdrop";
+      overlay.className = "modal-backdrop sancord-dialog-backdrop gp-backdrop";
       overlay.dataset.gamePicker = "1";
       overlay.innerHTML = `
         <div class="sancord-dialog gp-dialog" role="dialog" aria-modal="true" aria-labelledby="gp-title">
@@ -932,7 +937,7 @@ const SancordGamePicker = (() => {
     const note = widget.description || widget.note || "";
 
     const overlay = document.createElement("div");
-    overlay.className = "sancord-dialog-backdrop gp-backdrop";
+    overlay.className = "modal-backdrop sancord-dialog-backdrop gp-backdrop";
     overlay.dataset.gameDetails = "1";
 
     const dlg = document.createElement("div");

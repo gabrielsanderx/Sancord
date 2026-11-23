@@ -1084,8 +1084,28 @@ chatMessagesEl?.addEventListener("scroll", () => {
   if (chatMessagesEl.scrollTop < 120) requestOlderMessages();
 }, { passive: true });
 
+// O projeto virou Sanvo: mensagens de sistema antigas (gravadas como "Sancord" / "Sancord Bot")
+// aparecem com o nome novo em todo lugar, sem reescrever o histórico salvo.
+const LEGACY_SYSTEM_AUTHORS = { Sancord: "Sanvo", "Sancord Bot": "Sanvo Bot" };
+function renameLegacySystemAuthors(value, depth = 0) {
+  if (!value || typeof value !== "object" || depth > 8) return;
+  if (Array.isArray(value)) {
+    for (const item of value) renameLegacySystemAuthors(item, depth + 1);
+    return;
+  }
+  if (Object.hasOwn(LEGACY_SYSTEM_AUTHORS, value.author_name) &&
+      (value.author_id === "system" || value.author_kind === "System" || value.author_kind === "system")) {
+    value.author_name = LEGACY_SYSTEM_AUTHORS[value.author_name];
+  }
+  for (const key in value) {
+    const child = value[key];
+    if (child && typeof child === "object") renameLegacySystemAuthors(child, depth + 1);
+  }
+}
+
 async function handleServerMessage(msg) {
   const { type, payload, cached = false } = msg;
+  renameLegacySystemAuthors(payload);
 
   switch (type) {
     case "AuthFailed": {
@@ -1437,6 +1457,10 @@ async function handleServerMessage(msg) {
       if (action === "cosmetic_collection") {
         collectionStatus.textContent = fbMsg;
         if (!ok) showErrorToast(fbMsg);
+        break;
+      }
+      if (action === "update_email_code" && ok) {
+        promptAccountEmailCode(fbMsg);
         break;
       }
       showUiToast(fbMsg);
@@ -2246,9 +2270,10 @@ async function createLocalAudioStream(forceRebuild = false) {
   const nsMode = typeof currentNoiseSuppressionMode === "function"
     ? currentNoiseSuppressionMode()
     : (state.audioSettings?.noiseSuppressionMode || "auto");
+  const AudioCtxCtor = typeof window !== "undefined" ? (window.AudioContext || window.webkitAudioContext) : null;
   const supportsWorklet = typeof AudioWorkletNode !== "undefined" &&
-    typeof (window.AudioContext || window.webkitAudioContext) !== "undefined" &&
-    Boolean((window.AudioContext || window.webkitAudioContext).prototype?.audioWorklet);
+    typeof AudioCtxCtor === "function" &&
+    Boolean(AudioCtxCtor.prototype && "audioWorklet" in AudioCtxCtor.prototype);
 
   // Evita supressão dupla: quando o AudioWorklet do Sancord está ativo, desliga o NS do browser
   // e mantém AEC e AGC independentes conforme configuração do usuário.
@@ -3907,77 +3932,39 @@ const STATUS_LABELS = {
 
 const AVATAR_DECORATIONS = [
   { id: "none", name: "Nenhuma", kind: "static" },
-  { id: "flame-violet", name: "Chama Violeta", kind: "animated" },
-  { id: "cat-gamer", name: "Orelhas Gamer RGB", kind: "animated" },
-  { id: "angel-wings", name: "Asas Celestiais", kind: "animated" },
-  { id: "devil-horns", name: "Chifres Infernais", kind: "animated" },
-  { id: "cyber-cyan", name: "Visor Cyberpunk", kind: "animated" },
-  { id: "sakura-glow", name: "Pétalas Sakura", kind: "animated" },
-  { id: "golden-halo", name: "Coroa Estelar", kind: "animated" },
-  { id: "crimson-vortex", name: "Vórtice Escarlate", kind: "animated" },
-  { id: "rainbow-prism", name: "Prisma RGB", kind: "animated" },
-  { id: "galaxy-portal", name: "Portal Galáctico", kind: "animated" },
-  { id: "electric-surge", name: "Descarga Elétrica", kind: "animated" },
-  { id: "dragon-fire", name: "Chamas de Dragão", kind: "animated" },
-  { id: "frost-crown", name: "Cristais de Gelo", kind: "animated" },
-  { id: "heart-pixel", name: "Corações Neon", kind: "animated" },
-  { id: "neon-glitch", name: "Anel Duplo Glitch", kind: "animated" },
-  { id: "blood-moon", name: "Lua Sangrenta", kind: "animated" },
-  { id: "static-royal-crown", name: "Coroa Imperial", kind: "static" },
-  { id: "static-gold", name: "Louros Dourados", kind: "static" },
-  { id: "static-cyber-hud", name: "Mira Tática HUD", kind: "static" },
-  { id: "static-crimson", name: "Rubi Gótico", kind: "static" },
-  { id: "static-diamond", name: "Diamante Glacial", kind: "static" },
-  { id: "static-blurple", name: "Brasão Sanvo", kind: "static" },
-  { id: "static-emerald", name: "Vinha Esmeralda", kind: "static" },
-  { id: "static-angel", name: "Pérola Celestial", kind: "static" },
+  { id: "galaxy-portal", name: "Astrolábio Celestial", kind: "animated" },
+  { id: "sakura-glow", name: "Ramo de Hanami", kind: "animated" },
+  { id: "frost-crown", name: "Dragão Glacial", kind: "animated" },
+  { id: "cat-gamer", name: "Kitsune-Neko Cyber", kind: "animated" },
+  { id: "dragon-fire", name: "Chamas de Drakon", kind: "animated" },
+  { id: "blood-moon", name: "Oráculo do Eclipse", kind: "animated" },
+  { id: "ocean-bubbles", name: "Coroa das Profundezas", kind: "animated" },
+  { id: "angel-wings", name: "Asas de Serafim", kind: "animated" },
+  { id: "eclipse-sovereign", name: "Coroa do Soberano", kind: "animated" },
 ];
 
 const PROFILE_EFFECTS = [
   { id: "none", name: "Nenhum", desc: "Cartão limpo sem efeito sobreposto" },
-  { id: "embers", name: "Brasas da Forja", desc: "Calor ascendente e faíscas incandescentes em dois planos" },
-  { id: "sparkles", name: "Poeira Estelar", desc: "Estrelas cintilantes suaves" },
-  { id: "sakura", name: "Chuva de Sakura", desc: "Pétalas de cerejeira caindo" },
-  { id: "matrix", name: "Código Digital", desc: "Grade digital em movimento" },
-  { id: "lightning", name: "Tempestade Arcana", desc: "Relâmpagos pulsantes no cartão" },
-  { id: "snow", name: "Neve Ártica", desc: "Flocos suaves flutuando" },
-  { id: "confetti", name: "Festa Confete", desc: "Chuva colorida comemorativa" },
-  { id: "cyber", name: "Scan Holográfico", desc: "Linhas holográficas futuristas" },
-  { id: "hellfire", name: "Inferno Rubro", desc: "Brilho incandescente na base" },
-  { id: "galaxy", name: "Nebulosa Rotativa", desc: "Luz cósmica girando suave" },
-  { id: "glitch", name: "Sinal VHS", desc: "Distorção elétrica retrô" },
-  { id: "aurora", name: "Aurora Boreal", desc: "Ondas luminosas suaves" },
-  { id: "core-signal", name: "Inicialização Sanvo", desc: "Varredura laser, traços geométricos e pulso central em camadas", requiresCatalog: true },
-  { id: "star-trail", name: "Travessia Cósmica", desc: "Constelações, cometas duplos e supernova suave", requiresCatalog: true },
-  { id: "circuit-boot", name: "Varredura Digital HUD", desc: "Grade tática, rotas de circuito e travamento nos cantos", requiresCatalog: true },
-  { id: "petal-drift", name: "Vento de Cerejeira", desc: "Pétalas em dois planos de profundidade trazidas pelo vento", requiresCatalog: true },
-  { id: "polar-ribbon", name: "Véu da Aurora", desc: "Cortinas de aurora polar e estrelas de gelo", requiresCatalog: true },
-  { id: "pixel-assembly", name: "Montagem de Pixels", desc: "Pixels se agrupam e desaparecem", requiresCatalog: true },
-  { id: "gravity-well", name: "Poço de Luz", desc: "Pontos de luz se recolhem em uma órbita", requiresCatalog: true },
+  { id: "star-trail", name: "Eclipse da Nebulosa", desc: "Cometas pintados, nebulosa profunda e constelação em 4 atos" },
+  { id: "petal-drift", name: "Rajada de Cerejeira", desc: "Brisa lateral com pétalas e flor de sakura pintadas em parallax" },
+  { id: "polar-ribbon", name: "Tempestade Polar", desc: "Aurora boreal e cristais de gelo lapidados varrendo o topo" },
+  { id: "circuit-boot", name: "Inicialização Holográfica", desc: "Varredura cyber com prismas holográficos projetados dos cantos" },
+  { id: "embers", name: "Erupção de Brasas", desc: "Labaredas pintadas e estilhaços de magma subindo em 4 atos" },
+  { id: "arcane-sigil", name: "Selo do Eclipse", desc: "Mandala arcana dourada e runas ametista desabrochando no topo" },
+  { id: "abyssal-tide", name: "Maré Bioluminescente", desc: "Águas-vivas translúcidas e bolhas peroladas em correnteza turquesa" },
+  { id: "seraphim-fall", name: "Chuva de Plumas", desc: "Feixe solar diagonal com plumas marfim-ouro planando suavemente" },
 ];
 
 const NAMEPLATES = [
   { id: "none", name: "Sem placa", desc: "Fundo padrão da lista" },
-  { id: "crimson", name: "Carmesim Sombrio", desc: "Gradiente vermelho escuro" },
-  { id: "nebula", name: "Nebulosa Roxa", desc: "Brilho espacial roxo e azul" },
-  { id: "aurora", name: "Aurora Ciano", desc: "Faixa verde e azul suave" },
-  { id: "sakura", name: "Sakura Suave", desc: "Tons rosados vibrantes" },
-  { id: "gold", name: "Ouro Real", desc: "Faixa dourada elegante" },
-  { id: "cyber", name: "Grade Cyber", desc: "Ciano elétrico com azul neon" },
-  { id: "hellfire", name: "Chamas Rubras", desc: "Laranja e vermelho intenso" },
-  { id: "frost", name: "Gelo Ártico", desc: "Brilho azul cristalino" },
-  { id: "void", name: "Vazio Cósmico", desc: "Índigo noturno profundo" },
-  { id: "toxic", name: "Tóxico Neon", desc: "Lima e esmeralda vibrante" },
-  { id: "synthwave", name: "Synthwave Retrô", desc: "Magenta e pôr do sol" },
-  { id: "core-stripe", desc: "Facetas cristalinas Sanvo Core e telemetria lateral", requiresCatalog: true },
-  { id: "circuit-weave", desc: "Trilhas de circuito PCB e núcleo ciano à direita", requiresCatalog: true },
-  { id: "starlit-silt", desc: "Crescente astral e constelação cintilante", requiresCatalog: true },
-  { id: "twilight-garden", desc: "Ramo ilustrado de cerejeira com flores em balanço suave", requiresCatalog: true },
-  { id: "gold-leaf", desc: "Brasão real em ouro gravado com diamante lapidado", requiresCatalog: true },
-  { id: "retro-horizon", desc: "Linhas de horizonte em cobre e rosa", requiresCatalog: true },
-  { id: "frost-vein", desc: "Cristais polares facetados com brilho glacial", requiresCatalog: true },
-  { id: "ember-line", desc: "Veios de obsidiana e brasas ascendentes", requiresCatalog: true },
-  { id: "tide-glass", desc: "Ondas abissais em vidro marinho e bolhas nacaradas", requiresCatalog: true },
+  { id: "starlit-silt", name: "Constelação Astralium", desc: "Crescente astral e constelação cintilante", requiresCatalog: true },
+  { id: "twilight-garden", name: "Ramo de Hanami", desc: "Ramo ilustrado de cerejeira com flores em balanço suave", requiresCatalog: true },
+  { id: "frost-vein", name: "Cristais de Glacium", desc: "Cristais polares facetados com brilho glacial", requiresCatalog: true },
+  { id: "core-stripe", name: "Pulso Synth-Neko", desc: "Facetas holográficas e telemetria lateral", requiresCatalog: true },
+  { id: "ember-line", name: "Veio de Brasa", desc: "Obsidiana vulcânica com filetes de magma dourado", requiresCatalog: true },
+  { id: "arcane-velvet", name: "Veludo Arcano", desc: "Veludo ametista com selo rúnico em ouro antigo", requiresCatalog: true },
+  { id: "tide-glass", name: "Vidro de Maré", desc: "Vidro oceânico bioluminescente com reflexo turquesa", requiresCatalog: true },
+  { id: "eclipse-gold", name: "Ouro de Serafim", desc: "Filigrana dourada catedral com luz marfim", requiresCatalog: true },
 ];
 
 const CLASSIC_NAME_STYLES = ["gta", "neon", "chrome", "gradient", "fire", "ice", "sakura", "retro", "gothic", "toxic", "royal"];
@@ -4031,8 +4018,8 @@ function getDecoSvgHtml(decoId) {
     case "angel-wings":
       return wrapSvgDeco(`
         <ellipse cx="50" cy="11" rx="22" ry="5" fill="none" stroke="#fde68a" stroke-width="3" class="deco-pulse-soft"/>
-        <path d="M12 42 C2 32 4 20 14 26 C8 34 10 40 16 45 C6 45 4 54 14 57 C10 61 13 67 20 65" fill="none" stroke="#f8fafc" stroke-width="2.8" stroke-linecap="round"/>
-        <path d="M88 42 C98 32 96 20 86 26 C92 34 90 40 84 45 C94 45 96 54 86 57 C90 61 87 67 80 65" fill="none" stroke="#f8fafc" stroke-width="2.8" stroke-linecap="round"/>
+        <path class="cos-wing-sway-l" d="M12 42 C2 32 4 20 14 26 C8 34 10 40 16 45 C6 45 4 54 14 57 C10 61 13 67 20 65" fill="none" stroke="#f8fafc" stroke-width="2.8" stroke-linecap="round"/>
+        <path class="cos-wing-sway-r" d="M88 42 C98 32 96 20 86 26 C92 34 90 40 84 45 C94 45 96 54 86 57 C90 61 87 67 80 65" fill="none" stroke="#f8fafc" stroke-width="2.8" stroke-linecap="round"/>
         <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(254,240,138,0.65)" stroke-width="2"/>
       `);
     case "devil-horns":
@@ -4212,16 +4199,25 @@ function getNameStyleClass(styleId) {
 }
 
 function getNameplateClass(npId) {
-  return npId !== "none" && NAMEPLATES.some(item => item.id === npId) ? `nameplate-${npId}` : "";
+  if (!npId || npId === "none") return "";
+  const resolved = typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.resolveCosmeticId === "function"
+    ? SancordCosmetics.resolveCosmeticId("nameplate", npId)
+    : npId;
+  return (NAMEPLATES.some(item => item.id === npId) || (resolved && NAMEPLATES.some(item => item.id === resolved)))
+    ? `nameplate-${resolved || npId}`
+    : "";
 }
 
 function applyNameplateChip(el, id) {
   if (!el) return;
-  if (el.dataset.plateClass) el.classList.remove(el.dataset.plateClass);
   const cls = getNameplateClass(id);
-  el.classList.toggle("profile-nameplate-chip", Boolean(cls));
-  el.dataset.plateClass = cls;
-  if (cls) el.classList.add(cls);
+  const prevCls = el.dataset.plateClass || "";
+  if (prevCls !== cls) {
+    if (prevCls) el.classList.remove(prevCls);
+    el.classList.toggle("profile-nameplate-chip", Boolean(cls));
+    el.dataset.plateClass = cls;
+    if (cls) el.classList.add(cls);
+  }
   if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.renderNameplateArt === "function") {
     SancordCosmetics.renderNameplateArt(el, cls ? id : null);
   }
@@ -4261,17 +4257,21 @@ const styledNameSources = new WeakMap();
 function applyNameStyleToEl(el, userObj, fallbackColor) {
   if (!el) return;
   styledNameSources.set(el, { userObj, fallbackColor });
-  Array.from(el.classList)
-    .filter((c) => c.startsWith("name-style-"))
-    .forEach((c) => el.classList.remove(c));
   el.classList.add("styled-name");
   const enabled = state.audioSettings.showProfileNameStyles !== false || el.closest("#settings-tab-profile");
   const parts = profileNameParts(enabled ? userObj?.name_style : "default");
   const st = parts.effect === "default" ? parts.font : parts.effect;
   const cls = getNameStyleClass(st);
-  if (cls) el.classList.add(cls);
-  if (parts.font !== "default" && parts.effect !== "default") el.dataset.nameFont = parts.font;
-  else delete el.dataset.nameFont;
+  // Idempotente: só troca classes que realmente mudaram para nunca reiniciar animações de material.
+  for (const existing of Array.from(el.classList)) {
+    if (existing.startsWith("name-style-") && existing !== cls) el.classList.remove(existing);
+  }
+  if (cls && !el.classList.contains(cls)) el.classList.add(cls);
+  if (parts.font !== "default" && parts.effect !== "default") {
+    if (el.dataset.nameFont !== parts.font) el.dataset.nameFont = parts.font;
+  } else if ("nameFont" in el.dataset) {
+    delete el.dataset.nameFont;
+  }
   const roleMode = state.audioSettings.roleColorsMode || "name";
   const rawRoleColor = themedNameColor(fallbackColor);
   const baseColor = roleMode === "name" ? rawRoleColor : "";
@@ -4340,11 +4340,11 @@ function updateSelfProfileUI() {
 
   const bar = document.getElementById("self-user-profile-bar");
   if (bar) {
-    Array.from(bar.classList)
-      .filter((c) => c.startsWith("nameplate-"))
-      .forEach((c) => bar.classList.remove(c));
     const npCls = getNameplateClass(state.selfUser.nameplate_style);
-    if (npCls) bar.classList.add(npCls);
+    for (const c of Array.from(bar.classList)) {
+      if (c.startsWith("nameplate-") && c !== npCls) bar.classList.remove(c);
+    }
+    if (npCls && !bar.classList.contains(npCls)) bar.classList.add(npCls);
     if (typeof SancordCosmetics !== "undefined") SancordCosmetics.renderNameplateArt(bar, npCls ? state.selfUser.nameplate_style : null);
   }
 
@@ -6002,6 +6002,10 @@ function openMemberProfilePopover(userId, fallbackMsg = null, { global = false }
   if (profileActivityCardList) profileActivityCardList.textContent = "Carregando atividade…";
   switchProfileModalTab("activity");
   profilePopoverModal.classList.remove("hidden");
+  if (typeof queueProfileMotion === "function") queueProfileMotion();
+  if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.reconcileIdleBudget === "function") {
+    SancordCosmetics.reconcileIdleBudget();
+  }
   playVisitedProfileEffectOnce();
   // Perfil completo (amigos/servidores em comum, data de entrada) vem do servidor.
   requestFullProfile(name);
@@ -8551,19 +8555,50 @@ function renderAccountSessionsUI() {
 document.getElementById("account-edit-email-btn")?.addEventListener("click", async () => {
   const values = await SancordUI.formDialog({
     title: "E-mail da conta",
-    description: "Associe um endereço de e-mail à sua conta (visível apenas para você). Deixe o campo de e-mail em branco para removê-lo.",
+    description: "O e-mail é obrigatório e fica visível só para você. Ao trocar, enviamos um código para o novo endereço; o atual continua valendo até você confirmar.",
     fields: [
-      { name: "email", label: "ENDEREÇO DE E-MAIL (OPCIONAL)", value: state.accountEmail || "", maxlength: 120, placeholder: "voce@exemplo.com" },
+      { name: "email", label: "NOVO E-MAIL", value: state.accountEmail || "", maxlength: 120, placeholder: "voce@exemplo.com", required: true },
       { name: "current_password", label: "SENHA ATUAL PARA CONFIRMAR", type: "password", value: "", required: true, maxlength: 128 },
     ],
-    submitLabel: "Salvar e-mail",
+    submitLabel: "Enviar código",
   });
-  if (!values || !values.current_password) return;
+  if (!values || !values.current_password || !(values.email || "").trim()) return;
   sendWs("UpdateAccountEmail", {
-    email: (values.email || "").trim() || null,
+    email: values.email.trim(),
     current_password: values.current_password,
   });
 });
+
+/** Troca de e-mail nas Configurações: o servidor enviou o código; pede para digitá-lo. */
+async function promptAccountEmailCode(message) {
+  for (;;) {
+    const values = await SancordUI.formDialog({
+      title: "Confirme o novo e-mail",
+      description: message,
+      fields: [{ name: "code", label: "CÓDIGO DE 6 DÍGITOS", value: "", maxlength: 7, required: true, placeholder: "000000" }],
+      submitLabel: "Confirmar e-mail",
+    });
+    if (!values) return;
+    try {
+      const response = await SancordNet.fetch("/api/email/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: getStoredToken(), code: String(values.code || "").replace(/\D/g, "") }),
+        signal: AbortSignal.timeout(12000),
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok && data?.ok) {
+        showUiToast("E-mail confirmado ✓");
+        return;
+      }
+      showErrorToast(data?.message || "Não foi possível confirmar o código.");
+      if (!["code_wrong"].includes(data?.code)) return;
+    } catch (_) {
+      showErrorToast("Sem conexão com o Sanvo. Tente novamente.");
+      return;
+    }
+  }
+}
 
 document.getElementById("generate-recovery-code-btn")?.addEventListener("click", async () => {
   const values = await SancordUI.formDialog({

@@ -1185,9 +1185,16 @@ pub struct Account {
     pub password_salt_key: Option<String>,
     #[serde(default)]
     pub created_at: Option<String>,
-    /// E-mail opcional associado à conta (visível apenas para o próprio titular).
+    /// E-mail da conta (visível apenas para o próprio titular). Obrigatório no cadastro;
+    /// contas antigas sem e-mail cadastram e confirmam no próximo login.
     #[serde(default)]
     pub email: Option<String>,
+    /// `email` foi confirmado com o código enviado para a caixa de entrada.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub email_verified: bool,
+    /// Novo e-mail aguardando o código (troca de e-mail ou primeiro cadastro).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_email: Option<String>,
     /// Hash do código de recuperação de senha (uso único).
     #[serde(default)]
     pub recovery_code_hash: Option<String>,
@@ -1224,8 +1231,12 @@ fn default_remember() -> bool {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuthRequest {
+    /// Cadastro: nome de usuário. Login: e-mail ou nome de usuário.
     pub username: String,
     pub password: String,
+    /// Obrigatório no cadastro.
+    #[serde(default)]
+    pub email: Option<String>,
     /// "Manter conectado": sessão longa (30 dias) ou curta (24 h).
     #[serde(default = "default_remember")]
     pub remember: bool,
@@ -1257,7 +1268,7 @@ pub struct SessionInfo {
     pub connected: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct AuthResponse {
     pub ok: bool,
     pub message: Option<String>,
@@ -1265,6 +1276,33 @@ pub struct AuthResponse {
     pub username: Option<String>,
     pub avatar_color: Option<String>,
     pub avatar_url: Option<String>,
+    /// Motivo legível por máquina de uma recusa (ex.: `email_taken`, `username_taken`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// Passo de e-mail pendente antes de entrar: `add` (conta sem e-mail) ou `verify`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_step: Option<String>,
+    /// E-mail mascarado para mostrar onde o código foi enviado (`g***@gmail.com`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_hint: Option<String>,
+    /// Segundos até poder pedir outro código.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after: Option<u64>,
+}
+
+/// `POST /api/email/start`: define (ou reenvia o código para) o e-mail pendente.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EmailStartRequest {
+    pub token: String,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+/// `POST /api/email/verify`: confirma o e-mail com o código de 6 dígitos.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EmailVerifyRequest {
+    pub token: String,
+    pub code: String,
 }
 
 fn default_activity_kind() -> String {
@@ -2647,6 +2685,9 @@ pub enum ServerMessage {
     /// Autenticação do WebSocket recusada (token ausente, inválido ou expirado).
     /// O servidor fecha a conexão logo depois; o cliente deve voltar ao login.
     AuthFailed { message: String },
+    /// Sessão válida, mas a conta ainda precisa cadastrar (`step: "add"`) ou confirmar
+    /// (`step: "verify"`) o e-mail antes de usar o app. A conexão é encerrada em seguida.
+    EmailVerificationRequired { step: String, email_hint: Option<String> },
     Pong,
     ChatAccepted { nonce: String },
 

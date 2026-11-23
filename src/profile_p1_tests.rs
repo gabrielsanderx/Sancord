@@ -70,7 +70,7 @@ async fn profile_media_uses_validated_attachments_and_syncs() {
     wait_for(&mut a, "Welcome").await;
     // O catálogo chega logo depois do Welcome, com o que a conta possui.
     let cos = wait_for(&mut a, "CosmeticsState").await;
-    assert!(cos["catalog"].as_array().unwrap().len() >= 50);
+    assert!(cos["catalog"].as_array().unwrap().len() >= 40);
     assert!(cos["owned"].as_array().unwrap().iter().any(|k| k == "avatar_decoration:flame-violet"));
 
     let other_token = register(&srv, "Observadora").await;

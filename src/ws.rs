@@ -459,6 +459,28 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
         }
     };
 
+    // 1b) Conta sem e-mail confirmado: a sessão vale, mas o app ainda não abre.
+    let gate = {
+        let st = state.read().await;
+        crate::email_verification::email_step(st.config.require_verified_email, &account).map(|step| {
+            ServerMessage::EmailVerificationRequired {
+                step: step.to_string(),
+                email_hint: crate::email_verification::target_email(&account)
+                    .as_deref()
+                    .map(crate::email_verification::mask_email),
+            }
+        })
+    };
+    if let Some(msg) = gate {
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = ws_sender.send(Message::Text(json)).await;
+        }
+        let _ = ws_sender
+            .send(Message::Close(Some(CloseFrame { code: CLOSE_AUTH_FAILED, reason: "email".into() })))
+            .await;
+        return;
+    }
+
     // 2) Fila de saída limitada + task de envio com heartbeat.
     let (tx, mut rx) = mpsc::channel::<ServerMessage>(OUTBOUND_QUEUE);
     let kick = Arc::new(Notify::new());
@@ -3225,7 +3247,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 id: Uuid::new_v4().to_string(),
                 channel_id: first_ch_id.clone(),
                 author_id: "system".into(),
-                author_name: "Sancord Bot".into(),
+                author_name: "Sanvo Bot".into(),
                 author_color: "#5865F2".into(),
                 author_avatar: Some("/logo.png".into()),
                 content: format!(
@@ -3406,7 +3428,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                         id: Uuid::new_v4().to_string(),
                         channel_id: wch,
                         author_id: "system".into(),
-                        author_name: "Sancord".into(),
+                        author_name: "Sanvo".into(),
                         author_color: "#5865F2".into(),
                         author_avatar: Some("/logo.png".into()),
                         content: format!("**{}** entrou no servidor.", display),
@@ -4554,6 +4576,50 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 return;
             }
             let key = st.account_by_id(&account_id).map(|a| a.username.to_lowercase());
+            if let Some(email) = clean_email.as_deref() {
+                if crate::email_verification::email_in_use(&st, email, &account_id) {
+                    st.feedback(user_id, false, "update_email", "Este e-mail já está em uso em outra conta.");
+                    return;
+                }
+            }
+            if st.config.require_verified_email {
+                // E-mail é obrigatório e só troca depois de confirmado com o código.
+                let (Some(k), Some(email)) = (key, clean_email) else {
+                    st.feedback(user_id, false, "update_email", "O e-mail é obrigatório e não pode ser removido.");
+                    return;
+                };
+                let unchanged = st.accounts.get(&k).is_some_and(|a| a.email.as_deref() == Some(email.as_str()) && a.email_verified);
+                if unchanged {
+                    st.feedback(user_id, true, "update_email", "Este já é o e-mail confirmado da conta.");
+                    return;
+                }
+                if let Some(acc) = st.accounts.get_mut(&k) {
+                    if acc.email_verified {
+                        acc.pending_email = Some(email.clone());
+                    } else {
+                        acc.email = Some(email.clone());
+                    }
+                }
+                st.save_accounts();
+                let request = crate::email_verification::prepare_code(&mut st, &k, crate::auth::now_ms());
+                drop(st);
+                let outcome = match request {
+                    Ok(r) => crate::email_verification::deliver(state, r).await,
+                    Err(crate::email_verification::CodeError::Cooldown(secs)) => Err(format!("Aguarde {secs} s para pedir outro código.")),
+                    Err(crate::email_verification::CodeError::NoTarget) => Err("Informe o e-mail da conta.".into()),
+                };
+                let st = state.read().await;
+                match outcome {
+                    Ok(()) => st.feedback(
+                        user_id,
+                        true,
+                        "update_email_code",
+                        &format!("Enviamos um código para {}. Digite-o para confirmar o novo e-mail.", crate::email_verification::mask_email(&email)),
+                    ),
+                    Err(msg) => st.feedback(user_id, false, "update_email", &msg),
+                }
+                return;
+            }
             if let Some(k) = key {
                 if let Some(acc) = st.accounts.get_mut(&k) {
                     acc.email = clean_email.clone();

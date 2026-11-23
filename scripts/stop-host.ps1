@@ -1,6 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path $PSScriptRoot -Parent
 $allowedServers = @(
+    (Join-Path $projectDir 'SanvoServer.exe'),
+    (Join-Path $projectDir 'dist/SanvoServer.exe'),
     (Join-Path $projectDir 'SancordServer.exe'),
     (Join-Path $projectDir 'dist/SancordServer.exe'),
     (Join-Path $projectDir 'target/debug/sancord.exe'),

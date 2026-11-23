@@ -5,6 +5,7 @@
 //! para compatibilidade com o frontend, mas agora com códigos HTTP corretos.
 
 use crate::auth::{self, PasswordCheck};
+use crate::email_verification;
 use crate::models::{
     Account, AuthRequest, AuthResponse, InvitePreviewResponse, RecoverPasswordRequest,
     SessionRequest,
@@ -17,35 +18,43 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 type AuthReply = (StatusCode, Json<AuthResponse>);
-const INVALID_LOGIN: &str = "Nome de usuário ou senha incorretos.";
+const INVALID_LOGIN: &str = "E-mail, nome de usuário ou senha incorretos.";
 const INVALID_RECOVERY: &str = "Nome de usuário ou código de recuperação inválido.";
 
 fn auth_err(status: StatusCode, msg: impl Into<String>) -> AuthReply {
-    (
-        status,
-        Json(AuthResponse {
-            ok: false,
-            message: Some(msg.into()),
-            token: None,
-            username: None,
-            avatar_color: None,
-            avatar_url: None,
-        }),
-    )
+    (status, Json(AuthResponse { ok: false, message: Some(msg.into()), ..Default::default() }))
 }
 
-fn auth_ok(token: String, acc: &Account) -> AuthReply {
+fn auth_err_code(status: StatusCode, msg: impl Into<String>, code: &str) -> AuthReply {
+    (status, Json(AuthResponse { ok: false, message: Some(msg.into()), code: Some(code.into()), ..Default::default() }))
+}
+
+/// Login aceito. Se a conta ainda precisa cadastrar/confirmar o e-mail, a resposta
+/// diz o passo (`email_step`) e o app mostra essa etapa antes de conectar.
+fn auth_ok(token: String, acc: &Account, require_verified_email: bool) -> AuthReply {
     (
         StatusCode::OK,
         Json(AuthResponse {
             ok: true,
-            message: None,
             token: Some(token),
             username: Some(acc.username.clone()),
             avatar_color: Some(acc.avatar_color.clone()),
             avatar_url: acc.avatar_url.clone(),
+            email_step: email_verification::email_step(require_verified_email, acc).map(str::to_string),
+            email_hint: email_verification::target_email(acc).as_deref().map(email_verification::mask_email),
+            ..Default::default()
         }),
     )
+}
+
+/// Chave da conta (username_lower) a partir do que a pessoa digitou: e-mail ou nome.
+fn account_key_for_identifier(st: &ServerState, identifier: &str) -> String {
+    let ident = identifier.trim().to_lowercase();
+    if ident.contains('@') {
+        email_verification::account_key_by_email(st, &ident).unwrap_or(ident)
+    } else {
+        ident
+    }
 }
 
 pub fn format_pt_date_now() -> String {
@@ -63,17 +72,27 @@ pub async fn register_handler(State(state): State<SharedState>, Json(req): Json<
         Ok(u) => u,
         Err(msg) => return auth_err(StatusCode::BAD_REQUEST, msg),
     };
+    let email = match req.email.as_deref().map(auth::validate_email) {
+        Some(Ok(Some(e))) => e,
+        Some(Err(msg)) => return auth_err_code(StatusCode::BAD_REQUEST, msg, "email_invalid"),
+        _ => return auth_err_code(StatusCode::BAD_REQUEST, "Informe seu e-mail.", "email_missing"),
+    };
     if let Err(msg) = auth::validate_new_password(&req.password) {
         return auth_err(StatusCode::BAD_REQUEST, msg);
     }
     let key = username.to_lowercase();
+    const USERNAME_TAKEN: &str = "Este nome de usuário já está em uso. Escolha outro ou faça login.";
+    const EMAIL_TAKEN: &str = "Este e-mail já está em uso em outra conta. Entre com ele ou use outro.";
 
     // Checagem rápida antes do hash caro (a definitiva é feita de novo abaixo).
-    if state.read().await.accounts.contains_key(&key) {
-        return auth_err(
-            StatusCode::CONFLICT,
-            "Este nome de usuário já está em uso. Escolha outro ou faça login.",
-        );
+    {
+        let st = state.read().await;
+        if st.accounts.contains_key(&key) {
+            return auth_err_code(StatusCode::CONFLICT, USERNAME_TAKEN, "username_taken");
+        }
+        if email_verification::email_in_use(&st, &email, "") {
+            return auth_err_code(StatusCode::CONFLICT, EMAIL_TAKEN, "email_taken");
+        }
     }
 
     let password = req.password.clone();
@@ -87,11 +106,12 @@ pub async fn register_handler(State(state): State<SharedState>, Json(req): Json<
 
     let mut st = state.write().await;
     if st.accounts.contains_key(&key) {
-        return auth_err(
-            StatusCode::CONFLICT,
-            "Este nome de usuário já está em uso. Escolha outro ou faça login.",
-        );
+        return auth_err_code(StatusCode::CONFLICT, USERNAME_TAKEN, "username_taken");
     }
+    if email_verification::email_in_use(&st, &email, "") {
+        return auth_err_code(StatusCode::CONFLICT, EMAIL_TAKEN, "email_taken");
+    }
+    let require = st.config.require_verified_email;
     let account = Account {
         id: Uuid::new_v4().to_string(),
         username: username.clone(),
@@ -115,7 +135,10 @@ pub async fn register_handler(State(state): State<SharedState>, Json(req): Json<
         profile_effect: None,
         password_salt_key: None,
         created_at: Some(format_pt_date_now()),
-        email: None,
+        email: Some(email),
+        // Sem a exigência (modo de testes antigo), o e-mail informado já vale.
+        email_verified: !require,
+        pending_email: None,
         recovery_code_hash: None,
         inventory: Vec::new(),
         cosmetic_collection: Default::default(),
@@ -128,19 +151,37 @@ pub async fn register_handler(State(state): State<SharedState>, Json(req): Json<
         profile: Default::default(),
         token: String::new(),
     };
-    st.accounts.insert(key, account.clone());
+    st.accounts.insert(key.clone(), account.clone());
     st.save_accounts();
     let token = st.create_session(&account.id, req.remember);
     info!("Nova conta criada: {}", username);
-    auth_ok(token, &account)
+    // Código de confirmação já sai no cadastro; o envio (SMTP) acontece fora do lock.
+    let code = if require { email_verification::prepare_code(&mut st, &key, auth::now_ms()).ok() } else { None };
+    drop(st);
+    let (status, mut reply) = auth_ok(token, &account, require);
+    if let Some(request) = code {
+        if let Err(message) = email_verification::deliver(&state, request).await {
+            let mut st = state.write().await;
+            if let Some(pending) = st.email_codes.get_mut(&account.id) {
+                pending.sends.pop();
+                pending.code_hash.clear();
+            }
+            reply.0.message = Some(message);
+            reply.0.code = Some("send_failed".into());
+        } else {
+            reply.0.retry_after = Some((email_verification::RESEND_COOLDOWN_MS / 1000) as u64);
+        }
+    }
+    (status, reply)
 }
 
 pub async fn login_handler(State(state): State<SharedState>, Json(req): Json<AuthRequest>) -> AuthReply {
-    let key = req.username.trim().to_lowercase();
     let now = auth::now_ms();
 
-    let (account_id, stored_hash, salt_key) = {
+    let (key, account_id, stored_hash, salt_key) = {
         let st = state.read().await;
+        // O campo aceita e-mail ou nome de usuário; o limite de tentativas vale para a conta.
+        let key = account_key_for_identifier(&st, &req.username);
         if st.login_limiter.is_blocked(&key, now) {
             return auth_err(
                 StatusCode::TOO_MANY_REQUESTS,
@@ -153,6 +194,7 @@ pub async fn login_handler(State(state): State<SharedState>, Json(req): Json<Aut
             return auth_err(StatusCode::UNAUTHORIZED, INVALID_LOGIN);
         };
         (
+            key.clone(),
             acc.id.clone(),
             acc.password_hash.clone(),
             acc.password_salt_key.clone().unwrap_or_else(|| key.clone()),
@@ -199,13 +241,15 @@ pub async fn login_handler(State(state): State<SharedState>, Json(req): Json<Aut
         return auth_err(StatusCode::UNAUTHORIZED, INVALID_LOGIN);
     };
     let token = st.create_session(&account_id, req.remember);
-    auth_ok(token, &acc)
+    let require = st.config.require_verified_email;
+    auth_ok(token, &acc, require)
 }
 
 pub async fn session_handler(State(state): State<SharedState>, Json(req): Json<SessionRequest>) -> AuthReply {
     let mut st = state.write().await;
+    let require = st.config.require_verified_email;
     match st.validate_session(&req.token) {
-        Some((_, acc)) => auth_ok(req.token.trim().to_string(), &acc),
+        Some((_, acc)) => auth_ok(req.token.trim().to_string(), &acc, require),
         None => auth_err(StatusCode::UNAUTHORIZED, "Sessão expirada. Entre novamente."),
     }
 }
@@ -223,10 +267,10 @@ pub async fn recover_password_handler(
     State(state): State<SharedState>,
     Json(req): Json<RecoverPasswordRequest>,
 ) -> AuthReply {
-    let key = req.username.trim().to_lowercase();
-    if key.is_empty() {
-        return auth_err(StatusCode::BAD_REQUEST, "Informe seu nome de usuário.");
+    if req.username.trim().is_empty() {
+        return auth_err(StatusCode::BAD_REQUEST, "Informe seu e-mail ou nome de usuário.");
     }
+    let key = account_key_for_identifier(&*state.read().await, &req.username);
     let code_norm = auth::normalize_recovery_code(&req.recovery_code);
     if code_norm.is_empty() {
         return auth_err(StatusCode::BAD_REQUEST, "Informe o código de recuperação.");
@@ -298,7 +342,8 @@ pub async fn recover_password_handler(
     st.revoke_other_sessions(&account_id, None);
     let token = st.create_session(&account_id, req.remember);
     info!("Senha de '{key}' redefinida via código de recuperação (uso único consumido).");
-    auth_ok(token, &updated_acc)
+    let require = st.config.require_verified_email;
+    auth_ok(token, &updated_acc, require)
 }
 
 pub async fn health_handler(State(state): State<SharedState>) -> Json<serde_json::Value> {

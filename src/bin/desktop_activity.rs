@@ -445,7 +445,7 @@ impl Drop for OwnedHandle {
     }
 }
 
-fn query_process_image_path(pid: u32) -> Option<String> {
+pub(crate) fn query_process_image_path(pid: u32) -> Option<String> {
     use windows::core::PWSTR;
     use windows::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,

@@ -7,6 +7,7 @@ mod desktop_auth_storage;
 mod desktop_links;
 mod desktop_permissions;
 mod desktop_taskbar;
+mod desktop_tunnel;
 mod desktop_updater;
 use desktop_links::{confirm_page, desktop_url, link_endpoint, open_link_page, origin_of, KnownEndpoints};
 
@@ -594,7 +595,8 @@ fn ensure_local_host_started_if_present() -> bool {
             .spawn();
 
         let cloudflared_exe = host_dir.join("cloudflared.exe");
-        if cloudflared_exe.exists() {
+        // Só um túnel por anfitrião: reiniciar o servidor não abre outro endereço público.
+        if cloudflared_exe.exists() && !desktop_tunnel::tunnel_running(&cloudflared_exe) {
             let tunnel_log = host_dir.join("data").join("tunnel.log");
             let _ = fs::create_dir_all(host_dir.join("data"));
             let _ = fs::remove_file(&tunnel_log);

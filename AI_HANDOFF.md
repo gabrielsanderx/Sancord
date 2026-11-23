@@ -1837,3 +1837,161 @@ Implementação local sobre as fontes da v0.2.3. O cliente Windows continua carr
     - `SancordVoiceSounds` respeita **Não perturbe (`dnd`)** e conversas silenciadas (silencia o ringtone mantendo o aviso visual), além de oferecer controle dedicado **Volume do toque de chamadas** (`#call-ringtone-volume`) e toggle **Toque de chamadas recebidas** (`#call-sound-incoming`).
     - Integração Windows em `desktop_taskbar::set_call_attention_flash` (`FlashWindowEx` discreto de 3 pulsos sem loop infinito via IPC `call-attention:start`/`stop` e `window:focus`) + notificação nativa clicável (`SancordNotifications.notifyIncomingCall`) quando minimizado/sem foco + aviso/confirmação ao receber chamada durante outra call ou transmissão ativa.
 - **Testes validados:** `node --test tests/frontend-*.test.cjs` (**272/272** aprovados, incluindo `tests/frontend-tooltips.test.cjs` e `tests/frontend-private-calls.test.cjs`) e `cargo test --locked --all-targets --target-dir target-dev` (**214/214** aprovados, incluindo 5 novos testes de integração em `src/phase6_tests.rs` cobrindo ring timeout + entrada tardia, expiração de grace period ocioso, cancelamento/re-toque com cooldown, multi-dispositivo + reconexão preservando `ring_expires_at` e Group DM com 4 participantes).
+
+## 23/11/2026 · Refinamento Tipográfico do Perfil + Ativação e Motor Vivo de Cosméticos Animados (Rodada 16)
+
+- **Refinamento visual do Profile Popout / Perfil Completo (`static/js/profile-sharing.js`, `static/ui.css`, `static/styles.css`):**
+  - Escala hierárquica mais compacta nos cabeçalhos de seção (`MEMBRO DESDE`, `CONEXÕES`, `CARGOS`, `NOTA PRIVADA`), pílulas de cargos discretas e exibição limpa das conexões públicas (removido o texto técnico `"Link manual"` do perfil público mantendo-o em Configurações).
+- **Diagnóstico e correção da causa raiz dos cosméticos estáticos (`static/ui.css`, `static/styles.css`, `static/cosmetics/cosmetics.css`, `static/cosmetics/cosmetics-engine.js`, `static/js/profile-motion.js`, `static/js/profile.js`, `static/js/profile-editor.js`, `static/js/self-profile-menu.js`, `static/app.js`, `src/cosmetics.rs`):**
+  - **Cascata CSS corrigida:** removidos os bloqueios `animation: none !important` de `static/ui.css` em `:not(.profile-motion-active *)` (substituídos por `animation-play-state: paused` fora de contextos ativos/hover, mantendo `animation: none !important` estritamente em `Reduced Motion`, `anim-policy-never`, `profile-window-inactive` e `profile-static-*`). Corrigido `transform-box: view-box; transform-origin: 50px 50px` em `.deco-spin-*`/`.deco-pulse-soft` para órbita centrada sem oscilação.
+  - **Superfícies simultâneas em `profile-motion.js`:** substituído o limite de superfície única (`.profile-motion-active` em apenas 1 nó) por conjunto de superfícies primárias vivas (`#live-profile-preview-card`, `#profile-popover-card`, `.compact-profile-dialog`, `#self-profile-menu`, `#dm-peer-panel .profile-card`, `.cosmetic-picker-detail`, `.name-style-showcase-box`) + 1 superfície secundária de hover — impedindo que passar o mouse sobre mensagens/botões congele o perfil aberto.
+  - **Scheduler `IDLE_WITH_EVENTS` e Classificação Canônica (`static/cosmetics/cosmetics-engine.js`):**
+    - Adicionado `COSMETIC_ANIMATION_MAP` e `getAnimationMode(kind, id)` cobrindo todos os cosméticos do catálogo em `STATIC`, `LOOP`, `IDLE_WITH_EVENTS`, `PLAY_ON_OPEN` e `REACTIVE` (preservando todos os itens estáticos como `STATIC` e corrigindo metadata em `src/cosmetics.rs` para `starlit-silt`, `twilight-garden`, `neon`, `chrome`, `sakura` e `royal`).
+    - Corrigida visibilidade inicial síncrona em `registerIdleHost` (`isElementLikelyVisible`), prioridade de superfícies primárias no budget (`BUDGET.maxConcurrentIdleHosts = 6`), primeiro evento orgânico rápido (`3,2–5,6 s`) seguido de cadência com jitter (`8–14,5 s` secundário / `16,5–26 s` raro), disparo imediato ao abrir Perfil Completo, Popout, Self Profile Menu, Editor e Seletor, e isolamento de erros `try/catch` com fallback estático seguro em todos os renderers.
+  - **Animações ativadas por categoria sem redesenhar a arte aprovada:**
+    - *Avatar Decorations:* camadas `back` + `front` com respiração de halo/companheiro, balanço de galho/pingente/cachecol/asas, cintilação, brasas/cristais, piscar de olhos, orelha mexendo, pétala solta, estrela cadente e glint especular.
+    - *Profile Frames:* trilhos laterais com pulso luminoso suave (`.frame-art-rail::after`), crista com respiração, brilho diagonal periódico (`.frame-art-glint`) e detalhes temáticos (cristais, magma, sakura, pérolas, constelações) em `IDLE_WITH_EVENTS`, mantendo frames estáticas (`royal`, `cyber-corners`, etc.) intactas.
+    - *Profile Effects:* `PLAY_ON_OPEN` / `ONE_SHOT` multi-estágio (`init → entrance → main → climax → dissipate`) com animações completas em `.ef-wind-ribbons`, `.ef-particles`, `.ef-grid-trace`, `.ef-constellation` e `.ef-layer-wash`, sem loop infinito e sem reiniciar ao editar bio.
+    - *Display Name Styles:* animação exclusivamente no material (sem deslocar o texto) em todos os contextos (`full`, `FULL_PROFILE`, `editor-full`, `EDITOR_PREVIEW`, `editor`, `compact`, `popout`, `PROFILE_POPOUT`, `SELF_PROFILE_MENU`), cobrindo `gradient`, `custom-gradient`, `prism`, `holographic`, `cosmic`, `sakura`, `neon`/`glow` (pulso luminoso suave) e `chrome`/`royal` (reflexo metálico especular), mantendo estilos estáticos e fontes estáticas intactos.
+    - *Nameplates:* sheen especular periódico (`.np-art-layer::after`) e elementos internos vivos (constelações, ramo de sakura, brasas, bolhas) sem deslocar o card; aplicadas também no preview de contexto do editor (`profile.js`).
+    - *Idempotência & Member List:* `applyDecoToElement`, `applyProfileFrame`, `applyNameStyleToEl` e `applyNameplateChip` preservam nós/classes inalterados para não reiniciar animações em pequenos re-renders; `MEMBER_LIST` pausa por padrão e anima apenas no hover/foco do item.
+- **Correção do overlay do GamePicker / Mural (`static/js/game-picker.js`, `static/ui.css`, `static/styles.css`, `tests/frontend-game-picker.test.cjs`):**
+  - Corrigida a ausência da classe `modal-backdrop` em `SancordGamePicker.open` e `openGameDetails` + regra `.gp-backdrop` sem `position: fixed` e com `z-index: 950` (abaixo de `#settings-modal` `1200`), que empurrava toda a janela do app para cima e cortava o modal no rodapé; agora `.sancord-dialog-backdrop` e `.gp-backdrop` garantem `position: fixed; inset: 0; z-index: var(--z-dialog, 3000)` com margem segura da barra nativa (`--native-titlebar-h`).
+  - Corrigido `apiBaseUrl` em `game-picker.js` para resolver `/api/games/*` via `SancordNet.url(path)` (antes chamava `apiUrl` inexistente, fazendo o desktop cair em `"Modo offline"` no `sancord://localhost`).
+- **Desbloqueio de animações no Windows com `SPI_GETCLIENTAREAANIMATION = False` (`static/index.html`, `static/js/polish.js`, `static/js/profile.js`, `static/cosmetics/cosmetics-engine.js`, `static/ui.css`, `static/cosmetics/cosmetics.css`):**
+  - Identificado que no Windows com "Efeitos de animação" desativados nas configurações do sistema, o Chromium/WebView2 ativa `@media (prefers-reduced-motion: reduce)` e a regra global `*, *::before, *::after { animation-duration: .001ms !important }` + `systemPrefersReducedMotion()` congelavam **todos** os cosméticos no Sanvo mesmo com *Reduzir movimento* desligado no app.
+  - Adicionado toggle independente **Sincronizar com o computador** (`#appearance-sync-reduce-motion`, `syncReducedMotion`, padrão `false`, paridade com Discord Desktop) em Configurações → Acessibilidade e vinculadas as regras globais/cosméticas de redução de movimento a `body.reduce-motion` / `body.anim-policy-never`.
+- **Resiliência do GamePicker em servidores sem `/api/games/*` (`static/js/game-picker.js`):** fallback transparente para busca no catálogo local quando `/api/games/search` responde `404`.
+- **Testes validados:** `node --test tests/frontend-*.test.cjs` (**278/278** aprovados, incluindo regressão do `GamePicker`, Windows `prefers-reduced-motion` e 3 novos testes em `tests/frontend-cosmetics-v3.test.cjs`) e `cargo test --locked --all-targets --target-dir target-dev` (**214/214** aprovados).
+
+## 23/11/2026 · Nova Geração V4 Premium de Cosméticos de Perfil (Substituição Total + Motor Híbrido Canvas 2D VFX + SVG) (Rodada 17)
+
+- **Direção e substituição completa:** Substituída toda a antiga coleção básica de cosméticos de perfil (molduras simples de círculo, anéis recoloridos e efeitos CSS genéricos) pela **Biblioteca V4 Premium**, elevando Avatar Decorations, Profile Frames, Profile Effects e Nameplates ao padrão de produto desktop de alto acabamento, mantendo 100% intactos layout de perfil, bio, cargos, conexões e tipografia geral.
+- **Motor Híbrido Canvas 2D Procedural 60fps + SVG Esculpido (`static/cosmetics/cosmetics-vfx.js`, `static/cosmetics/cosmetics-engine.js`, `static/cosmetics/cosmetics.css`, `src/bin/desktop_assets.rs`, `static/index.html`):**
+  - **`SanvoCosmeticsVFX` (`cosmetics-vfx.js`, embutido em `desktop_assets.rs`):** loop único compartilhado `requestAnimationFrame` com HiDPI (`dpr ≤ 2`), `delta-time` limitado, limite de 10 instâncias ativas simultâneas (`MAX_ACTIVE_VFX`), pausa automática em janela inativa/oculta, `0` canvases na `MEMBER_LIST` (hover-only CSS), modo hover-only em thumbnails `MINI` do picker e pose estática curada em `Reduced Motion` (`t = 1.35`). Guard jsdom para manter testes DOM limpos.
+  - **Avatar Decorations V4 (16 peças: 12 animadas multi-camada `BACK + AVATAR + FRONT` com 2 planos Canvas 2D independentes + 4 estáticas de colecionador):** `galaxy-portal`, `sakura-glow`, `core-orbit`, `cat-gamer`, `dragon-fire`, `frost-crown`, `angel-wings`, `blood-moon`, `ocean-bubbles`, `electric-pulse`, `cyber-ring`, `lunar` (`IDLE_WITH_EVENTS`, partículas orbitando atrás e passando na frente, neblina/estrelas/pétalas/brasas/cristais/penas/bolhas/arcos elétricos/fases lunares) + `static-royal-crown`, `static-emerald`, `static-cyber-hud`, `static-diamond` (`STATIC`).
+  - **Profile Frames V4 (21 peças: 15 arquitetônicas vivas + 2 reativas + 4 estáticas/conquistas):** toda moldura animada agora combina arquitetura SVG esculpida (crista superior, cantos, selo inferior, trilhos) com Canvas VFX perimetral seguro (nunca cobre texto/botões): `cosmic-drift`, `sakura-wind`, `ember-trail`, `frost-glint`, `winter-2026`, `liquid`, `arcane-grimoire`, `eclipse-crown`, `seraphim-arch`, `dream-sanctuary`, `core-pulse`, `holographic`, `neon-pulse`, `founder`, `developer` (`IDLE_WITH_EVENTS`), `reactive-aura` e `voice-pulse` (`REACTIVE`), e `royal`, `cyber-corners`, `minimal`, `early-user` (`STATIC`).
+  - **Profile Effects V4 (12 peças cinematográficas em 4 atos `PLAY_ON_OPEN` / `ONE_SHOT`, `3,2–3,6 s`):** `star-trail`, `petal-drift`, `embers`, `polar-ribbon`, `core-signal`, `circuit-boot`, `arcane-sigil`, `eclipse-flare`, `abyssal-tide`, `seraphim-fall`, `synth-overdrive`, `dream-butterflies` — abertura → desenvolvimento → clímax → dissipação limpa no Canvas 2D + SVG sem loop infinito e com *Reproduzir novamente* no editor/seletor.
+  - **Nameplates V4 (11 peças: 8 animadas + 3 estáticas):** expandidas com `arcane-velvet`, `eclipse-gold` e `dream-mist` além das 5 animadas e 3 estáticas existentes.
+- **Limpeza do catálogo na UI + compatibilidade transparente (`src/cosmetics.rs`, `static/cosmetics/cosmetics-engine.js`, `static/app.js`, `static/js/profile.js`, `static/js/profile-motion.js`, `static/ui.css`):**
+  - Removidos do `catalog()` exibido na interface todos os itens legados básicos/protótipo (`flame-violet`, `devil-horns`, `cyber-cyan`, `golden-halo`, `crimson-vortex`, `rainbow-prism`, `electric-surge`, `heart-pixel`, `neon-glitch`, `nebula-orbit`, `sakura-fall`, `ember`, `snowfall`, `digital-rain`, `retro-pixels`, `static-gold`, `static-crimson`, `static-blurple`, `static-angel`, molduras genéricas `aurora`/`gold`/`obsidian`/`diamond`/`crimson`/`emerald`/`violet`/`neon-cyber`/`rainbow`/`sakura`/`glitch`/`galaxy`/`ice`/`fire`/`pixel`/`angel`/`demon`/`vintage`/`plasma`, efeitos antigos `aurora`/`cherry-petals`/`fire-sparks`/`electric-arc`/`snow-drift`/`confetti-burst`/`cosmic-dust`/`sakura-breeze`/`neon-grid`/`matrix-rain`/`golden-shimmer`/`void-mist`/`rainbow-wave` e placas legadas).
+  - Mantido `LEGACY_COSMETIC_ALIASES` no frontend e `LEGACY_FREE_IDS` em `src/cosmetics.rs` (`check_equip` + `owned_keys`) para que contas/presets já salvos no banco migrem visualmente de forma transparente para as peças V4 correspondentes sem quebrar nenhum dado ou protocolo.
+- **Limitações conhecidas:** no ambiente de teste jsdom, `HTMLCanvasElement.getContext("2d")` não existe nativamente, portanto a renderização de pixels do Canvas VFX é validada no WebView2 real (enquanto DOM, camadas `back`/`front`, ciclo de vida, aliases, isolamento da `MEMBER_LIST` e `Reduced Motion` são validados automaticamente via Node/jsdom).
+- **Testes validados:** `node --check` em todos os arquivos JS, `node --test tests/frontend-*.test.cjs` (**279/279** aprovados, incluindo suíte V4 em `tests/frontend-cosmetics-v3.test.cjs`) e `cargo test --locked --all-targets --target-dir target-dev` (**214/214** aprovados, incluindo `desktop_assets::tests::assets_are_embedded_and_routes_are_closed`).
+
+## 23/11/2026 · Reconstrução Visual do Zero — Biblioteca Flagship V5 Pintada (HiDPI RGBA WebP Multicamada) (Rodada 18)
+
+- **Substituição completa da base visual:** Descartados todos os assets vetoriais/SVG/CSS básicos anteriores das 3 categorias principais de cosméticos de perfil e substituídos por **28 assets reais pintados em alta resolução** (`1024×1024` / `640×480` renderizados em Chromium/Edge headless com downsampling Lanczos via Pillow para **HiDPI RGBA WebP**, orçamento total de apenas **343,1 KB** em `static/cosmetics/assets/*.webp`, embutidos em `src/bin/desktop_assets.rs` com `image/webp` e `Cache-Control: public, max-age=31536000, immutable`). Gerador reprodutível em `scripts/generate-v5-cosmetics.mjs`.
+- **4 Coleções Flagship Coesas (qualidade sobre quantidade, zero bordas/círculos genéricos ou emojis):**
+  - **Avatar Decorations V5 (`320×320`, `BACK + AVATAR + FRONT` + camada `BLINK` real no personagem):**
+    - `galaxy-portal` (*Astrolábio Celestial*, `IDLE_WITH_EVENTS`): anéis armilares dourados e nebulosa violeta em 2 planos + partículas orbitais 3D.
+    - `sakura-glow` (*Ramo de Hanami*, `IDLE_WITH_EVENTS`): ramo de cerejeira ilustrado com lanternas quentes em balanço orgânico + pétalas em profundidade.
+    - `frost-crown` (*Dragão Glacial*, `IDLE_WITH_EVENTS`): crista de cristais facetados com reflexo especular azul-gelo + neve cristalina.
+    - `cat-gamer` (*Kitsune-Neko Cyber*, `IDLE_WITH_EVENTS`): gatinha synthwave pintada com fones, cauda viva e camada `deco_cyber_blink.webp` para piscar real de olhos.
+  - **Profile Frames V5 Assimétricas (`360×270`, ornamentos `TL + TR + BR` pintados em WebP, zero `.pf-ring` / borda neon):**
+    - `cosmic-drift` (*Observatório Astralium*), `sakura-wind` (*Jardim de Hanami*), `frost-glint` (*Cidadela de Glacium*), `holographic` (*Chassi Synth-Neko*) + 4 molduras exclusivas de conquista/temporada preservadas (`founder`, `developer`, `winter-2026`, `early-user`).
+    - Harmonia automática Frame ↔ Effect: durante o clímax do Profile Effect (`p ∈ [0.38, 0.78]`), o motor adiciona `.cos-effect-climax` no `.profile-card`, atenuando discretamente a moldura para o efeito protagonizar sem poluição visual.
+  - **Profile Effects V5 Narrativos em 4 Atos (`192×192` hero sprites WebP + Canvas 2D VFX, `PLAY_ON_OPEN` / `ONE_SHOT`, `3,6 s`, nunca loop infinito):**
+    - `star-trail` (*Eclipse da Nebulosa*), `petal-drift` (*Rajada de Cerejeira*), `polar-ribbon` (*Tempestade Polar*), `circuit-boot` (*Inicialização Holográfica*), todos com entrada direcional → desenvolvimento → clímax → dissipação limpa e botão *Reproduzir novamente*.
+  - **Nameplates & Name Styles:** 4 placas coordenadas (`starlit-silt`, `twilight-garden`, `frost-vein`, `core-stripe`) + 26 fontes/materiais preservados.
+- **Compatibilidade total de contas, banco e inventário (`src/cosmetics.rs`, `src/cosmetic_collection.rs`, `static/cosmetics/cosmetics-engine.js`, `static/js/profile-editor.js`):**
+  - Todos os IDs legados continuam aceitos via `LEGACY_FREE_IDS` (`check_equip`, `owned_keys`, `owns_key`) e mapeados visualmente via `LEGACY_COSMETIC_ALIASES` para as peças Flagship V5 correspondentes, preservando 100% do inventário, favoritos, presets e molduras exclusivas desbloqueadas (como na conta `Swag`).
+- **Correções adicionais da mesma sessão:**
+  - `src/legacy_sancord_migration.rs` + `static/js/updater.js`: movido `updates/result.json` para `ONE_SHOT_MIGRATION_FILES` (eliminando o toast recorrente *"Atualização concluída"* em toda abertura).
+  - `static/app.js`: corrigido `TypeError: Illegal invocation` no getter WebIDL `AudioContext.prototype.audioWorklet` (que impedia os botões **Ligar** / **Vídeo** em DMs) com guarda segura `typeof window !== "undefined"` e `"audioWorklet" in AudioCtxCtor.prototype`.
+- **Verificação visual real e testes:**
+  - Inspecionados visualmente contact sheet dos 28 assets e capturas reais em Chromium headless (150% DPI) no Editor de Perfil ao vivo, corrigindo deslocamento de `.cos-v5-deco` sobre `.deco-svg-layer`, colisão de `.pe-preview-tools` com o ornamento `TR` e recorte de orelhas nas miniaturas da barra lateral.
+  - **Testes aprovados:** `node --check` (**47** arquivos JS OK), `node --test tests/frontend-*.test.cjs` (**280/280** aprovados) e `cargo test --locked --all-targets --target-dir target-dev` (**214/214** aprovados: 193 núcleo + 20 desktop + 1 manutenção). Executáveis `Sanvo.exe`, `Sancord.exe`, `SanvoServer.exe` e `SancordServer.exe` recompilados e implantados localmente.
+
+### Expansão V5 Pintada (+4 Coleções Flagship + Conjunto Exclusivo Soberano + 6 Insígnias Exclusivas Jewel)
+
+- **33 novos assets HiDPI RGBA WebP** gerados por `scripts/generate-v5-expansion.mjs` (`422,6 KB`; orçamento total combinado de **61 assets = 765,7 KB**), embutidos em `src/bin/desktop_assets.rs`:
+  - **Forja de Drakon (Infernal):** `dragon-fire` (*Chamas de Drakon*), `ember-trail` (*Forja de Drakon*), `embers` (*Erupção de Brasas*), `ember-line` (*Veio de Brasa*).
+  - **Grimório Arcano:** `blood-moon` (*Oráculo do Eclipse*), `arcane-grimoire` (*Grimório Arcano*), `arcane-sigil` (*Selo do Eclipse*), `arcane-velvet` (*Veludo Arcano*).
+  - **Santuário Abissal:** `ocean-bubbles` (*Coroa das Profundezas*), `liquid` (*Santuário Abissal*), `abyssal-tide` (*Maré Bioluminescente*), `tide-glass` (*Vidro de Maré*).
+  - **Arco de Serafim:** `angel-wings` (*Asas de Serafim*), `seraphim-arch` (*Arco de Serafim*), `seraphim-fall` (*Chuva de Plumas*), `eclipse-gold` (*Ouro de Serafim*).
+  - **Soberano Imperial (exclusivo `badge:sovereign`):** `eclipse-sovereign` (*Coroa do Soberano*) e `sovereign-crest` (*Trono Soberano*).
+- **6 novas insígnias exclusivas com arte multi-tom `.badge-jewel`** (`src/cosmetics.rs`, `static/js/profile.js`, `static/ui.css`): `architect` (*Arquiteto do Sanvo*), `sovereign` (*Soberano Imperial*), `astral_guardian` (*Guardião Astralium*), `dragon_forged` (*Forjado em Drakon*), `prism_collector` (*Colecionador Prismático*) e `obsidian_vip` (*Núcleo Obsidiana*) — concedidas em `data/badges.json` exclusivamente para a conta `Swag` (junto com `founder` e `developer`).
+- **Verificação visual em Chromium (Edge Headless, 150% DPI):** inspecionadas capturas ao vivo do Editor de Perfil (0 erros de console), corrigindo lookup direto em `V5_AVATAR_ART`/`V5_FRAME_ART` e lista `isV5Flagship` dos 8 efeitos em `cosmetics-engine.js` para eliminar completamente elementos SVG herdados da V3.
+
+## 23/11/2026 · Túneis duplicados e scripts com o nome Sanvo (Claude)
+
+- **Problema:** havia 9 processos `cloudflared` abertos ao mesmo tempo, cada um com um endereço público ativo.
+  - Causa: `ensure_local_host_started_if_present` (em `src/bin/SancordApp.rs`) abria um túnel novo sempre que o app encontrava o servidor desligado, sem checar se já existia um.
+  - Os reinícios do servidor durante as rodadas foram acumulando os túneis.
+- **Correção:**
+  - novo `src/bin/desktop_tunnel.rs`: `tunnel_running(exe)` lista os processos (feature `Win32_System_Diagnostics_ToolHelp`) e compara o caminho com `query_process_image_path`, que agora é `pub(crate)` em `desktop_activity.rs`;
+  - o app só cria o túnel e apaga o `tunnel.log` quando não há nenhum `cloudflared.exe` da mesma pasta rodando;
+  - testes: comparação de caminhos, processo inexistente e o teste manual ignorado `tunel_real_em_execucao_e_detectado`, conferido com o túnel real.
+- **Scripts:**
+  - `start-host.ps1` procura `SanvoServer.exe` e usa `SancordServer.exe` só como reserva;
+  - `stop-host.ps1` aceita os dois nomes;
+  - `install-autostart.ps1` mostra "Sanvo" nas mensagens e mantém o valor `SancordHost` no registro, para não duplicar a inicialização.
+- **Limpeza:** os 8 túneis antigos foram encerrados pelo PID, com o caminho conferido. Ficou só o PID 19012, cujo endereço é o anunciado pelo servidor; ele respondeu `/api/health` antes e depois da limpeza.
+- **Testes:** 280 de frontend e 217 em Rust aprovados.
+- **Instalação:** `Sanvo.exe` e a cópia `Sancord.exe` foram trocados no atalho pela build `qa-desktop-tunnel`. A versão anterior ficou em `qa-desktop-tunnel/Sanvo-antes-*.exe`. O servidor não mudou.
+- **Não publicado** no GitHub: segue junto com as rodadas locais (16 a 18 e Expansão V5), aguardando autorização.
+## 23/11/2026 · E-mail obrigatório no cadastro e no login, com confirmação por código (Claude) — nos fontes, NÃO publicado
+
+- **Decisões do usuário:**
+  - o login aceita **e-mail ou nome de usuário**;
+  - contas antigas cadastram o e-mail no próximo login;
+  - confirmação **por código** enviado por **SMTP genérico**.
+- **Backend:**
+  - `src/email_verification.rs`, módulo novo:
+    - `email_step` (`add`/`verify`), `target_email`, `email_in_use`, `account_key_by_email`;
+    - códigos de 6 dígitos guardados só como hash e só em memória: valem 15 min, aceitam 5 tentativas, exigem 60 s entre envios e no máximo 6 por hora;
+    - rotas `POST /api/email/start` (cadastrar ou trocar e-mail, ou reenviar) e `POST /api/email/verify`.
+  - `src/mailer.rs`, módulo novo:
+    - SMTP via `lettre` 0.11 com TLS nativo do Windows (schannel); dependência nova no `Cargo.lock`;
+    - a configuração vem de `data/smtp.json` (há um modelo em `smtp.example.json`) ou de `SANVO_SMTP_*`;
+    - sem configuração, o código só aparece no log (`Mailer::Log`); nos testes, `Mailer::Memory`.
+  - `Account` ganhou `email_verified` e `pending_email`, campos do JSON da conta (sem migração de esquema).
+  - `AuthRequest.email` e `AuthResponse.{code, email_step, email_hint, retry_after}`.
+  - Cadastro: e-mail obrigatório e único, sem diferenciar maiúsculas; o código é enviado no cadastro.
+  - Login e recuperação aceitam e-mail ou nome.
+  - `Config.require_verified_email`: `true` em produção e `false` em `for_tests` (os testes antigos não passam pela confirmação).
+  - O WebSocket envia `EmailVerificationRequired { step, email_hint }` e fecha quando falta o e-mail.
+  - `UpdateAccountEmail`: o novo e-mail fica em `pending_email` até o código ser confirmado, e o e-mail não pode ser removido.
+- **App:**
+  - `auth-screen.js`: modos `add-email` e `verify`, campo de e-mail no cadastro e "E-mail ou nome de usuário" no login;
+  - código com envio automático ao digitar o 6º número, reenviar com contagem regressiva, "Usar outro e-mail" e "Entrar com outra conta";
+  - `connection.js` trata `EmailVerificationRequired` sem apagar a sessão salva;
+  - Configurações → E-mail pede o código (`promptAccountEmailCode`);
+  - textos em `i18n.js`, em pt-BR e en.
+- **Testes:**
+  - `src/email_tests.rs` (4 testes de integração);
+  - unitário em `email_verification`;
+  - `tests/frontend-auth-email.test.cjs` (3 testes);
+  - suítes: 283 frontend e 222 Rust aprovados.
+- **Ensaio real** (servidor de QA na porta 3100, cópia do banco, sem SMTP):
+  - cadastro sem e-mail → 400;
+  - cadastro com e-mail → passo `verify`;
+  - WebSocket → `EmailVerificationRequired`;
+  - login pelo e-mail → 200;
+  - reenvio imediato → 429;
+  - código lido no log → confirmado;
+  - WebSocket → `Welcome`;
+  - mesmo e-mail em outra conta → 409.
+- **Impacto ao publicar:** das 7 contas reais, só 1 tem e-mail e nenhuma está confirmada. Todas vão passar pelo passo de e-mail no próximo login.
+  - **Antes de publicar, configurar `data/smtp.json` no servidor de produção**: sem isso, os códigos só aparecem no log e ninguém consegue confirmar sozinho.
+## 23/11/2026 · Autor das mensagens de sistema: "Sancord" → "Sanvo" (Claude)
+
+- O servidor passou a criar as mensagens de sistema como `Sanvo` e o bot como `Sanvo Bot`, em `social.rs`, `voice.rs`, `ws.rs` (2) e `state.rs`.
+- As mensagens antigas já gravadas continuam com "Sancord" no banco. O app as exibe como "Sanvo" via `renameLegacySystemAuthors` no início de `handleServerMessage` (`app.js`), que só vale para autores de sistema e não renomeia pessoas. `profile-sharing.js` reconhece também "Sanvo Bot".
+- Teste novo: `tests/frontend-sanvo-system-author.test.cjs`. Suítes: 284 frontend e 222 Rust.
+- Cliente instalado no atalho (`qa-desktop-sanvo`, hash `176E5B4EEFFD…`). Ele é compatível com o servidor atual, que não exige e-mail. A troca no servidor só vale depois da próxima publicação.
+- `data/smtp.json` foi criado para `sanvodesktop@gmail.com` com `password` = `COLE-AQUI-A-SENHA-DE-APP`. **O usuário cola a senha de app do Google**; nenhuma IA deve digitar ou ler essa senha.
+### Atualização 23/11/2026: envio real de e-mail homologado
+- `data/smtp.json` está configurado pelo usuário com o Gmail `sanvodesktop@gmail.com`, senha de app (a senha não foi lida nem registrada).
+- O `mailer.rs` ficou mais tolerante:
+  - remove os espaços da senha de app quando o host é `smtp.gmail.com`;
+  - em erro de JSON, o log mostra só linha e coluna, sem o conteúdo do arquivo.
+  - Na primeira tentativa, o usuário tinha colado a senha com uma quebra de linha dentro das aspas.
+- **Ensaio real** no servidor de QA (porta 3100, cópia do banco, com o `smtp.json`):
+  - cadastro de `TesteSmtp458816`;
+  - o Gmail aceitou o envio e o e-mail "655323 é o seu código do Sanvo" chegou na caixa de entrada (confirmado pelo usuário);
+  - `/api/email/verify` respondeu 200, e o WebSocket respondeu `Welcome`.
+  - O servidor de QA foi parado e a cópia do `smtp.json` na pasta de QA foi apagada.
+- **Pronto para publicar.** Tudo o que está só local (rodadas 16 a 18 + Expansão V5, túneis, e-mail obrigatório, autores "Sanvo") pode sair como **v0.2.9**, com autorização.
+  - Ao atualizar a produção, o servidor carrega o `data/smtp.json`, e todas as 7 contas passam pelo passo de e-mail.

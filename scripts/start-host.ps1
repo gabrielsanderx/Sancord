@@ -1,9 +1,13 @@
-param(
+﻿param(
     [switch]$NoTunnel
 )
 $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path $PSScriptRoot -Parent
-$serverExe = Join-Path $projectDir 'SancordServer.exe'
+# Nome atual primeiro; a cópia de transição com o nome antigo fica como reserva.
+$serverExe = @('SanvoServer.exe', 'SancordServer.exe') |
+    ForEach-Object { Join-Path $projectDir $_ } |
+    Where-Object { Test-Path $_ } |
+    Select-Object -First 1
 $cloudflaredExe = Join-Path $projectDir 'cloudflared.exe'
 $dataDir = Join-Path $projectDir 'data'
 $tunnelLog = Join-Path $dataDir 'tunnel.log'
@@ -14,11 +18,11 @@ if (-not (Test-Path $dataDir)) {
 
 $listening = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue
 if (-not $listening) {
-    if (-not (Test-Path $serverExe)) {
-        throw "SancordServer.exe nao encontrado em $serverExe"
+    if (-not $serverExe) {
+        throw "SanvoServer.exe nao encontrado em $projectDir"
     }
     Start-Process -FilePath $serverExe -WorkingDirectory $projectDir -WindowStyle Hidden | Out-Null
-    Write-Host "SancordServer.exe iniciado em segundo plano (porta 3000)."
+    Write-Host "$(Split-Path $serverExe -Leaf) iniciado em segundo plano (porta 3000)."
 } else {
     Write-Host "Backend ja esta escutando na porta 3000."
 }

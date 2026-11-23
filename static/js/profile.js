@@ -73,10 +73,15 @@ function systemPrefersReducedMotion() {
   }
 }
 
-/** "Reduzir animações" (do app ou do Windows) sempre vence: nada anima. */
+function effectiveReduceMotion() {
+  if (state.audioSettings?.reduceMotion) return true;
+  if (state.audioSettings?.syncReducedMotion && systemPrefersReducedMotion()) return true;
+  return false;
+}
+
+/** "Reduzir animações" (do app ou sincronizado com o Windows quando ativado) sempre vence. */
 function profileAnimPolicy() {
-  if (state.audioSettings?.reduceMotion || state.audioSettings?.showProfileAnimations === false ||
-      systemPrefersReducedMotion()) return "never";
+  if (effectiveReduceMotion() || state.audioSettings?.showProfileAnimations === false) return "never";
   const p = state.audioSettings?.profileAnimations;
   return PROFILE_ANIM_POLICIES.includes(p) ? p : "hover";
 }
@@ -94,9 +99,9 @@ function applyProfileAnimPolicy() {
   const sel = document.getElementById("appearance-profile-animations");
   if (sel) {
     sel.value = PROFILE_ANIM_POLICIES.includes(state.audioSettings?.profileAnimations) ? state.audioSettings.profileAnimations : "hover";
-    const reduced = Boolean(state.audioSettings?.reduceMotion) || systemPrefersReducedMotion();
+    const reduced = effectiveReduceMotion();
     sel.disabled = reduced || state.audioSettings?.showProfileAnimations === false;
-    sel.title = reduced ? "Reduzir animações está ativo no Sanvo ou no Windows." : "";
+    sel.title = reduced ? "Reduzir animações está ativo no Sanvo." : "";
   }
   updateProfileMotion();
   if (typeof SancordCosmetics !== "undefined") SancordCosmetics.reconcileIdleBudget();
@@ -108,7 +113,16 @@ let activeProfileEffect = null;
 
 function configureProfileEffect(layer, id) {
   if (!layer) return;
-  const effect = id && id !== "none" && PROFILE_EFFECTS.some(item => item.id === id) ? id : "";
+  const resolved = typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.resolveCosmeticId === "function"
+    ? SancordCosmetics.resolveCosmeticId("profile_effect", id)
+    : id;
+  const isKnown = Boolean(
+    id && id !== "none" && (
+      PROFILE_EFFECTS.some(item => item.id === id) ||
+      (resolved && PROFILE_EFFECTS.some(item => item.id === resolved))
+    )
+  );
+  const effect = isKnown ? id : "";
   if (layer.dataset.profileEffect !== effect) {
     stopProfileEffect(layer);
     layer.dataset.profileEffect = effect;
@@ -180,7 +194,10 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) stopProfileEffect();
 });
 window.addEventListener("blur", () => stopProfileEffect());
-window.matchMedia?.("(prefers-reduced-motion: reduce)")?.addEventListener?.("change", applyProfileAnimPolicy);
+window.matchMedia?.("(prefers-reduced-motion: reduce)")?.addEventListener?.("change", () => {
+  if (typeof applyReduceMotion === "function") applyReduceMotion();
+  else applyProfileAnimPolicy();
+});
 
 document.getElementById("appearance-profile-animations")?.addEventListener("change", (e) => {
   state.audioSettings.profileAnimations = PROFILE_ANIM_POLICIES.includes(e.target.value) ? e.target.value : "hover";
@@ -687,6 +704,10 @@ function renderProfileContextPreview() {
   }
   const nameEl = host.querySelector(".ctx-name");
   if (nameEl && typeof applyNameStyleToEl === "function") applyNameStyleToEl(nameEl, u, "#ffffff");
+  const plateRow = host.querySelector(".ctx-dm-row");
+  if (plateRow && typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.renderNameplateArt === "function") {
+    SancordCosmetics.renderNameplateArt(plateRow, plate ? u.nameplate_style : null);
+  }
   const avatarEl = host.querySelector(".ctx-name") ? host.querySelector(".avatar-status-wrap") : null;
   if (avatarEl) renderDecoratedAvatar(avatarEl.firstElementChild, avatarEl, u);
   refreshAnimatedMedia(host);
@@ -936,7 +957,8 @@ function onFrameVoiceState(userId) {
 // Ícones desenhados para o Sancord.
 // ---------------------------------------------------------------------------
 const BADGE_ICONS = {
-  founder: '<path d="M4 18h16l-1.5-9-4.5 4-2-7-2 7-4.5-4z"/>',
+  founder: '<path d="M4 18h16l-1.5-9-4.5 4-2-7-2 7-4.5-4z" fill="#fbbf24" stroke="#fef3c7" stroke-width="1.3"/><circle cx="12" cy="14" r="1.5" fill="#e11d48" stroke="none"/>',
+  architect: '<polygon points="12,2 21,9 17.5,21 6.5,21 3,9" fill="#0284c7" stroke="#bae6fd" stroke-width="1.2"/><polygon points="12,2 17,9 12,15 7,9" fill="#38bdf8" stroke="none"/><polygon points="12,5 14.8,9 12,12 9.2,9" fill="#e0f2fe" stroke="none"/>',
   developer: '<path d="M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"/>',
   moderator: '<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/>',
   verified_bot: '<path d="M12 2l2.6 2.2 3.4-.4.9 3.3 3 1.7-1.3 3.2 1.3 3.2-3 1.7-.9 3.3-3.4-.4L12 22l-2.6-2.2-3.4.4-.9-3.3-3-1.7L3.4 12 2.1 8.8l3-1.7.9-3.3 3.4.4zM8 12l3 3 5-6"/>',
@@ -944,12 +966,18 @@ const BADGE_ICONS = {
   contributor: '<path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10z"/>',
   bug_hunter: '<path d="M8 8a4 4 0 0 1 8 0v8a4 4 0 0 1-8 0zM12 8v12M4 10h4M16 10h4M4 16h4M16 16h4M9 4l1.5 2M15 4l-1.5 2"/>',
   event_winner: '<path d="M7 4h10v4a5 5 0 0 1-10 0zM12 13v4M8 21h8M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4"/>',
+  sovereign: '<path d="M3.5 18.5h17l-1.4-9.5-3.8 3.6L12 4.5l-3.3 8.1-3.8-3.6z" fill="#d97706" stroke="#fef08a" stroke-width="1.2"/><polygon points="12,11 14.6,14.5 12,17.4 9.4,14.5" fill="#e11d48" stroke="#ffe4e6" stroke-width="0.9"/><circle cx="12" cy="3.8" r="1.4" fill="#fef9c3" stroke="none"/>',
+  astral_guardian: '<path d="M15.8 4.2a8.2 8.2 0 1 0 4.4 12.6A6.5 6.5 0 1 1 15.8 4.2z" fill="#a855f7" stroke="#f3e8ff" stroke-width="1.1"/><polygon points="16.5,5 17.6,8.2 21,9.2 17.6,10.2 16.5,13.5 15.4,10.2 12,9.2 15.4,8.2" fill="#fde68a" stroke="none"/>',
+  dragon_forged: '<path d="M12 2.2c3.8 3.5 7 7.2 7 11.4a7 7 0 0 1-14 0c0-3.2 2-6.1 4.2-8.2.4 2 1.6 3.1 2.8 3.1 0-2.5-.6-4.5 0-6.3z" fill="#ea580c" stroke="#fed7aa" stroke-width="1.1"/><path d="M12 9.5c2 2 3.4 3.8 3.4 6a3.4 3.4 0 0 1-6.8 0c0-1.9 1.2-3.9 3.4-6z" fill="#fef08a" stroke="none"/>',
+  prism_collector: '<polygon points="12,2 20.5,12 12,22 3.5,12" fill="#a855f7" stroke="#e0f2fe" stroke-width="1.1"/><polygon points="12,2 20.5,12 12,12" fill="#22d3ee" stroke="none"/><polygon points="12,12 20.5,12 12,22" fill="#f472b6" stroke="none"/><polygon points="12,6 15.5,12 12,18 8.5,12" fill="#ffffff" fill-opacity="0.72" stroke="none"/>',
+  obsidian_vip: '<polygon points="12,2.2 20.5,7.1 20.5,16.9 12,21.8 3.5,16.9 3.5,7.1" fill="#064e3b" stroke="#fde047" stroke-width="1.3"/><polygon points="12,6.2 16.8,12 12,17.8 7.2,12" fill="#10b981" stroke="#d1fae5" stroke-width="0.9"/><circle cx="12" cy="12" r="1.8" fill="#fef08a" stroke="none"/>',
   early_user: '<path d="M12 3l1.8 5.4L19 10l-5.2 1.6L12 17l-1.8-5.4L5 10l5.2-1.6zM18 16l.8 2.2L21 19l-2.2.8L18 22l-.8-2.2L15 19l2.2-.8z"/>',
   alpha: '<path d="M18 7c-1.5 5-2.5 10-1 11M17 12c-1.4 3.5-3.5 6-6.5 6S6 15.5 6 12.5 8 6 11 6s5 4 6 6z"/>',
   beta: '<path d="M8 21V7a4 4 0 0 1 8 0c0 2-1.5 3.5-3.5 3.5 2.5 0 4.5 1.6 4.5 4s-2 4.5-4.5 4.5c-1.6 0-3.2-.8-4.5-2"/>',
   community: '<path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM2 20c0-3.3 2.7-6 6-6s6 2.7 6 6M12 20c0-3.3 1.8-6 4-6 3.3 0 6 2.7 6 6"/>',
   supporter: '<path d="M12 20l-7-7a4.5 4.5 0 0 1 7-5.6A4.5 4.5 0 0 1 19 13z"/>',
 };
+const EXCLUSIVE_JEWEL_BADGES = new Set(["founder", "architect", "sovereign", "astral_guardian", "dragon_forged", "prism_collector", "obsidian_vip"]);
 
 function badgeDef(id) {
   return (state.cosmetics?.badges || []).find((b) => b.id === id) || null;
@@ -1015,7 +1043,7 @@ function renderProfileBadges(host, badgeIds) {
   for (const id of ids) {
     const def = badgeDef(id);
     const el = document.createElement("span");
-    el.className = `profile-badge ${def?.category === "trust" ? "badge-trust" : "badge-cosmetic"}`;
+    el.className = `profile-badge ${def?.category === "trust" ? "badge-trust" : "badge-cosmetic"}${EXCLUSIVE_JEWEL_BADGES.has(id) ? " badge-jewel" : ""}`;
     el.dataset.badge = id;
     el.setAttribute("role", "img");
     const label = def ? `${def.name} — ${def.description}` : id;
@@ -1044,8 +1072,12 @@ const PICKER_TABS = [
 ];
 const RARITY_LABELS = { common: "Comum", rare: "Rara", epic: "Épica", legendary: "Lendária", event: "Evento", founder: "Fundação" };
 const COLLECTION_LABELS = {
-  classicos: "Clássicos", "sancord-core": "Sanvo Core", "sanvo-core": "Sanvo Core", cosmic: "Cosmic", sakura: "Sakura", cyber: "Cyber", midnight: "Midnight",
-  inferno: "Inferno", frost: "Frost", ocean: "Ocean", retro: "Retrô", royal: "Royal", conquistas: "Conquistas", "temporada-inverno": "Temporada de inverno",
+  classicos: "Clássicos", "sancord-core": "Sanvo Core", "sanvo-core": "Sanvo Core",
+  cosmic: "Astral & Cósmico", sakura: "Sakura & Floral", cyber: "Holográfico & Cyber",
+  synth: "Neon Synthwave", arcane: "Magia & Arcano", seraphim: "Celestial & Serafim",
+  eclipse: "Sombra & Eclipse", dream: "Sonho & Etéreo", midnight: "Midnight",
+  inferno: "Forja Dracônica", frost: "Gelo & Cristal", ocean: "Água & Oceano", abyssal: "Abissal & Oceânico",
+  retro: "Retrô", royal: "Joalheria Real", conquistas: "Conquistas", "temporada-inverno": "Temporada de inverno",
 };
 const picker = { kind: null, tab: "all", selected: null, el: null };
 
@@ -1150,6 +1182,10 @@ function openCosmeticPicker(kind) {
   el.querySelector("[data-cosmetic-owned]").checked = false;
   renderCosmeticPicker();
   el.classList.remove("hidden");
+  if (typeof queueProfileMotion === "function") queueProfileMotion();
+  if (typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.reconcileIdleBudget === "function") {
+    SancordCosmetics.reconcileIdleBudget();
+  }
   setTimeout(() => el.querySelector(".cosmetic-choice.selected, .cosmetic-choice")?.focus(), 0);
 }
 

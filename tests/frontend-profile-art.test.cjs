@@ -20,8 +20,8 @@ test('cartão e editor preservam as camadas, a mídia e o efeito durante mudanç
   assert.ok(image);
   assert.ok(slot('preview-deco-wrap').querySelector('.avatar-art-back + #preview-card-avatar'));
   assert.ok(slot('preview-deco-wrap').querySelector('.avatar-art-front'));
-  assert.equal(preview.querySelectorAll('.frame-art-corner').length, 4);
-  assert.ok(preview.querySelector('.frame-art-crest'));
+  assert.ok(preview.querySelector('.cos-v5-frame'));
+  assert.ok(preview.querySelectorAll('.frame-v5-orn').length >= 3);
   d.getElementById('profile-preview-replay').click();
   assert.ok(slot('preview-effect-layer').classList.contains('is-playing'));
   d.querySelector('[data-pe-open="about"]').click();

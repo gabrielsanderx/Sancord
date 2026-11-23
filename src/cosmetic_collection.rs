@@ -116,11 +116,7 @@ pub fn handle(st: &mut ServerState, uid: &str, message: ClientMessage) -> Result
 }
 
 fn check_owned_key(account: &Account, key: &str) -> Result<(), &'static str> {
-    let owned = cosmetics::catalog().iter().any(|item| {
-        key.split_once(':') == Some((cosmetics::kind_name(item.kind), item.id))
-            && cosmetics::owns(account, item)
-    });
-    if owned {
+    if cosmetics::owns_key(account, key) {
         Ok(())
     } else {
         Err("Este item não está disponível na sua coleção.")

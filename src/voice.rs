@@ -135,7 +135,7 @@ pub(crate) fn private_system_message(st: &mut ServerState, conversation: &str, c
         id: Uuid::new_v4().to_string(),
         channel_id: conversation.to_string(),
         author_id: "system".into(),
-        author_name: "Sancord".into(),
+        author_name: "Sanvo".into(),
         author_color: "#5865F2".into(),
         author_avatar: Some("/logo.png".into()),
         content,

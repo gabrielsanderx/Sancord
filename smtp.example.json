@@ -1,0 +1,9 @@
+{
+  "_comentario": "Copie para data/smtp.json e preencha com a conta que vai enviar os códigos. data/ fica fora do Git. Gmail: use uma senha de app (Conta Google > Segurança > Senhas de app), porta 587, security starttls.",
+  "host": "smtp.gmail.com",
+  "port": 587,
+  "security": "starttls",
+  "username": "seu-email@gmail.com",
+  "password": "SENHA-DE-APP-AQUI",
+  "from": "Sanvo <seu-email@gmail.com>"
+}

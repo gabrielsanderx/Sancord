@@ -40,171 +40,137 @@ const fn item(id: &'static str, kind: Kind, name: &'static str, collection: &'st
 
 use Kind::*;
 
-/// Primeira leva (já existente no cliente): continua gratuita para todos.
-const CLASSIC: &[CosmeticItem] = &[
-    item("flame-violet", AvatarDecoration, "Chama Violeta", "classicos", "common", true, "free"),
-    item("cat-gamer", AvatarDecoration, "Orelhas de Gato RGB", "classicos", "common", true, "free"),
-    item("angel-wings", AvatarDecoration, "Asas Celestiais", "classicos", "common", true, "free"),
-    item("devil-horns", AvatarDecoration, "Chifres Infernais", "classicos", "common", true, "free"),
-    item("cyber-cyan", AvatarDecoration, "Visor Ciano", "classicos", "common", true, "free"),
-    item("sakura-glow", AvatarDecoration, "Pétalas Sakura", "classicos", "common", true, "free"),
-    item("golden-halo", AvatarDecoration, "Coroa Estelar", "classicos", "common", true, "free"),
-    item("crimson-vortex", AvatarDecoration, "Vórtice Escarlate", "classicos", "common", true, "free"),
-    item("rainbow-prism", AvatarDecoration, "Prisma", "classicos", "common", true, "free"),
-    item("galaxy-portal", AvatarDecoration, "Portal Galáctico", "classicos", "common", true, "free"),
-    item("electric-surge", AvatarDecoration, "Descarga Elétrica", "classicos", "common", true, "free"),
-    item("dragon-fire", AvatarDecoration, "Chamas de Dragão", "classicos", "common", true, "free"),
-    item("frost-crown", AvatarDecoration, "Cristais de Gelo", "classicos", "common", true, "free"),
-    item("heart-pixel", AvatarDecoration, "Corações Neon", "classicos", "common", true, "free"),
-    item("neon-glitch", AvatarDecoration, "Anel Duplo Glitch", "classicos", "common", true, "free"),
-    item("blood-moon", AvatarDecoration, "Lua Rubra", "classicos", "common", true, "free"),
-    item("static-royal-crown", AvatarDecoration, "Coroa Imperial", "classicos", "common", false, "free"),
-    item("static-gold", AvatarDecoration, "Louros Dourados", "classicos", "common", false, "free"),
-    item("static-cyber-hud", AvatarDecoration, "Mira Tática", "classicos", "common", false, "free"),
-    item("static-crimson", AvatarDecoration, "Rubi Gótico", "classicos", "common", false, "free"),
-    item("static-diamond", AvatarDecoration, "Diamante Glacial", "classicos", "common", false, "free"),
-    item("static-blurple", AvatarDecoration, "Brasão Sanvo", "classicos", "common", false, "free"),
-    item("static-emerald", AvatarDecoration, "Vinha Esmeralda", "classicos", "common", false, "free"),
-    item("static-angel", AvatarDecoration, "Pérola Celestial", "classicos", "common", false, "free"),
-    item("embers", ProfileEffect, "Brasas Carmesim", "classicos", "common", true, "free"),
-    item("sparkles", ProfileEffect, "Poeira Estelar", "classicos", "common", true, "free"),
-    item("sakura", ProfileEffect, "Chuva de Sakura", "classicos", "common", true, "free"),
-    item("matrix", ProfileEffect, "Código Verde", "classicos", "common", true, "free"),
-    item("lightning", ProfileEffect, "Tempestade Arcana", "classicos", "common", true, "free"),
-    item("snow", ProfileEffect, "Neve Ártica", "classicos", "common", true, "free"),
-    item("confetti", ProfileEffect, "Festa Confete", "classicos", "common", true, "free"),
-    item("cyber", ProfileEffect, "Varredura Holográfica", "classicos", "common", true, "free"),
-    item("hellfire", ProfileEffect, "Inferno Rubro", "classicos", "common", true, "free"),
-    item("galaxy", ProfileEffect, "Nebulosa Rotativa", "classicos", "common", true, "free"),
-    item("glitch", ProfileEffect, "Sinal VHS", "classicos", "common", true, "free"),
-    item("aurora", ProfileEffect, "Aurora Boreal", "classicos", "common", true, "free"),
-    item("crimson", Nameplate, "Carmesim Sombrio", "classicos", "common", false, "free"),
-    item("nebula", Nameplate, "Nebulosa Roxa", "classicos", "common", false, "free"),
-    item("aurora", Nameplate, "Aurora Ciano", "classicos", "common", false, "free"),
-    item("sakura", Nameplate, "Sakura Suave", "classicos", "common", false, "free"),
-    item("gold", Nameplate, "Ouro Real", "classicos", "common", false, "free"),
-    item("cyber", Nameplate, "Grade Cyber", "classicos", "common", false, "free"),
-    item("hellfire", Nameplate, "Chamas Rubras", "classicos", "common", false, "free"),
-    item("frost", Nameplate, "Gelo Ártico", "classicos", "common", false, "free"),
-    item("void", Nameplate, "Vazio Cósmico", "classicos", "common", false, "free"),
-    item("toxic", Nameplate, "Tóxico Neon", "classicos", "common", false, "free"),
-    item("synthwave", Nameplate, "Onda Retrô", "classicos", "common", false, "free"),
+/// Biblioteca Curada V5 — Coleções Flagship Autorais de Arte Pintada do Sanvo.
+/// Qualidade acima de quantidade (#23, #57):
+/// • 4 Avatar Decorations flagship em camadas WebP HiDPI pintadas (`BACK` + `AVATAR` + `FRONT` + `BLINK/FX`)
+/// • 4 Profile Frames flagship assimétricas pintadas (`TL` + `TR` + `BR`) + 4 Conquistas/Temporada exclusivas
+/// • 4 Profile Effects narrativos em 4 atos com sprites WebP pintados e coordenação de moldura
+/// • 4 Nameplates coordenadas por coleção + 26 Estilos & Fontes de Nome
+const V5_AVATAR_DECORATIONS: &[CosmeticItem] = &[
+    item("galaxy-portal", AvatarDecoration, "Astrolábio Celestial", "cosmic", "legendary", true, "free"),
+    item("sakura-glow", AvatarDecoration, "Ramo de Hanami", "sakura", "epic", true, "free"),
+    item("frost-crown", AvatarDecoration, "Dragão Glacial", "frost", "legendary", true, "free"),
+    item("cat-gamer", AvatarDecoration, "Kitsune-Neko Cyber", "cyber", "legendary", true, "free"),
+    item("dragon-fire", AvatarDecoration, "Chamas de Drakon", "inferno", "legendary", true, "free"),
+    item("blood-moon", AvatarDecoration, "Oráculo do Eclipse", "arcane", "legendary", true, "free"),
+    item("ocean-bubbles", AvatarDecoration, "Coroa das Profundezas", "abyssal", "epic", true, "free"),
+    item("angel-wings", AvatarDecoration, "Asas de Serafim", "seraphim", "legendary", true, "free"),
+    item("eclipse-sovereign", AvatarDecoration, "Coroa do Soberano", "conquistas", "founder", true, "badge:sovereign"),
+];
+
+const V5_PROFILE_FRAMES: &[CosmeticItem] = &[
+    item("cosmic-drift", ProfileFrame, "Observatório Astralium", "cosmic", "legendary", true, "free"),
+    item("sakura-wind", ProfileFrame, "Jardim de Hanami", "sakura", "epic", true, "free"),
+    item("frost-glint", ProfileFrame, "Cidadela de Glacium", "frost", "legendary", true, "free"),
+    item("holographic", ProfileFrame, "Chassi Synth-Neko", "cyber", "legendary", true, "free"),
+    item("ember-trail", ProfileFrame, "Forja de Drakon", "inferno", "legendary", true, "free"),
+    item("arcane-grimoire", ProfileFrame, "Grimório Arcano", "arcane", "legendary", true, "free"),
+    item("liquid", ProfileFrame, "Santuário Abissal", "abyssal", "epic", true, "free"),
+    item("seraphim-arch", ProfileFrame, "Arco de Serafim", "seraphim", "legendary", true, "free"),
+    item("sovereign-crest", ProfileFrame, "Trono Soberano", "conquistas", "founder", true, "badge:sovereign"),
+    item("early-user", ProfileFrame, "Pioneira Astral", "conquistas", "founder", false, "badge:early_user"),
+    item("founder", ProfileFrame, "Fundação Imperial", "conquistas", "founder", true, "badge:founder"),
+    item("developer", ProfileFrame, "Arquitetura Dev", "conquistas", "legendary", true, "badge:developer"),
+    item("winter-2026", ProfileFrame, "Solstício Glacial", "temporada-inverno", "event", true, "grant"),
+];
+
+const V5_PROFILE_EFFECTS: &[CosmeticItem] = &[
+    item("star-trail", ProfileEffect, "Eclipse da Nebulosa", "cosmic", "legendary", true, "free"),
+    item("petal-drift", ProfileEffect, "Rajada de Cerejeira", "sakura", "epic", true, "free"),
+    item("polar-ribbon", ProfileEffect, "Tempestade Polar", "frost", "legendary", true, "free"),
+    item("circuit-boot", ProfileEffect, "Inicialização Holográfica", "cyber", "legendary", true, "free"),
+    item("embers", ProfileEffect, "Erupção de Brasas", "inferno", "legendary", true, "free"),
+    item("arcane-sigil", ProfileEffect, "Selo do Eclipse", "arcane", "legendary", true, "free"),
+    item("abyssal-tide", ProfileEffect, "Maré Bioluminescente", "abyssal", "epic", true, "free"),
+    item("seraphim-fall", ProfileEffect, "Chuva de Plumas", "seraphim", "legendary", true, "free"),
+];
+
+const V5_NAMEPLATES: &[CosmeticItem] = &[
+    item("starlit-silt", Nameplate, "Constelação Astralium", "cosmic", "epic", true, "free"),
+    item("twilight-garden", Nameplate, "Ramo de Hanami", "sakura", "epic", true, "free"),
+    item("frost-vein", Nameplate, "Cristais de Glacium", "frost", "epic", false, "free"),
+    item("core-stripe", Nameplate, "Pulso Synth-Neko", "cyber", "epic", true, "free"),
+    item("ember-line", Nameplate, "Veio de Brasa", "inferno", "epic", true, "free"),
+    item("arcane-velvet", Nameplate, "Veludo Arcano", "arcane", "epic", true, "free"),
+    item("tide-glass", Nameplate, "Vidro de Maré", "abyssal", "epic", true, "free"),
+    item("eclipse-gold", Nameplate, "Ouro de Serafim", "seraphim", "legendary", true, "free"),
+];
+
+const V4_NAME_STYLES: &[CosmeticItem] = &[
     item("gta", NameStyle, "Cursiva Vice", "classicos", "common", false, "free"),
-    item("neon", NameStyle, "Neon Nítido", "classicos", "common", false, "free"),
-    item("chrome", NameStyle, "Cromado", "classicos", "common", false, "free"),
-    item("gradient", NameStyle, "Arco-íris Fluido", "classicos", "common", true, "free"),
-    item("fire", NameStyle, "Chamas", "classicos", "common", false, "free"),
-    item("ice", NameStyle, "Cristal Glacial", "classicos", "common", false, "free"),
-    item("sakura", NameStyle, "Rosa Sakura", "classicos", "common", false, "free"),
-    item("retro", NameStyle, "Pixel Retrô", "classicos", "common", false, "free"),
-    item("gothic", NameStyle, "Gótico", "classicos", "common", false, "free"),
-    item("toxic", NameStyle, "Ácido Neon", "classicos", "common", false, "free"),
-    item("royal", NameStyle, "Ouro Imperial", "classicos", "common", false, "free"),
-];
-
-static CATALOG: OnceLock<Vec<CosmeticItem>> = OnceLock::new();
-
-/// Catálogo completo. Itens novos entram em `extra_items()` (fases seguintes).
-pub fn catalog() -> &'static [CosmeticItem] {
-    CATALOG.get_or_init(|| {
-        let mut all = CLASSIC.to_vec();
-        all.extend(extra_items());
-        all
-    })
-}
-
-/// Fase 2 — coleções próprias do Sancord: decorações novas e molduras de perfil.
-/// Arte em SVG/CSS no cliente (`static/js/profile.js` e `ui.css`), desenhada para o Sancord.
-const PHASE2: &[CosmeticItem] = &[
-    // Sancord Core (primeira coleção gratuita completa).
-    item("core-orbit", AvatarDecoration, "Órbita", "sancord-core", "common", true, "free"),
-    item("core-pulse", ProfileFrame, "Pulso Core", "sancord-core", "common", true, "free"),
-    // Decorações novas.
-    item("nebula-orbit", AvatarDecoration, "Órbita Nebular", "cosmic", "rare", true, "free"),
-    item("sakura-fall", AvatarDecoration, "Pétalas ao Vento", "sakura", "rare", true, "free"),
-    item("cyber-ring", AvatarDecoration, "Anel Cyber", "cyber", "rare", true, "free"),
-    item("electric-pulse", AvatarDecoration, "Pulso Elétrico", "cyber", "rare", true, "free"),
-    item("lunar", AvatarDecoration, "Lunar", "midnight", "rare", true, "free"),
-    item("ember", AvatarDecoration, "Brasa", "inferno", "rare", true, "free"),
-    item("snowfall", AvatarDecoration, "Nevada", "frost", "common", true, "free"),
-    item("ocean-bubbles", AvatarDecoration, "Bolhas do Oceano", "ocean", "common", true, "free"),
-    item("digital-rain", AvatarDecoration, "Chuva Digital", "cyber", "rare", true, "free"),
-    item("retro-pixels", AvatarDecoration, "Pixels Retrô", "retro", "common", true, "free"),
-    // Molduras estáticas.
-    item("minimal", ProfileFrame, "Minimal", "sancord-core", "common", false, "free"),
-    item("carbon", ProfileFrame, "Carbono", "midnight", "common", false, "free"),
-    item("cyber-corners", ProfileFrame, "Cantos Cyber", "cyber", "common", false, "free"),
-    item("sakura-corners", ProfileFrame, "Flores de Canto", "sakura", "common", false, "free"),
-    item("royal", ProfileFrame, "Real", "royal", "rare", false, "free"),
-    item("retro-pixel", ProfileFrame, "Pixel Retrô", "retro", "common", false, "free"),
-    item("cosmic", ProfileFrame, "Cósmica", "cosmic", "rare", false, "free"),
-    item("inferno", ProfileFrame, "Inferno", "inferno", "rare", false, "free"),
-    item("frost", ProfileFrame, "Geada", "frost", "common", false, "free"),
-    // Molduras animadas (movimento lento, sem piscar).
-    item("neon-pulse", ProfileFrame, "Neon Pulsante", "cyber", "epic", true, "free"),
-    item("prism-flow", ProfileFrame, "Fluxo Prisma", "sancord-core", "epic", true, "free"),
-    item("electric", ProfileFrame, "Elétrica", "cyber", "epic", true, "free"),
-    item("cosmic-drift", ProfileFrame, "Deriva Cósmica", "cosmic", "epic", true, "free"),
-    item("sakura-wind", ProfileFrame, "Vento Sakura", "sakura", "epic", true, "free"),
-    item("ember-trail", ProfileFrame, "Rastro de Brasa", "inferno", "epic", true, "free"),
-    item("frost-glint", ProfileFrame, "Brilho de Geada", "frost", "epic", true, "free"),
-    item("digital-glitch", ProfileFrame, "Glitch Digital", "cyber", "epic", true, "free"),
-    item("liquid", ProfileFrame, "Líquida", "ocean", "epic", true, "free"),
-    item("holographic", ProfileFrame, "Holográfica", "royal", "legendary", true, "free"),
-    // Molduras reativas (exclusivas do Sancord): reagem a presença e voz, só cosmético.
-    item("reactive-aura", ProfileFrame, "Aura Reativa", "sancord-core", "legendary", true, "free"),
-    item("voice-pulse", ProfileFrame, "Pulso de Voz", "sancord-core", "legendary", true, "free"),
-    // Por conquista: só com a badge, concedida pelo servidor.
-    item("early-user", ProfileFrame, "Pioneira", "conquistas", "founder", false, "badge:early_user"),
-    item("founder", ProfileFrame, "Fundação", "conquistas", "founder", true, "badge:founder"),
-    item("developer", ProfileFrame, "Construção", "conquistas", "legendary", true, "badge:developer"),
-    item("bug-hunter", ProfileFrame, "Caça-Bugs", "conquistas", "epic", false, "badge:bug_hunter"),
-    item("community", ProfileFrame, "Comunidade", "conquistas", "epic", false, "badge:community"),
-    item("event-champion", ProfileFrame, "Campeã de Evento", "conquistas", "event", true, "badge:event_winner"),
-    // Temporada (preparada): só por inventário; quem recebe mantém.
-    item("winter-2026", ProfileFrame, "Inverno 2026", "temporada-inverno", "event", true, "grant"),
-];
-
-/// Fase 3 — efeitos de entrada com arte própria em `static/ui.css`.
-const PHASE3: &[CosmeticItem] = &[
-    item("core-signal", ProfileEffect, "Sinal Core", "sancord-core", "common", true, "free"),
-    item("star-trail", ProfileEffect, "Rastro Celeste", "cosmic", "rare", true, "free"),
-    item("circuit-boot", ProfileEffect, "Circuito de Entrada", "cyber", "common", true, "free"),
-    item("petal-drift", ProfileEffect, "Brisa de Pétalas", "sakura", "common", true, "free"),
-    item("polar-ribbon", ProfileEffect, "Fita Polar", "frost", "rare", true, "free"),
-    item("pixel-assembly", ProfileEffect, "Montagem de Pixels", "retro", "common", true, "free"),
-    item("gravity-well", ProfileEffect, "Poço de Luz", "cosmic", "epic", true, "free"),
-];
-
-const PHASE4: &[CosmeticItem] = &[
-    item("core-stripe", Nameplate, "Faixa Core", "sancord-core", "common", true, "free"),
-    item("circuit-weave", Nameplate, "Trama de Circuitos", "cyber", "common", false, "free"),
-    item("starlit-silt", Nameplate, "Sedimento Estelar", "cosmic", "rare", false, "free"),
-    item("twilight-garden", Nameplate, "Jardim do Crepúsculo", "sakura", "common", false, "free"),
-    item("gold-leaf", Nameplate, "Folha Dourada", "royal", "rare", false, "free"),
-    item("retro-horizon", Nameplate, "Horizonte Retrô", "retro", "common", false, "free"),
-    item("frost-vein", Nameplate, "Veio de Geada", "frost", "rare", false, "free"),
-    item("ember-line", Nameplate, "Linha de Brasa", "inferno", "common", true, "free"),
-    item("tide-glass", Nameplate, "Vidro de Maré", "ocean", "rare", true, "free"),
+    item("neon", NameStyle, "Neon Nítido", "synth", "rare", true, "free"),
+    item("chrome", NameStyle, "Cromado", "cyber", "rare", true, "free"),
+    item("gradient", NameStyle, "Arco-íris Fluido", "sancord-core", "rare", true, "free"),
+    item("fire", NameStyle, "Chamas", "inferno", "common", false, "free"),
+    item("ice", NameStyle, "Cristal Glacial", "frost", "common", false, "free"),
+    item("sakura", NameStyle, "Rosa Sakura", "sakura", "rare", true, "free"),
+    item("retro", NameStyle, "Pixel Retrô", "retro", "common", false, "free"),
+    item("gothic", NameStyle, "Gótico", "royal", "common", false, "free"),
+    item("toxic", NameStyle, "Ácido Neon", "cyber", "common", false, "free"),
+    item("royal", NameStyle, "Ouro Imperial", "royal", "rare", true, "free"),
     item("modern", NameStyle, "Moderno", "sancord-core", "common", false, "free"),
     item("rounded", NameStyle, "Arredondado", "sancord-core", "common", false, "free"),
     item("mono", NameStyle, "Monoespaçado", "cyber", "common", false, "free"),
     item("editorial", NameStyle, "Editorial", "royal", "common", false, "free"),
     item("bubble", NameStyle, "Pop Bubble", "sakura", "common", false, "free"),
     item("cyber", NameStyle, "Cyber Tech", "cyber", "rare", false, "free"),
-    item("fantasy", NameStyle, "Fantasia", "royal", "rare", false, "free"),
+    item("fantasy", NameStyle, "Fantasia", "arcane", "rare", false, "free"),
     item("outline", NameStyle, "Contorno Artístico", "sancord-core", "common", false, "free"),
-    item("glow", NameStyle, "Brilho Suave", "cosmic", "common", true, "free"),
-    item("prism", NameStyle, "Prismático", "cosmic", "rare", true, "free"),
-    item("holographic", NameStyle, "Holográfico", "cyber", "rare", true, "free"),
+    item("glow", NameStyle, "Brilho Suave", "cosmic", "rare", true, "free"),
+    item("prism", NameStyle, "Prismático", "cosmic", "epic", true, "free"),
+    item("holographic", NameStyle, "Holográfico", "cyber", "epic", true, "free"),
     item("gummy", NameStyle, "Gel Gummy", "sakura", "rare", false, "free"),
     item("ink", NameStyle, "Tinta Artística", "retro", "rare", false, "free"),
     item("cosmic", NameStyle, "Cósmico Fluido", "cosmic", "epic", true, "free"),
-    item("custom-gradient", NameStyle, "Gradiente Personalizado", "sancord-core", "common", true, "free"),
+    item("custom-gradient", NameStyle, "Gradiente Personalizado", "sancord-core", "rare", true, "free"),
 ];
 
-fn extra_items() -> Vec<CosmeticItem> {
-    PHASE2.iter().chain(PHASE3).chain(PHASE4).cloned().collect()
+/// IDs legados gratuitos retirados da vitrine V5, mas ainda aceitos no backend para
+/// compatibilidade transparente com contas e presets antigos (o cliente renderiza o sucessor V5).
+const LEGACY_FREE_IDS: &[(Kind, &str)] = &[
+    (AvatarDecoration, "core-orbit"), (AvatarDecoration, "electric-pulse"),
+    (AvatarDecoration, "cyber-ring"), (AvatarDecoration, "lunar"), (AvatarDecoration, "static-royal-crown"),
+    (AvatarDecoration, "static-emerald"), (AvatarDecoration, "static-cyber-hud"), (AvatarDecoration, "static-diamond"),
+    (AvatarDecoration, "flame-violet"), (AvatarDecoration, "devil-horns"), (AvatarDecoration, "cyber-cyan"),
+    (AvatarDecoration, "golden-halo"), (AvatarDecoration, "crimson-vortex"), (AvatarDecoration, "rainbow-prism"),
+    (AvatarDecoration, "electric-surge"), (AvatarDecoration, "heart-pixel"), (AvatarDecoration, "neon-glitch"),
+    (AvatarDecoration, "nebula-orbit"), (AvatarDecoration, "sakura-fall"), (AvatarDecoration, "ember"),
+    (AvatarDecoration, "snowfall"), (AvatarDecoration, "digital-rain"), (AvatarDecoration, "retro-pixels"),
+    (AvatarDecoration, "static-gold"), (AvatarDecoration, "static-crimson"), (AvatarDecoration, "static-blurple"),
+    (AvatarDecoration, "static-angel"),
+    (ProfileFrame, "core-pulse"), (ProfileFrame, "neon-pulse"), (ProfileFrame, "eclipse-crown"),
+    (ProfileFrame, "dream-sanctuary"), (ProfileFrame, "reactive-aura"),
+    (ProfileFrame, "voice-pulse"), (ProfileFrame, "royal"), (ProfileFrame, "cyber-corners"), (ProfileFrame, "minimal"),
+    (ProfileFrame, "carbon"), (ProfileFrame, "sakura-corners"), (ProfileFrame, "retro-pixel"),
+    (ProfileFrame, "cosmic"), (ProfileFrame, "inferno"), (ProfileFrame, "frost"),
+    (ProfileFrame, "prism-flow"), (ProfileFrame, "electric"), (ProfileFrame, "digital-glitch"),
+    (ProfileEffect, "core-signal"), (ProfileEffect, "eclipse-flare"),
+    (ProfileEffect, "synth-overdrive"), (ProfileEffect, "dream-butterflies"),
+    (ProfileEffect, "sparkles"), (ProfileEffect, "sakura"), (ProfileEffect, "matrix"),
+    (ProfileEffect, "lightning"), (ProfileEffect, "snow"), (ProfileEffect, "confetti"),
+    (ProfileEffect, "cyber"), (ProfileEffect, "hellfire"), (ProfileEffect, "galaxy"),
+    (ProfileEffect, "glitch"), (ProfileEffect, "aurora"), (ProfileEffect, "pixel-assembly"),
+    (ProfileEffect, "gravity-well"),
+    (Nameplate, "dream-mist"), (Nameplate, "circuit-weave"), (Nameplate, "gold-leaf"),
+    (Nameplate, "crimson"), (Nameplate, "nebula"), (Nameplate, "aurora"), (Nameplate, "sakura"),
+    (Nameplate, "gold"), (Nameplate, "cyber"), (Nameplate, "hellfire"), (Nameplate, "frost"),
+    (Nameplate, "void"), (Nameplate, "toxic"), (Nameplate, "synthwave"), (Nameplate, "retro-horizon"),
+];
+
+static CATALOG: OnceLock<Vec<CosmeticItem>> = OnceLock::new();
+
+/// Catálogo oficial V5 exibido na vitrine do cliente.
+pub fn catalog() -> &'static [CosmeticItem] {
+    CATALOG.get_or_init(|| {
+        V5_AVATAR_DECORATIONS
+            .iter()
+            .chain(V5_PROFILE_FRAMES)
+            .chain(V5_PROFILE_EFFECTS)
+            .chain(V5_NAMEPLATES)
+            .chain(V4_NAME_STYLES)
+            .cloned()
+            .collect()
+    })
 }
 
 /// Badges oficiais. "trust" = confirmação/confiança (sempre visíveis, nunca confundidas com
@@ -225,6 +191,7 @@ pub const MAX_VISIBLE_BADGES: usize = 6;
 
 pub const BADGES: &[BadgeDef] = &[
     BadgeDef { id: "founder", name: "Fundador do Sanvo", category: "trust", description: "Fundador oficial do projeto Sanvo.", can_hide: true },
+    BadgeDef { id: "architect", name: "Arquiteto do Sanvo", category: "trust", description: "Idealizador e arquiteto principal do ecossistema Sanvo.", can_hide: true },
     BadgeDef { id: "developer", name: "Desenvolvimento", category: "trust", description: "Faz parte da equipe de desenvolvimento.", can_hide: true },
     BadgeDef { id: "moderator", name: "Moderação oficial", category: "trust", description: "Modera a comunidade oficial.", can_hide: true },
     BadgeDef { id: "verified_bot", name: "Bot verificado", category: "trust", description: "Integração verificada pelo Sanvo.", can_hide: false },
@@ -232,6 +199,11 @@ pub const BADGES: &[BadgeDef] = &[
     BadgeDef { id: "contributor", name: "Contribuição", category: "trust", description: "Contribuiu com código, tradução ou documentação.", can_hide: true },
     BadgeDef { id: "bug_hunter", name: "Caça-Bugs", category: "trust", description: "Ajudou a encontrar problemas importantes.", can_hide: true },
     BadgeDef { id: "event_winner", name: "Vencedora de evento", category: "trust", description: "Venceu um evento oficial.", can_hide: true },
+    BadgeDef { id: "sovereign", name: "Soberano Imperial", category: "cosmetic", description: "Insígnia exclusiva de prestígio supremo no Sanvo.", can_hide: true },
+    BadgeDef { id: "astral_guardian", name: "Guardião Astralium", category: "cosmetic", description: "Portador da relíquia original da coleção Astralium.", can_hide: true },
+    BadgeDef { id: "dragon_forged", name: "Forjado em Drakon", category: "cosmetic", description: "Distinção rara da Forja Dracônica.", can_hide: true },
+    BadgeDef { id: "prism_collector", name: "Colecionador Prismático", category: "cosmetic", description: "Colecionador lendário de cosméticos flagship do Sanvo.", can_hide: true },
+    BadgeDef { id: "obsidian_vip", name: "Núcleo Obsidiana", category: "cosmetic", description: "Membro exclusivo do círculo fechado Obsidiana.", can_hide: true },
     BadgeDef { id: "early_user", name: "Pioneira", category: "cosmetic", description: "Conta criada na fase inicial do Sanvo.", can_hide: true },
     BadgeDef { id: "alpha", name: "Alpha", category: "cosmetic", description: "Participou do Alpha.", can_hide: true },
     BadgeDef { id: "beta", name: "Beta", category: "cosmetic", description: "Participou do Beta.", can_hide: true },
@@ -486,16 +458,44 @@ pub fn check_equip(acc: &Account, kind: Kind, requested: &str) -> Result<Option<
         }
         return Ok(Some(id.to_string()));
     }
-    let item = find(kind, id).ok_or("Este item não existe no catálogo do Sanvo.")?;
-    if !owns(acc, item) {
-        return Err("Você ainda não possui este item.");
+    if let Some(item) = find(kind, id) {
+        if !owns(acc, item) {
+            return Err("Você ainda não possui este item.");
+        }
+        return Ok(Some(item.id.to_string()));
     }
-    Ok(Some(item.id.to_string()))
+    if LEGACY_FREE_IDS.iter().any(|&(k, legacy)| k == kind && legacy == id) {
+        return Ok(Some(id.to_string()));
+    }
+    Err("Este item não existe no catálogo do Sanvo.")
 }
 
-/// Chaves de inventário que a conta possui (gratuitos inclusos), para o cliente filtrar.
+/// Verifica se a conta possui a chave `"tipo:id"` (incluindo aliases legados gratuitos).
+pub fn owns_key(acc: &Account, key: &str) -> bool {
+    let Some((k_str, id)) = key.split_once(':') else {
+        return false;
+    };
+    if catalog()
+        .iter()
+        .any(|item| kind_name(item.kind) == k_str && item.id == id && owns(acc, item))
+    {
+        return true;
+    }
+    LEGACY_FREE_IDS
+        .iter()
+        .any(|&(k, legacy)| kind_name(k) == k_str && legacy == id)
+}
+
+/// Chaves de inventário que a conta possui (gratuitos + aliases legados inclusos), para o cliente filtrar.
 pub fn owned_keys(acc: &Account) -> Vec<String> {
-    catalog().iter().filter(|i| owns(acc, i)).map(inventory_key).collect()
+    let mut keys: Vec<String> = catalog().iter().filter(|i| owns(acc, i)).map(inventory_key).collect();
+    for &(kind, id) in LEGACY_FREE_IDS {
+        let key = format!("{}:{id}", kind_name(kind));
+        if !keys.iter().any(|k| k == &key) {
+            keys.push(key);
+        }
+    }
+    keys
 }
 
 #[cfg(test)]
@@ -553,5 +553,30 @@ mod tests {
         assert_eq!(visible[1], "founder");
         assert!(visible.contains(&"verified_bot".to_string()));
         assert!(!visible.contains(&"developer".to_string()));
+    }
+
+    #[test]
+    fn exclusive_sovereign_badges_and_cosmetics_require_server_grant() {
+        for id in ["architect", "sovereign", "astral_guardian", "dragon_forged", "prism_collector", "obsidian_vip"] {
+            assert!(badge(id).is_some(), "insígnia exclusiva ausente: {id}");
+        }
+        let regular: Account = serde_json::from_value(serde_json::json!({
+            "id": "1", "username": "Comum", "password_hash": "x", "avatar_color": "#5865f2"
+        })).unwrap();
+        assert!(check_equip(&regular, AvatarDecoration, "eclipse-sovereign").is_err());
+        assert!(check_equip(&regular, ProfileFrame, "sovereign-crest").is_err());
+
+        let mut owner: Account = serde_json::from_value(serde_json::json!({
+            "id": "2", "username": "Swag", "password_hash": "x", "avatar_color": "#2563eb"
+        })).unwrap();
+        sync_account_badges(&mut owner, &["sovereign".into()]);
+        assert_eq!(
+            check_equip(&owner, AvatarDecoration, "eclipse-sovereign").unwrap(),
+            Some("eclipse-sovereign".into())
+        );
+        assert_eq!(
+            check_equip(&owner, ProfileFrame, "sovereign-crest").unwrap(),
+            Some("sovereign-crest".into())
+        );
     }
 }

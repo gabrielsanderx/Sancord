@@ -4491,22 +4491,26 @@ body.compact-messages .message-item {
 
 .deco-spin-slow {
   animation: decoSpin 7s linear infinite;
-  transform-origin: 50% 50%;
+  transform-box: view-box;
+  transform-origin: 50px 50px;
 }
 
 .deco-spin-fast {
   animation: decoSpin 2.8s linear infinite;
-  transform-origin: 50% 50%;
+  transform-box: view-box;
+  transform-origin: 50px 50px;
 }
 
 .deco-spin-reverse {
   animation: decoSpinRev 4.5s linear infinite;
-  transform-origin: 50% 50%;
+  transform-box: view-box;
+  transform-origin: 50px 50px;
 }
 
 .deco-pulse-soft {
   animation: decoPulseSoft 2s ease-in-out infinite alternate;
-  transform-origin: 50% 50%;
+  transform-box: view-box;
+  transform-origin: 50px 50px;
 }
 
 @keyframes decoSpin {
@@ -5272,26 +5276,28 @@ body.streamer-mode #copy-invite-rail-btn {
   backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
-  padding: 12px;
+  padding: 10px 11px;
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 9px;
   margin-top: 4px;
 }
 
 .profile-info-block label {
   display: block;
-  font-size: 10.5px;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.62);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.58);
   margin-bottom: 3px;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .profile-info-block p {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--text-header);
-  line-height: 1.4;
+  line-height: 1.38;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -7173,7 +7179,12 @@ body[data-theme="light"] .active-now-card {
 
 /* Diálogos (UI kit) */
 .sancord-dialog-backdrop {
-  z-index: 3000;
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-dialog, 3000);
 }
 .sancord-dialog {
   max-width: 460px;

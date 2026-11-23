@@ -191,3 +191,54 @@ test('UI de Voz e vídeo: 5 modos de supressão, AEC/AGC independentes, Quick to
   assert.match(d.getElementById('dsp-dev-diagnostics').textContent, /48000 Hz/);
   assert.equal(d.getElementById('mic-clip-pill').classList.contains('hidden'), false);
 });
+
+test('createLocalAudioStream e botão Ligar não disparam Illegal invocation com getter WebIDL em AudioContext.prototype.audioWorklet', async (t) => {
+  const h = await openInterface(t);
+  const res = JSON.parse(await h.run(`(async () => {
+    function FakeAudioContext() {
+      this.state = 'running';
+      this.currentTime = 0;
+    }
+    FakeAudioContext.prototype.resume = () => Promise.resolve();
+    FakeAudioContext.prototype.close = () => Promise.resolve();
+    FakeAudioContext.prototype.createMediaStreamSource = () => ({ connect(){} });
+    FakeAudioContext.prototype.createBiquadFilter = () => ({ frequency: {}, Q: {}, connect(){} });
+    FakeAudioContext.prototype.createGain = () => ({ gain: { value: 1, setTargetAtTime(){} }, connect(){} });
+    FakeAudioContext.prototype.createAnalyser = () => ({ fftSize: 512, getFloatTimeDomainData(){}, connect(){} });
+    FakeAudioContext.prototype.createDynamicsCompressor = () => ({ threshold:{}, knee:{}, ratio:{}, attack:{}, release:{}, connect(){} });
+    FakeAudioContext.prototype.createMediaStreamDestination = () => ({
+      stream: { getTracks: () => [{ stop(){} }], getAudioTracks: () => [{ enabled: true, stop(){} }] }
+    });
+    Object.defineProperty(FakeAudioContext.prototype, 'audioWorklet', {
+      configurable: true,
+      get() {
+        if (!(this instanceof FakeAudioContext)) throw new TypeError('Illegal invocation');
+        return null;
+      }
+    });
+    window.AudioContext = FakeAudioContext;
+    window.AudioWorkletNode = function() {};
+    window.navigator.mediaDevices.getUserMedia = async () => ({
+      getTracks: () => [{ stop(){} }],
+      getAudioTracks: () => [{ enabled: true, stop(){} }]
+    });
+    window.navigator.mediaDevices.enumerateDevices = async () => [];
+    window.__sent = [];
+    sendWs = (type, payload) => { window.__sent.push({ type, payload }); return true; };
+    state.selfUser = { id: 'u1', username: 'Swag', display_name: 'Swag' };
+    openDmConversation('dm:ana__swag', { username: 'Ana', display_name: 'Ana' });
+    document.getElementById('dm-call-btn').click();
+    await new Promise(r => setTimeout(r, 80));
+    const out = {
+      currentVoice: state.currentVoiceChannel,
+      sent: window.__sent,
+      label: document.getElementById('dm-call-btn-label').textContent,
+    };
+    leaveVoiceChannel({ silent: true });
+    return JSON.stringify(out);
+  })()`));
+
+  assert.equal(res.currentVoice, 'dmvoice:ana__swag');
+  assert.equal(res.label, 'Desligar');
+  assert.ok(res.sent.some(m => m.type === 'JoinVoice' && m.payload.channel_id === 'dmvoice:ana__swag'));
+});

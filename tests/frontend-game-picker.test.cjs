@@ -234,3 +234,39 @@ test('Lista de desejos (#pe-add-wishlist) reutiliza o mesmo GamePicker central',
   assert.equal(h.run('boardEditor.draft.widgets[0].kind'), 'want_to_play');
   assert.equal(h.run('boardEditor.draft.widgets[0].game_id'), 'steam:730');
 });
+
+test('GamePicker e detalhes usam modal-backdrop fixo acima das Configurações e resolvem URL via SancordNet', async (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const seenUrls = [];
+  const h = await setup(t, {
+    fetchImpl: async (url) => {
+      seenUrls.push(String(url));
+      return { ok: true, json: async () => ({ ok: true, games: MOCK_CATALOG }) };
+    },
+  });
+  const d = h.document;
+  d.getElementById('open-board-editor').click();
+  await h.run('receive("ProfileBoardState", {board:{revision:1, audience:"everyone", widgets:[]}})');
+  d.getElementById('board-widget-kind').value = 'favorite_game';
+  d.getElementById('board-add-widget').click();
+  await h.flush();
+
+  const overlay = d.querySelector('[data-game-picker="1"]');
+  assert.ok(overlay.classList.contains('modal-backdrop'), 'overlay do GamePicker deve ter .modal-backdrop');
+  assert.ok(overlay.classList.contains('sancord-dialog-backdrop'));
+  assert.ok(overlay.classList.contains('gp-backdrop'));
+  assert.ok(seenUrls.some((u) => u.includes('/api/games/popular') && /^https?:\/\//.test(u)),
+    'deve resolver URL do catálogo via SancordNet.url (não cair em modo offline no desktop)');
+
+  overlay.querySelector('[data-gp-cancel="1"]').click();
+  await h.flush();
+
+  h.run('SancordGamePicker.openGameDetails({ widget: { kind: "favorite_game", name: "ELDEN RING" } })');
+  const detailsOverlay = d.querySelector('[data-game-details="1"]');
+  assert.ok(detailsOverlay.classList.contains('modal-backdrop'), 'modal de detalhes deve ter .modal-backdrop');
+
+  const uiCss = fs.readFileSync(path.join(__dirname, '..', 'static', 'ui.css'), 'utf8');
+  assert.match(uiCss, /\.gp-backdrop\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*var\(--z-dialog/s,
+    '.gp-backdrop deve ser position:fixed com z-index var(--z-dialog) acima das Configurações');
+});
