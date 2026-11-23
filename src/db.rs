@@ -35,7 +35,7 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use tracing::{error, info, warn};
 
-pub const SCHEMA_VERSION: i64 = 22;
+pub const SCHEMA_VERSION: i64 = 23;
 
 /// Metadados de um arquivo enviado (o conteúdo fica em `data/uploads/`).
 #[derive(Debug, Clone, PartialEq)]
@@ -632,6 +632,9 @@ fn migrate_schema(conn: &Connection) -> DbResult<()> {
              PRAGMA user_version = 22;",
         )?;
         txn.commit()?;
+    }
+    if version < 23 {
+        conn.execute_batch(include_str!("sanoted.sql"))?;
     }
     Ok(())
 }
@@ -1376,7 +1379,7 @@ impl Db {
         }
     }
 
-    fn with_reader<T>(&self, f: impl FnOnce(&Connection) -> DbResult<T>) -> DbResult<T> {
+    pub(crate) fn with_reader<T>(&self, f: impl FnOnce(&Connection) -> DbResult<T>) -> DbResult<T> {
         let conn = self.reader.lock().map_err(|_| DbError::Closed)?;
         f(&conn)
     }

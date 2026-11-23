@@ -2,6 +2,55 @@
 // Sancord — Cliente WebSockets + WebRTC P2P Mesh (Voz & Compartilhamento de Tela)
 // ============================================================================
 
+const AMBIENT_IDLE_MS = 15000;
+let visualWindowHidden = false;
+let ambientLastInput = 0;
+let ambientIdleTimer = null;
+
+function isVisualWindowHidden() {
+  return document.hidden || window.__SANVO_WINDOW_MINIMIZED === true;
+}
+
+function pauseAmbientWhenIdle() {
+  ambientIdleTimer = null;
+  if (!document.body.dataset.ambientFx || isVisualWindowHidden()) return;
+  const remaining = AMBIENT_IDLE_MS - (performance.now() - ambientLastInput);
+  if (remaining > 0) ambientIdleTimer = setTimeout(pauseAmbientWhenIdle, remaining);
+  else document.documentElement.classList.add("ambient-idle");
+}
+
+function noteAmbientInput() {
+  if (!document.body.dataset.ambientFx || isVisualWindowHidden()) return;
+  ambientLastInput = performance.now();
+  if (ambientIdleTimer === null) {
+    document.documentElement.classList.remove("ambient-idle");
+    ambientIdleTimer = setTimeout(pauseAmbientWhenIdle, AMBIENT_IDLE_MS);
+  }
+}
+
+function syncAmbientAnimation() {
+  clearTimeout(ambientIdleTimer);
+  ambientIdleTimer = null;
+  document.documentElement.classList.remove("ambient-idle");
+  noteAmbientInput();
+}
+
+function syncVisualWindow() {
+  const hidden = isVisualWindowHidden();
+  if (hidden === visualWindowHidden) return;
+  visualWindowHidden = hidden;
+  document.documentElement.classList.toggle("visual-window-hidden", hidden);
+  syncAmbientAnimation();
+  document.dispatchEvent(new Event("sanvo:visual-visibility"));
+}
+
+document.addEventListener("visibilitychange", syncVisualWindow);
+window.addEventListener("sanvo:window-visibility", syncVisualWindow);
+for (const kind of ["pointermove", "pointerdown", "keydown", "wheel"]) {
+  document.addEventListener(kind, noteAmbientInput, { passive: true });
+}
+syncVisualWindow();
+
 const RTC_CONFIG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -171,11 +220,13 @@ function applyAppThemeSettings() {
   }
   const glass = Number.isFinite(Number(s.glassIntensity)) ? Number(s.glassIntensity) : 60;
   document.documentElement.style.setProperty("--glass-intensity", String(glass));
+  const previousAmbient = document.body.dataset.ambientFx;
   if (s.ambientFx && s.ambientFx !== "none") {
     document.body.dataset.ambientFx = s.ambientFx;
   } else {
     delete document.body.dataset.ambientFx;
   }
+  if (previousAmbient !== document.body.dataset.ambientFx) syncAmbientAnimation();
   document.body.dataset.radius = s.uiRadius || "discord";
   document.body.classList.toggle("voice-glow-enabled", s.voiceGlow !== false);
   document.body.classList.toggle("compact-messages", Boolean(s.compactMode));
@@ -975,6 +1026,8 @@ function storeSession(token, username, remember) {
 }
 
 function clearStoredSession() {
+  state.sanotedAccountId = null;
+  window.Sanoted?.bind(null);
   for (const storage of [localStorage, sessionStorage]) {
     SancordSessions.remove(storage, "sancord_token");
     SancordSessions.remove(storage, "sancord_username");
@@ -1159,6 +1212,11 @@ async function handleServerMessage(msg) {
       break;
     }
 
+    case "SanotedChanged": {
+      window.Sanoted?.remoteChanged();
+      break;
+    }
+
     case "Welcome": {
       const accountChanged = state.selfUser?.username?.toLowerCase() !== payload.user?.username?.toLowerCase();
       state.awaitingReconnectSocial = !cached && !accountChanged && SancordConnection.restoredView();
@@ -1170,6 +1228,8 @@ async function handleServerMessage(msg) {
       state.historyPageSize = payload.history_page_size || 50;
       state.historyState = new Map();
       state.selfUser = payload.user;
+      state.sanotedAccountId = payload.account_id || null;
+      window.Sanoted?.bind(state.sanotedAccountId);
       SancordOutbox.bind(payload.user?.username);
       state.composerCapabilities = new Set(payload.composer_capabilities || []);
       resetBoardEditorOnAccountChange();
@@ -2422,7 +2482,7 @@ async function createLocalAudioStream(forceRebuild = false) {
       if (!msg) return;
       if (msg.type === "diagnostics") {
         dspObj.lastDiagnostics = msg.data;
-        renderDspDiagnostics(msg.data);
+        if (!isVisualWindowHidden()) renderDspDiagnostics(msg.data);
       } else if (msg.type === "fallback") {
         dspObj.nsFallback = true;
         console.warn("[SancordDSP] Fallback ativado durante processamento:", msg.error);
@@ -2458,14 +2518,15 @@ async function createLocalAudioStream(forceRebuild = false) {
     }
 
     gateGainNode.gain.setTargetAtTime(shouldPass ? 1.0 : 0.0, ctx.currentTime, 0.012);
+    if (isVisualWindowHidden()) return;
 
-    if (micMeterFill) {
+    if (micMeterFill && !micMeterFill.closest(".hidden,[hidden]")) {
       const pct = Math.max(0, Math.min(100, ((db + 80) / 80) * 100));
       micMeterFill.style.width = `${pct}%`;
       micMeterFill.classList.toggle("active", db >= threshold);
     }
 
-    if (micBarsMeter && micBarsMeter.children.length > 0) {
+    if (micBarsMeter?.children.length && !micBarsMeter.closest(".hidden,[hidden]")) {
       const pctNorm = Math.max(0, Math.min(1, (db + 75) / 65));
       const totalBars = micBarsMeter.children.length;
       const litCount = Math.round(pctNorm * totalBars);
@@ -2652,15 +2713,14 @@ function leaveVoiceChannel({ silent = false } = {}) {
 
 function startVoicePingMonitor() {
   stopVoicePingMonitor();
-  updateVoicePingDisplay();
-  state.voicePingInterval = setInterval(updateVoicePingDisplay, 2500);
+  state.voicePingEnabled = true;
+  syncVoiceDisplayTimers();
 }
 
 function stopVoicePingMonitor() {
-  if (state.voicePingInterval) {
-    clearInterval(state.voicePingInterval);
-    state.voicePingInterval = null;
-  }
+  state.voicePingEnabled = false;
+  clearInterval(state.voicePingInterval);
+  state.voicePingInterval = null;
   if (voiceSignalBox) {
     if (typeof closeVoiceDetails === "function") closeVoiceDetails();
     voiceSignalBox.title = "Qualidade do Sinal";
@@ -2701,7 +2761,7 @@ function startVoiceCallTimer() {
   if (voiceCallTimerEl) {
     voiceCallTimerEl.textContent = "00:00";
   }
-  state.voiceCallTimerInterval = setInterval(updateVoiceCallTimer, 1000);
+  syncVoiceDisplayTimers();
 }
 
 function stopVoiceCallTimer() {
@@ -2718,6 +2778,24 @@ function stopVoiceCallTimer() {
 async function updateVoicePingDisplay() {
   if (typeof refreshVoiceConnectionDetails === "function") await refreshVoiceConnectionDetails();
 }
+
+function syncVoiceDisplayTimers() {
+  if (isVisualWindowHidden()) {
+    clearInterval(state.voiceCallTimerInterval);
+    clearInterval(state.voicePingInterval);
+    state.voiceCallTimerInterval = state.voicePingInterval = null;
+    return;
+  }
+  if (state.voiceCallStartedAt && state.voiceCallTimerInterval == null) {
+    updateVoiceCallTimer();
+    state.voiceCallTimerInterval = setInterval(updateVoiceCallTimer, 1000);
+  }
+  if (state.voicePingEnabled && state.voicePingInterval == null) {
+    void updateVoicePingDisplay();
+    state.voicePingInterval = setInterval(updateVoicePingDisplay, 2500);
+  }
+}
+document.addEventListener("sanvo:visual-visibility", syncVoiceDisplayTimers);
 
 function createOrGetPeerConnection(peerId) {
   if (state.peers.has(peerId)) {
@@ -3789,7 +3867,7 @@ function setupVoiceActivityDetection(stream, getUserIdFn) {
     source.connect(analyser);
 
     const data = new Float32Array(analyser.fftSize);
-    const timer = setInterval(() => {
+    const updateSpeakingIndicator = () => {
       const uid = getUserIdFn();
       if (!uid) return;
 
@@ -3815,9 +3893,22 @@ function setupVoiceActivityDetection(stream, getUserIdFn) {
           .querySelectorAll(`[data-speaking-card="${uid}"]`)
           .forEach((el) => el.classList.toggle("speaking-border", isSpeaking));
       }
-    }, 120);
+    };
+    let timer = null;
+    const syncTimer = () => {
+      if (isVisualWindowHidden()) {
+        clearInterval(timer);
+        timer = null;
+      } else if (timer === null) {
+        updateSpeakingIndicator();
+        timer = setInterval(updateSpeakingIndicator, 120);
+      }
+    };
+    syncTimer();
+    document.addEventListener("sanvo:visual-visibility", syncTimer);
     return () => {
       clearInterval(timer);
+      document.removeEventListener("sanvo:visual-visibility", syncTimer);
       try {
         source.disconnect();
       } catch (_) {}
@@ -7517,6 +7608,7 @@ function getDmVoiceIdFromDmId(dmId) {
 }
 
 function switchToServerView() {
+  window.Sanoted?.hide();
   state.activeView = "server";
   state.activeDmId = null;
 
@@ -7562,6 +7654,7 @@ function switchToServerView() {
 }
 
 function switchToHomeFriendsView(tabName = null) {
+  window.Sanoted?.hide();
   state.activeView = "home";
   state.homeSection = "friends";
   state.activeDmId = null;
@@ -7594,6 +7687,7 @@ function switchToHomeFriendsView(tabName = null) {
 }
 
 function switchToHomeStarredView() {
+  window.Sanoted?.hide();
   state.activeView = "home";
   state.homeSection = "starred";
   state.activeDmId = null;
@@ -7699,6 +7793,7 @@ function renderHomeStarredView() {
 }
 
 function openDmConversation(dmId, peerObj = null) {
+  window.Sanoted?.hide();
   state.activeView = "home";
   state.activeDmId = dmId;
   const attach = document.getElementById("attach-image-btn");
@@ -8162,6 +8257,7 @@ function renderHomeFirstSteps() {
 }
 
 function renderFriendsView() {
+  if (state.homeSection === "sanoted") return;
   if (!friendsMainView) return;
   renderActiveNowPanel();
   const showFirstSteps = renderHomeFirstSteps();

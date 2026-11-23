@@ -301,9 +301,15 @@ const TITLEBAR_INIT_SCRIPT: &str = r#"
     document.getElementById("tb-max").addEventListener("click", () => {
       window.ipc?.postMessage("maximize");
     });
-    document.getElementById("tb-close").addEventListener("click", () => {
-      window.ipc?.postMessage("close");
-    });
+    window.requestSanvoWindowClose = async (nativeClose = false) => {
+      try {
+        await window.Sanoted?.flushLocal();
+        window.ipc?.postMessage(nativeClose ? "close-native" : "close");
+      } catch (_) {
+        window.showErrorToast?.("Termine de salvar as alterações locais do Sanoted antes de fechar.");
+      }
+    };
+    document.getElementById("tb-close").addEventListener("click", () => window.requestSanvoWindowClose());
   }
 
   if (document.readyState === "loading") {
@@ -955,6 +961,10 @@ fn main() {
                         std::process::exit(0);
                     }
                 }
+                "close-native" => {
+                    desktop_taskbar::apply_taskbar_badge(win_ipc.hwnd() as isize, 0);
+                    std::process::exit(0);
+                }
                 _ => {}
             }
         });
@@ -975,8 +985,21 @@ fn main() {
     };
     desktop_permissions::grant_app_media(&webview);
 
+    let mut last_minimized = None;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
+        let page_loaded = matches!(&event, Event::UserEvent(UserEvent::PageLoaded(_)));
+        if page_loaded || matches!(&event, Event::WindowEvent {
+            event: WindowEvent::Resized(_) | WindowEvent::Focused(_), ..
+        }) {
+            let minimized = window.is_minimized();
+            if page_loaded || last_minimized != Some(minimized) {
+                last_minimized = Some(minimized);
+                let _ = webview.evaluate_script(&format!(
+                    "window.__SANVO_WINDOW_MINIMIZED = {minimized}; window.dispatchEvent(new Event('sanvo:window-visibility'));"
+                ));
+            }
+        }
         match event {
             Event::UserEvent(UserEvent::Navigate(url)) => {
                 // Endereço digitado pelo próprio usuário na tela de conexão.
@@ -1065,8 +1088,10 @@ fn main() {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                desktop_taskbar::apply_taskbar_badge(window.hwnd() as isize, 0);
-                *control_flow = ControlFlow::Exit;
+                if webview.evaluate_script("if (window.requestSanvoWindowClose) window.requestSanvoWindowClose(true); else window.ipc.postMessage('close-native');").is_err() {
+                    desktop_taskbar::apply_taskbar_badge(window.hwnd() as isize, 0);
+                    *control_flow = ControlFlow::Exit;
+                }
             }
             _ => {}
         }

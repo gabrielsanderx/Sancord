@@ -52,6 +52,7 @@ const SancordIcons = (() => {
     'arrow-up': '<path d="M12 20V4m-6 6 6-6 6 6"/>',
     'arrow-down': '<path d="M12 4v16m-6-6 6 6 6-6"/>',
     check: '<path d="m4 12 5 5L20 6"/>',
+    square: '<rect x="4" y="4" width="16" height="16" rx="3"/>',
     globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3q-7 9 0 18M12 3q7 9 0 18"/>',
     eye: '<path d="M2 12q10-16 20 0-10 16-20 0z"/><circle cx="12" cy="12" r="3"/>',
     'eye-off': '<path d="M3 3l18 18M8 6q8-4 14 6-2 3-5 5M14 19q-7 1-12-7 2-3 4-4M10 10a3 3 0 0 0 4 4"/>',

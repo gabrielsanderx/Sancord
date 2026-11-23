@@ -139,10 +139,10 @@ function summarizeVoiceStats(reports) {
 
 async function refreshVoiceConnectionDetails() {
   const channelId = state.currentVoiceChannel;
-  if (!channelId) return;
+  if (!channelId || isVisualWindowHidden()) return;
   const generation = ++voiceStatsGeneration;
   const replies = await Promise.allSettled([...state.peers.values()].map(async ({ pc }) => summarizeVoiceStats(await pc.getStats())));
-  if (generation !== voiceStatsGeneration || channelId !== state.currentVoiceChannel) return;
+  if (generation !== voiceStatsGeneration || channelId !== state.currentVoiceChannel || isVisualWindowHidden()) return;
   const samples = replies.filter(result => result.status === "fulfilled").map(result => result.value);
   const measured = samples.filter(sample => sample.rtt != null).sort((a, b) => b.rtt - a.rtt);
   const sample = measured[0] || samples[0];

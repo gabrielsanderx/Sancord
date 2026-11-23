@@ -166,6 +166,13 @@ pub fn disk_path(data_dir: &Path, id: &str, ext: &str) -> PathBuf {
     data_dir.join("uploads").join(shard).join(format!("{id}.{ext}"))
 }
 
+pub(crate) fn write_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, bytes)
+}
+
 fn json_error(status: StatusCode, message: &str) -> Response {
     (status, Json(serde_json::json!({ "ok": false, "message": message }))).into_response()
 }
@@ -236,10 +243,7 @@ pub async fn upload_handler(
     let write_path = path.clone();
     let written = tokio::task::spawn_blocking(move || -> std::io::Result<String> {
         let digest = hex::encode(Sha256::digest(&data));
-        if let Some(parent) = write_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&write_path, &data)?;
+        write_file(&write_path, &data)?;
         Ok(digest)
     })
     .await;
@@ -291,26 +295,32 @@ pub async fn download_handler(
         }
     };
     let path = disk_path(&data_dir, &record.id, &record.ext);
+    let inline = matches!(record.kind.as_str(), "image" | "video" | "audio" | "sticker" | "voice");
+    serve_file(path, req, &record.filename, &record.content_type, inline, false).await
+}
+
+pub(crate) async fn serve_file(
+    path: PathBuf, req: Request<Body>, filename: &str, mime: &str, inline: bool, authenticated: bool,
+) -> Response {
     let mut res = match tower_http::services::ServeFile::new(&path).oneshot(req).await {
         Ok(r) => r.into_response(),
         Err(e) => {
-            warn!("Falha ao servir anexo {id}: {e}");
+            warn!("Falha ao servir anexo: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
     if !res.status().is_success() && res.status() != StatusCode::PARTIAL_CONTENT && res.status() != StatusCode::NOT_MODIFIED {
         return res;
     }
-    let inline = matches!(record.kind.as_str(), "image" | "video" | "audio" | "sticker" | "voice");
     let headers = res.headers_mut();
-    let ct = if inline { record.content_type.as_str() } else { "application/octet-stream" };
+    let ct = if inline { mime } else { "application/octet-stream" };
     if let Ok(v) = HeaderValue::from_str(ct) {
         headers.insert(header::CONTENT_TYPE, v);
     }
     let disposition = format!(
         "{}; filename*=UTF-8''{}",
         if inline { "inline" } else { "attachment" },
-        url_encode_component(&record.filename)
+        url_encode_component(filename)
     );
     if let Ok(v) = HeaderValue::from_str(&disposition) {
         headers.insert(header::CONTENT_DISPOSITION, v);
@@ -323,7 +333,7 @@ pub async fn download_handler(
     // O conteúdo de um ID nunca muda: o cliente pode guardar em cache para sempre.
     headers.insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("private, max-age=31536000, immutable"),
+        HeaderValue::from_static(if authenticated { "private, no-store" } else { "private, max-age=31536000, immutable" }),
     );
     res
 }

@@ -213,6 +213,9 @@
               </span>
               <span class="home-new-pill">NOVO</span>
             </button>
+            <button type="button" id="open-sanoted-btn" class="home-friends-btn">
+              <span class="home-friends-left"><span data-ui-icon="file" aria-hidden="true"></span><span>Sanoted</span></span>
+            </button>
           </div>
 
           <div class="section-title-row dm-section-head">
@@ -322,6 +325,58 @@
 
     <!-- Área Central (Amigos OU Palco de Voz/Tela + Chat/DM) -->
     <main class="main-content">
+      <section id="sanoted" class="sanoted hidden" aria-labelledby="sanoted-heading">
+        <header class="sanoted-header">
+          <button type="button" id="sanoted-toggle-list" class="header-tool-btn" aria-controls="sanoted-library" aria-expanded="true" title="Mostrar ou recolher lista"><span data-ui-icon="folder" aria-hidden="true"></span></button>
+          <h2 id="sanoted-heading">Sanoted</h2>
+          <label class="sanoted-search"><span data-ui-icon="search" aria-hidden="true"></span><input id="sanoted-search" type="search" placeholder="Pesquisar notas" aria-label="Pesquisar notas"></label>
+          <button type="button" id="sanoted-new" class="btn-primary"><span data-ui-icon="plus" aria-hidden="true"></span>Nova nota</button>
+        </header>
+        <div class="sanoted-body">
+          <aside id="sanoted-library" class="sanoted-library" aria-label="Biblioteca de notas">
+            <nav class="sanoted-filters" aria-label="Filtros de notas">
+              <button type="button" data-note-filter="all">Todas</button><button type="button" data-note-filter="recent">Recentes</button>
+              <button type="button" data-note-filter="favorite">Favoritas</button><button type="button" data-note-filter="trash">Lixeira</button>
+            </nav>
+            <div class="sanoted-folder-header">Pastas <button type="button" id="sanoted-folder-new" class="header-tool-btn" title="Nova pasta"><span data-ui-icon="plus" aria-hidden="true"></span></button></div>
+            <div id="sanoted-folders" class="sanoted-folders"></div>
+            <label class="sanoted-order"><span>Ordenar</span><select id="sanoted-order" aria-label="Ordenar notas"><option value="updated">Última edição</option><option value="created">Criação</option><option value="title">Título</option></select></label>
+            <div id="sanoted-notes" class="sanoted-notes" aria-label="Notas"></div>
+          </aside>
+          <div class="sanoted-workspace">
+            <div id="sanoted-empty" class="sanoted-empty"></div>
+            <section id="sanoted-document" class="sanoted-document hidden" aria-label="Editor de notas">
+              <div class="sanoted-meta"><span id="sanoted-location"></span><span id="sanoted-status" role="status"></span>
+                <button type="button" id="sanoted-retry" class="btn-secondary small-btn hidden">Tentar novamente</button>
+                <button type="button" id="sanoted-more" class="header-tool-btn" title="Ações da nota"><span data-ui-icon="more" aria-hidden="true"></span></button>
+              </div>
+              <div id="sanoted-conflict" class="sanoted-conflict hidden" role="alert"></div>
+              <div class="sanoted-page">
+                <input id="sanoted-title" maxlength="160" placeholder="Sem título" aria-label="Título da nota" autocomplete="off">
+                <div id="sanoted-toolbar" class="sanoted-toolbar" role="group" aria-label="Formatação">
+                  <button type="button" data-note-command="paragraph" title="Texto normal">¶</button>
+                  <button type="button" data-note-command="heading" title="Título">H1</button>
+                  <button type="button" data-note-command="subheading" title="Subtítulo">H2</button>
+                  <button type="button" data-note-command="bold" title="Negrito (Ctrl+B)"><strong>B</strong></button>
+                  <button type="button" data-note-command="italic" title="Itálico (Ctrl+I)"><em>I</em></button>
+                  <button type="button" data-note-command="underline" title="Sublinhado"><u>U</u></button>
+                  <button type="button" data-note-command="strikeThrough" title="Tachado"><s>S</s></button>
+                  <button type="button" data-note-command="insertUnorderedList" title="Lista com marcadores">• Lista</button>
+                  <button type="button" data-note-command="insertOrderedList" title="Lista numerada (Ctrl+Shift+7)">1. Lista</button>
+                  <button type="button" data-note-command="checklist" title="Checklist"><span data-ui-icon="check" aria-hidden="true"></span></button>
+                  <button type="button" data-note-command="quote" title="Citação">❝</button>
+                  <button type="button" data-note-command="code" title="Bloco de código">&lt;/&gt;</button>
+                  <button type="button" data-note-command="link" title="Inserir link"><span data-ui-icon="link" aria-hidden="true"></span></button>
+                  <button type="button" data-note-command="image" title="Inserir imagem"><span data-ui-icon="image" aria-hidden="true"></span></button>
+                  <button type="button" data-note-command="file" title="Anexar arquivo"><span data-ui-icon="file" aria-hidden="true"></span></button>
+                </div>
+                <div id="sanoted-editor" class="sanoted-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Conteúdo da nota" data-placeholder="Comece a escrever…" spellcheck="true"></div>
+                <input id="sanoted-file" type="file" hidden multiple>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
       <!-- Tela de Amigos estilo Discord -->
       <section id="friends-main-view" class="friends-main-view hidden">
         <header class="friends-topbar">
@@ -4212,5 +4267,8 @@
   <script src="/js/stickers.js?v=1"></script>
   <script src="/js/voice-recorder.js?v=1"></script>
   <script src="/js/scheduled.js?v=1"></script>
+  <script src="/js/sanoted-storage.js?v=1"></script>
+  <script src="/js/sanoted-editor.js?v=1"></script>
+  <script src="/js/sanoted.js?v=1"></script>
 </body>
 </html>

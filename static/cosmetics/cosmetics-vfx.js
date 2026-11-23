@@ -16,6 +16,18 @@
   const instances = new Map();
   let rafId = null;
   let lastTs = 0;
+  const canvasObserver = typeof IntersectionObserver === "function" ? new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      const rec = instances.get(entry.target);
+      if (rec) rec.visible = entry.isIntersecting && entry.intersectionRatio > 0;
+    }
+    kickLoop();
+  }) : null;
+
+  function unregisterCanvas(canvas) {
+    canvasObserver?.unobserve(canvas);
+    instances.delete(canvas);
+  }
 
   const SPRITE_URLS = Object.freeze({
     petal: "/cosmetics/assets/fx_sakura_petal.webp",
@@ -139,7 +151,7 @@
 
   function isWindowActive() {
     if (typeof document === "undefined") return true;
-    if (document.hidden) return false;
+    if (document.hidden || document.documentElement.classList.contains("visual-window-hidden")) return false;
     return !document.body?.classList?.contains("profile-window-inactive");
   }
 
@@ -906,7 +918,7 @@
         rec.ctx.clearRect(0, 0, rec.w, rec.h);
         card?.classList?.remove("cos-effect-climax");
         rec.done = true;
-        instances.delete(rec.canvas);
+        unregisterCanvas(rec.canvas);
         return;
       }
       if (card) card.classList.toggle("cos-effect-climax", p >= 0.38 && p <= 0.78);
@@ -923,29 +935,28 @@
 
   function tick(ts) {
     rafId = null;
-    if (!instances.size) return;
+    if (!instances.size || !isWindowActive()) { lastTs = 0; return; }
     const rawDt = lastTs ? (ts - lastTs) / 1000 : 0.016;
     const dt = Math.min(0.05, Math.max(0.002, rawDt));
     lastTs = ts;
 
     const reduced = isReducedMotion();
-    const activeWin = isWindowActive();
     let anyRunning = false;
     let drawnThisFrame = 0;
 
     for (const [canvas, rec] of [...instances.entries()]) {
       if (!canvas.isConnected || rec.done) {
-        instances.delete(canvas);
+        unregisterCanvas(canvas);
         continue;
       }
-      if (canvas.closest(".hidden, [hidden]")) continue;
+      if (!rec.visible || !rec.ctx || canvas.closest(".hidden, [hidden]")) continue;
 
       if (rec.kind === "effect") {
-        if (reduced || !activeWin) {
+        if (reduced) {
           rec.ctx?.clearRect(0, 0, rec.w || 1, rec.h || 1);
           rec.host?.closest?.(".profile-card")?.classList?.remove("cos-effect-climax");
           rec.done = true;
-          instances.delete(canvas);
+          unregisterCanvas(canvas);
           continue;
         }
         drawInstance(rec, dt);
@@ -967,7 +978,6 @@
       }
       rec.stillRendered = false;
 
-      if (!activeWin) continue;
       if (rec.isMini && !isMiniHoveredOrSelected(rec.host)) {
         if (!rec.miniStillDrawn) { rec.t = 1.4; drawInstance(rec, 0); rec.miniStillDrawn = true; }
         continue;
@@ -986,7 +996,22 @@
   }
 
   function kickLoop() {
-    if (rafId !== null || !instances.size) return;
+    let hasVisibleCanvas = false;
+    for (const [canvas, rec] of instances) {
+      if (canvas.isConnected) {
+        rec.mounted = true;
+        hasVisibleCanvas ||= rec.visible && Boolean(rec.ctx);
+      } else if (rec.mounted) {
+        unregisterCanvas(canvas);
+      }
+    }
+    if (!isWindowActive()) {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = null;
+      lastTs = 0;
+      return;
+    }
+    if (rafId !== null || !hasVisibleCanvas) return;
     if (typeof requestAnimationFrame !== "function") return;
     lastTs = 0;
     rafId = requestAnimationFrame(tick);
@@ -1016,11 +1041,14 @@
       done: false,
       stillRendered: false,
       miniStillDrawn: false,
+      visible: !canvasObserver,
+      mounted: canvas.isConnected,
       w: 0,
       h: 0,
     };
     if (rec.density <= 0) return false;
     instances.set(canvas, rec);
+    canvasObserver?.observe(canvas);
     kickLoop();
     return true;
   }
@@ -1048,7 +1076,7 @@
   function detachAvatarVfx(wrapEl) {
     if (!wrapEl) return;
     wrapEl.querySelectorAll(":scope > .deco-svg-layer > .cos-vfx-canvas").forEach((c) => {
-      instances.delete(c);
+      unregisterCanvas(c);
       c.remove();
     });
   }
@@ -1073,7 +1101,7 @@
   function detachFrameVfx(cardEl) {
     if (!cardEl) return;
     cardEl.querySelectorAll(":scope > .pf-layer .cos-vfx-frame").forEach((c) => {
-      instances.delete(c);
+      unregisterCanvas(c);
       c.remove();
     });
   }
@@ -1097,13 +1125,14 @@
     if (!layerEl) return;
     layerEl.closest?.(".profile-card")?.classList?.remove("cos-effect-climax");
     layerEl.querySelectorAll(".cos-vfx-effect").forEach((c) => {
-      instances.delete(c);
+      unregisterCanvas(c);
       c.remove();
     });
   }
 
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", kickLoop);
+    document.addEventListener("sanvo:visual-visibility", kickLoop);
     global.addEventListener?.("focus", kickLoop);
     document.addEventListener("pointerover", (e) => {
       if (e.target instanceof Element && e.target.closest(".pe-choice, .cosmetic-choice")) kickLoop();

@@ -25,6 +25,7 @@ export async function runProfileArtQa(page, evaluate) {
   await evaluate(`(() => {
     state.audioSettings.profileAnimations = 'always';
     state.audioSettings.reduceMotion = false;
+    state.audioSettings.syncReducedMotion = true;
     applyProfileVisualSettings();
     document.getElementById('login-modal').classList.add('hidden');
     state.selfUser = { id:'qa-self', username:'Lume', display_name:'Lume', status_kind:'online', online:true,

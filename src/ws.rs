@@ -643,7 +643,8 @@ async fn join_authenticated(user_id: &str, mut acc: Account, state: &SharedState
             let read_states = st.read_states_for(&account_id, &final_lower);
 
             let welcome = ServerMessage::Welcome {
-                composer_capabilities: vec!["media_v1".into(), "scheduling_v1".into(), "connection_v1".into(), "activity_v1".into(), "search_v2".into()],
+                account_id: account_id.clone(),
+                composer_capabilities: vec!["media_v1".into(), "scheduling_v1".into(), "connection_v1".into(), "activity_v1".into(), "search_v2".into(), "sanoted_v1".into()],
                 user: user_info.clone(),
                 text_channels: st.text_channels.clone(),
                 voice_channels: st.voice_channels.clone(),

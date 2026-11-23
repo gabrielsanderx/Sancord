@@ -69,6 +69,8 @@ mod composer;
 mod hub_removal;
 #[path = "email_tests.rs"]
 mod email;
+#[path = "sanoted_tests.rs"]
+mod sanoted;
 
 struct TestServer {
     addr: std::net::SocketAddr,

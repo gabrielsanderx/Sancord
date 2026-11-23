@@ -7,9 +7,11 @@ import { resolve, join, dirname } from 'node:path';
 import { promisify } from 'node:util';
 import { registerProfileQaAccount, runLiveProfileQa, runProfileArtQa } from './profile-art-qa.mjs';
 import { runComposerVoiceQa } from './composer-voice-qa.mjs';
+import { runIdleQa } from './idle-qa.mjs';
 
 const composerVoiceQa = process.argv.includes('--composer-voice');
 const liveProfileQa = process.argv.includes('--live-profile');
+const idleQa = process.argv.includes('--idle');
 
 const exec = promisify(execFile);
 const delay = ms => new Promise(r => setTimeout(r, ms));
@@ -35,10 +37,10 @@ let backend;
 const data = await mkdtemp(join(tmpdir(), 'sancord-profile-p8-'));
 const executable = resolve(process.env.SANCORD_QA_EXE || 'target/debug/SancordApp.exe');
 let endpoint;
-if (liveProfileQa) {
+if (liveProfileQa || idleQa) {
   const bind = '127.0.0.1:' + await freePort();
   endpoint = 'http://' + bind;
-  backend = spawn(join(dirname(executable), 'sancord.exe'), [], { windowsHide: true, stdio: 'ignore', env: {
+  backend = spawn(process.env.SANCORD_QA_BACKEND || join(dirname(executable), 'sancord.exe'), [], { windowsHide: true, stdio: 'ignore', env: {
     ...process.env, SANCORD_BIND: bind, SANCORD_DATA_DIR: join(data, 'backend'),
     SANCORD_LOG_DIR: join(data, 'logs'), SANCORD_DISCOVERY: '0',
   } });
@@ -128,7 +130,9 @@ try {
     if (!ready) await delay(100);
   }
   if (!ready) throw Error('O frontend embutido do Sancord não terminou de iniciar.');
-  if (liveProfileQa) {
+  if (idleQa) {
+    await runIdleQa(page, evaluate, endpoint, join(data, 'logs'), process.argv.includes('--baseline'));
+  } else if (liveProfileQa) {
     const account = await registerProfileQaAccount(endpoint, 'LumeQA');
     const viewer = await registerProfileQaAccount(endpoint, 'NorteQA');
     await runLiveProfileQa(page, evaluate, endpoint, account, viewer);

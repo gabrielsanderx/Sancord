@@ -614,7 +614,7 @@ window.addEventListener(
       openShortcutsHelp();
       return;
     }
-    if (ctrl && !e.shiftKey && (e.key === "f" || e.key === "F") && typeof chatSearchInput !== "undefined" && chatSearchInput) {
+    if (ctrl && !e.shiftKey && (e.key === "f" || e.key === "F") && state.homeSection !== "sanoted" && typeof chatSearchInput !== "undefined" && chatSearchInput) {
       // Substitui a busca da página do WebView pela busca do Sancord.
       e.preventDefault();
       chatSearchInput.focus();

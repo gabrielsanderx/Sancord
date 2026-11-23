@@ -2346,7 +2346,7 @@
 
   function canRunIdleEvents(el, rec) {
     if (!el || !el.isConnected) return false;
-    if (document.hidden || isReducedMotionActive()) return false;
+    if (document.hidden || document.documentElement.classList.contains("visual-window-hidden") || isReducedMotionActive()) return false;
     if (typeof profileWindowFocused !== "undefined" && !profileWindowFocused) return false;
     if (el.closest(".hidden, [hidden]")) return false;
     if (rec.context === CONTEXTS.MEMBER_LIST) return false;

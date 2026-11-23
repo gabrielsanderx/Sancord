@@ -190,8 +190,8 @@ function playProfileEffect(layer) {
 document.querySelectorAll("[data-replay-profile-effect]").forEach(button => {
   button.addEventListener("click", () => playProfileEffect(document.getElementById(button.dataset.replayProfileEffect)));
 });
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) stopProfileEffect();
+document.addEventListener("sanvo:visual-visibility", () => {
+  if (isVisualWindowHidden()) stopProfileEffect();
 });
 window.addEventListener("blur", () => stopProfileEffect());
 window.matchMedia?.("(prefers-reduced-motion: reduce)")?.addEventListener?.("change", () => {

@@ -38,6 +38,7 @@ mod profile_sharing;
 pub mod nicknames;
 pub mod timeouts;
 pub mod uploads;
+mod sanoted;
 pub mod updates;
 pub mod validate;
 pub mod voice;
@@ -101,6 +102,7 @@ pub fn build_router(state: SharedState) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),
         )
         .route("/api/attachments/:id/:name", get(uploads::download_handler))
+        .merge(sanoted::routes())
         .route("/api/link-preview/:channel/:message/:index", get(link_preview::image_handler))
         .route("/ws", get(ws::ws_handler))
         .layer(middleware::from_fn(response_headers))

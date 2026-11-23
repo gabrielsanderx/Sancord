@@ -24,6 +24,7 @@ const SancordOfflineCache = (() => {
       date: Date.now(), username: state.selfUser.username.toLowerCase(),
       route: { server: state.activeServerId, channel: state.currentTextChannel, dm: state.activeDmId, view: state.activeView },
       welcome: {
+        account_id: state.sanotedAccountId,
         user: noVoice(state.selfUser), servers: state.servers, prefs: state.prefs,
         users: [...state.users.values()].map(noVoice), chat_history: history,
         voice_members: {}, ice_servers: [], read_states: [...(state.readStates || [])].map(([channel_id, read]) => ({ channel_id, ...read })),

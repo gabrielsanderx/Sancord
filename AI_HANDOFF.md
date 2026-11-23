@@ -1995,3 +1995,44 @@ Implementação local sobre as fontes da v0.2.3. O cliente Windows continua carr
   - O servidor de QA foi parado e a cópia do `smtp.json` na pasta de QA foi apagada.
 - **Pronto para publicar.** Tudo o que está só local (rodadas 16 a 18 + Expansão V5, túneis, e-mail obrigatório, autores "Sanvo") pode sair como **v0.2.9**, com autorização.
   - Ao atualizar a produção, o servidor carrega o `data/smtp.json`, e todas as 7 contas passam pelo passo de e-mail.
+## 23/11/2026 · v0.2.9 publicada e produção atualizada (Claude, autorizado pelo usuário)
+- **Commit:** `dcbda7c39dfae1a2b3934f559c54c1a341c71709` na `main` (pai `535a0fa`, sem force), feito pela API do GitHub.
+  - 119 arquivos, todos com o hash de blob conferido. As imagens WebP foram enviadas byte a byte, e só os arquivos de texto tiveram as quebras de linha normalizadas para LF.
+  - `sancord-release validate v0.2.9` OK.
+  - Auditoria limpa: nenhum segredo, URL de túnel, e-mail pessoal ou senha de app. A pasta `data/` (com o `smtp.json`) ficou fora.
+  - Testes: 284 frontend e 222 Rust.
+- **Tag** `v0.2.9`: run 45240839610 ("Stable Windows release") e "Windows CI", ambos com sucesso. Release publicada em 23/11 às 19:03Z.
+  - `SanvoServer.exe`: sha256 `99a1ab39…ecb81`.
+  - `Sanvo.exe`: sha256 `5e6882cb…65ec`.
+- **Produção:**
+  1. Parado o PID 16096 (`SanvoServer.exe`, caminho conferido).
+  2. Backup em `data-backup-pre-0.2.9-20261123-1603/`, igual por hash (exceto `tunnel.log`), com `SanvoServer-0.2.8-local.exe`.
+  3. `SanvoServer.exe` e a cópia `SancordServer.exe` trocados pelo oficial e religados com `start-host.ps1`. Ficou 1 túnel só.
+- **Conferido:**
+  - o log mostra "SMTP configurado (smtp.gmail.com:587)";
+  - `/api/health` responde `0.2.9`, local e pelo túnel;
+  - banco v22, `integrity_check = ok`, 7 contas.
+- **Cliente:** cliente oficial instalado: 5E6882CBF592.
+- **Rollback:** restaurar `data/` desse backup e voltar `SanvoServer-0.2.8-local.exe`.
+- **Efeito:** as 7 contas passam pelo passo de e-mail no próximo login, com o código enviado pelo Gmail `sanvodesktop@gmail.com`.
+
+## 23/11/2026 · Workspace volta a focar no Sanvo Desktop
+
+- A etapa experimental do aplicativo móvel foi retirada antes de publicação, incluindo o projeto, a homologação e os recursos exclusivos dele nos arquivos compartilhados. A cópia de recuperação está fora do repositório.
+- Os arquivos compartilhados alterados nessa etapa foram comparados com a tag pública `v0.2.9` e voltaram ao conteúdo da release. A produção usa os binários oficiais dessa tag, conferidos por SHA-256. O atalho aponta para `D:\Sancord\Sanvo.exe`.
+
+## 23/11/2026 · Otimização em repouso e ao minimizar
+
+- O host Windows informa ao WebView2 o estado real de minimização. O frontend suspende animações CSS e cancela os timers de duração, qualidade da chamada, indicadores remotos de fala e contadores de atividade enquanto a janela está oculta. Ao restaurar, os indicadores voltam a partir do estado e dos horários existentes. O processamento de captura e o heartbeat continuam rodando.
+- O Canvas de cosméticos desenha nas áreas visíveis, incluindo a posição de rolagem. O fundo animado opcional pausa após 15 segundos sem interação e retoma com mouse, teclado ou rolagem. Os medidores do microfone evitam atualizações do DOM quando estão fora de vista.
+- `node scripts/profile-motion-qa.mjs --idle` valida minimização real, restauração, rolagem e `Pong` de um backend Rust isolado. Use `--idle --baseline` com o `.exe` anterior para comparar. No ensaio de 16 segundos, o Canvas recortado foi de 1.602 desenhos a zero e o visível manteve 1.602. O tempo de tarefas do renderizador foi de 361 ms para 329 ms nesse cenário. O ensaio não mede o consumo total da GPU.
+
+## 23/11/2026 · Sanoted no cliente desktop
+
+- A Home abre a área **Sanoted** abaixo de Servidores. `static/js/sanoted.js` cuida da biblioteca, pastas aninhadas, pesquisa, filtros, ordenação, lixeira e sincronização. O editor de `static/js/sanoted-editor.js` usa blocos JSON para títulos, formatação, citação, código, listas, checklists, links e referências de anexos. Os atalhos na área são Ctrl+N, Ctrl+F, Ctrl+B, Ctrl+I e Ctrl+Shift+7.
+- A migração SQLite 23 cria `sanoted_notes`, `sanoted_folders` e `sanoted_assets`. Todas as consultas de `src/sanoted.rs` usam a conta obtida da sessão Bearer. É o ID persistente da conta, distinto do ID da conexão. O campo `user_id` enviado dentro de uma mutação é rejeitado. As rotas não expõem HTML, links de anexo públicos nem identificadores internos de disco. O WebSocket envia apenas uma sinalização de mudança às sessões da mesma conta.
+- `static/js/sanoted-storage.js` grava a edição local durante a digitação. Os registros e arquivos do IndexedDB são cifrados com AES-GCM e a chave é protegida por DPAPI, com escopo por conta e origem do backend. O fechamento pela janela aguarda a gravação local. Uma nota aberta anteriormente pode ser editada offline e as alterações pendentes são recuperadas após reiniciar. O cache inicial depende da sessão lembrada e do snapshot offline já existente no cliente.
+- O envio ao backend espera 650 ms de pausa. O cliente reaproveita a reconexão do Sanvo e mantém o rascunho se a sincronização falhar. Cada mutação leva uma revisão-base e um UUID de operação, para deduplicação e resposta de conflito. O usuário pode manter sua edição ou usar a versão retornada pelo servidor. Na reconexão e ao receber uma mudança privada, o cliente atualiza a biblioteca e carrega o documento selecionado conforme necessário.
+- Imagens por colagem, arraste ou seletor e arquivos PDF ou texto passam pelo mesmo diretório de uploads existente. O backend valida formato, dimensões e tamanho e usa um identificador interno aleatório no disco. A leitura exige a conta autorizada e só é atendida pela rota privada. Imagens podem ser ampliadas, redimensionadas e legendadas, com carregamento sob demanda. Os limites são 500 notas, 100 pastas, 128 KiB por documento, 10 MiB por arquivo, 24 anexos armazenados por nota e 250 MiB por conta. Anexos removidos do documento permanecem associados à nota até a exclusão permanente, para preservar a resolução de conflitos.
+- QA de API em `src/sanoted_tests.rs`. QA de ponta a ponta em `scripts/sanoted-qa.mjs` com processos Windows, backend e perfis WebView2 descartáveis. O teste derruba o backend de QA, recupera uma edição e uma imagem após encerrar o cliente e confere a sincronização em outro perfil. A colagem e o arraste são exercitados com eventos de entrada do WebView2. O atalho físico Win+Shift+S e a sincronização entre dois computadores físicos ficam para homologação.
+- Entrega local, com atualização conjunta de cliente e backend necessária para disponibilizar a área em produção.

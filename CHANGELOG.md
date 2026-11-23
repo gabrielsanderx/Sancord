@@ -1,5 +1,17 @@
 # Histórico de versões
 
+## 0.2.10
+
+### Sanoted (notas privadas no desktop)
+- **Área dedicada na Home:** acesse o **Sanoted** abaixo de *Servidores* para organizar notas privadas com pastas aninhadas, pesquisa instantânea, filtros (Todas, Favoritas, Lixeira), ordenação, fixação e lixeira com restauração ou exclusão permanente.
+- **Editor de blocos ricos e anexos:** suporte a títulos, negrito, itálico, citação, código, listas, checklists interativos, links seguros e anexos de imagens (colagem, arraste ou seletor com legenda, redimensionamento e lightbox) além de PDFs e arquivos de texto — armazenados em rotas privadas autenticadas (`500` notas, `100` pastas, `128 KiB` por nota, `10 MiB` por arquivo e `250 MiB` por conta).
+- **Offline cifrado e sincronização com conflitos:** edição salva localmente em IndexedDB cifrado com AES-GCM e chave protegida por DPAPI vinculada à conta e origem do servidor; edições e imagens feitas offline sincronizam automaticamente ao reconectar, com resolução visual de conflitos entre dispositivos.
+- **Banco de dados:** o servidor migra automaticamente o SQLite para o esquema `v23` (`sanoted_notes`, `sanoted_folders`, `sanoted_assets`), preservando integralmente todos os dados existentes.
+
+### Otimização em repouso e ao minimizar
+- **Menor uso de CPU/GPU quando minimizado ou ocioso:** o aplicativo Windows informa ao WebView2 o estado real de minimização, suspendendo animações CSS, desenhos de Canvas fora da área visível e timers visuais de voz/atividade enquanto oculto (mantendo heartbeat e captura de áudio ativos).
+- **Fundo animado e medidores inteligentes:** o efeito ambiente opcional pausa após 15 segundos sem interação e retoma instantaneamente ao usar mouse, teclado ou rolagem; medidores de microfone fora de vista evitam atualizações desnecessárias do DOM.
+
 ## 0.2.9
 
 ### E-mail obrigatório e confirmado

@@ -21,7 +21,7 @@ let profileFocusSurface = null;
 let profileHoverTimer = null;
 
 function profileMotionAvailable() {
-  return profileWindowFocused && !document.hidden && profileAnimPolicy() !== "never";
+  return profileWindowFocused && !isVisualWindowHidden() && profileAnimPolicy() !== "never";
 }
 
 function interactionSurface() {
@@ -52,7 +52,7 @@ function mediaShouldAnimate(img) {
 }
 
 function queueProfileMotion() {
-  if (profileMotionFrame !== null || !globalThis.document?.body?.isConnected) return;
+  if (profileMotionFrame !== null || isVisualWindowHidden() || !globalThis.document?.body?.isConnected) return;
   profileMotionFrame = requestAnimationFrame(() => {
     profileMotionFrame = null;
     updateProfileMotion();
@@ -169,8 +169,17 @@ function prepareProfileFrame(src) {
   });
 }
 
+function pruneProfileMedia() {
+  for (const [img] of profileMedia) {
+    if (img.isConnected) continue;
+    if (img.getAttribute("src") === img.dataset.profileSrc) img.removeAttribute("src");
+    profileMediaObserver?.unobserve(img);
+    profileMedia.delete(img);
+  }
+}
+
 function updateProfileMotion() {
-  const foreground = profileWindowFocused && !document.hidden;
+  const foreground = profileWindowFocused && !isVisualWindowHidden();
   const interaction = interactionSurface();
   const motionOk = profileMotionAvailable();
 
@@ -207,12 +216,9 @@ function updateProfileMotion() {
     SanvoCosmeticsVFX.kickLoop();
   }
   const visible = [];
+  pruneProfileMedia();
   for (const [img, record] of profileMedia) {
-    if (!img.isConnected) {
-      if (img.getAttribute("src") === img.dataset.profileSrc) img.removeAttribute("src");
-      profileMediaObserver?.unobserve(img);
-      profileMedia.delete(img);
-    } else if (record.visible && img.dataset.profileSrc && !img.closest(".hidden,[hidden]")) {
+    if (record.visible && img.dataset.profileSrc && !img.closest(".hidden,[hidden]")) {
       visible.push(img);
     }
   }
@@ -247,8 +253,11 @@ function updateProfileMotion() {
 function noteProfileInteraction(target, keyboard) {
   const element = target instanceof Element ? target : null;
   const surface = element?.closest(profileHoverContexts) || element?.closest(".avatar-deco-wrap,.user-avatar-wrap,.avatar") || null;
-  if (keyboard) profileFocusSurface = surface;
-  else if (surface !== profileHoverSurface) {
+  if (keyboard) {
+    if (surface === profileFocusSurface) return;
+    profileFocusSurface = surface;
+  } else {
+    if (surface === profileHoverSurface) return;
     profileHoverSurface = surface;
     clearTimeout(profileHoverTimer);
     if (surface) profileHoverTimer = setTimeout(() => {
@@ -273,9 +282,12 @@ document.addEventListener("error", e => {
 }, true);
 
 function syncProfileWindow() {
-  const inactive = !profileWindowFocused || document.hidden;
+  const inactive = !profileWindowFocused || isVisualWindowHidden();
   document.body.classList.toggle("profile-window-inactive", inactive);
   if (inactive) {
+    if (profileMotionFrame !== null) cancelAnimationFrame(profileMotionFrame);
+    profileMotionFrame = null;
+    clearTimeout(profileHoverTimer);
     profileFocusSurface = null;
     profileHoverSurface = null;
     for (const controller of profileFrameJobs.values()) controller.abort("background");
@@ -286,7 +298,7 @@ function syncProfileWindow() {
 }
 window.addEventListener("blur", () => { profileWindowFocused = false; syncProfileWindow(); });
 window.addEventListener("focus", () => { profileWindowFocused = true; syncProfileWindow(); });
-document.addEventListener("visibilitychange", syncProfileWindow);
+document.addEventListener("sanvo:visual-visibility", syncProfileWindow);
 
 const profileMediaMutations = new MutationObserver(records => {
   if (!globalThis.document?.body?.isConnected) return;
@@ -300,6 +312,8 @@ const profileMediaMutations = new MutationObserver(records => {
       changed ||= node.matches(profileLiveContexts);
     }
   }
-  if (changed) queueProfileMotion();
+  if (!changed) return;
+  if (isVisualWindowHidden()) pruneProfileMedia();
+  else queueProfileMotion();
 });
 profileMediaMutations.observe(document.body, { childList: true, subtree: true });

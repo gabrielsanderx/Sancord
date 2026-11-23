@@ -419,6 +419,7 @@ const SancordActivity = (() => {
   }
 
   function refreshLiveTimers() {
+    if (isVisualWindowHidden()) return;
     const now = Date.now();
     for (const card of document.querySelectorAll("[data-activity-card='1']")) {
       const el = card.querySelector("[data-activity-time='1']");
@@ -426,12 +427,22 @@ const SancordActivity = (() => {
       const endsAt = Number(card.dataset.endsAt || 0);
       const startedAt = Number(card.dataset.startedAt || 0);
       const text = endsAt ? formatRemaining(endsAt, now) : startedAt ? formatElapsed(startedAt, now) : "";
-      if (text) el.textContent = text;
+      if (text && el.textContent !== text) el.textContent = text;
     }
     const settingsTimer = document.getElementById("activity-current-timer");
     const active = resolveActiveActivity();
     if (settingsTimer && active?.started_at) {
       settingsTimer.textContent = formatElapsed(active.started_at, now);
+    }
+  }
+
+  function syncActivityClock() {
+    if (isVisualWindowHidden()) {
+      clearInterval(timerId);
+      timerId = null;
+    } else if (timerId === null) {
+      refreshLiveTimers();
+      timerId = setInterval(refreshLiveTimers, 30000);
     }
   }
 
@@ -638,7 +649,8 @@ const SancordActivity = (() => {
       postNative("get-state");
     }
     renderSettingsPanel();
-    if (!timerId) timerId = setInterval(refreshLiveTimers, 30000);
+    document.addEventListener("sanvo:visual-visibility", syncActivityClock);
+    syncActivityClock();
   }
 
   function onSelfStatusChanged() {

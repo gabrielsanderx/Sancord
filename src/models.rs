@@ -2613,9 +2613,11 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum ServerMessage {
+    SanotedChanged,
     ScheduledMessages { messages: Vec<crate::scheduled::ScheduledMessage> },
     /// Estado completo inicial enviado quando o usuário conecta
     Welcome {
+        account_id: String,
         #[serde(default)]
         composer_capabilities: Vec<String>,
         user: UserInfo,

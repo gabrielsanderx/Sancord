@@ -164,6 +164,9 @@ const SancordSessions = (() => {
 
   return {
     ready,
+    protectPrivate(action, scope, value) {
+      return protectedNative && SancordNet.secureForAuth ? protect(action, scope, value) : Promise.resolve(null);
+    },
     get(storage, name) {
       const key = keyFor(name);
       const aliasKey = sanvoAliasKeyFor(name);
