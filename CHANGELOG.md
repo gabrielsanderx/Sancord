@@ -1,5 +1,10 @@
 # Histórico de versões
 
+## 0.2.12
+
+### Conectividade e descoberta automática
+- Atualizada a chave pública de descoberta automática do servidor anfitrião para reconexão direta dos clientes desktop.
+
 ## 0.2.11
 
 ### Expansão Flagship V5 (12 Coleções Pintadas) e Avatares Predefinidos
