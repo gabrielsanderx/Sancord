@@ -55,6 +55,10 @@ const V5_AVATAR_DECORATIONS: &[CosmeticItem] = &[
     item("blood-moon", AvatarDecoration, "Oráculo do Eclipse", "arcane", "legendary", true, "free"),
     item("ocean-bubbles", AvatarDecoration, "Coroa das Profundezas", "abyssal", "epic", true, "free"),
     item("angel-wings", AvatarDecoration, "Asas de Serafim", "seraphim", "legendary", true, "free"),
+    item("lunar", AvatarDecoration, "Guardião das Borboletas", "dream", "legendary", true, "free"),
+    item("electric-pulse", AvatarDecoration, "Espírito Raijin", "synth", "legendary", true, "free"),
+    item("cyber-ring", AvatarDecoration, "Companheiro Pixel-Bot", "retro", "epic", true, "free"),
+    item("core-orbit", AvatarDecoration, "Koi de Jade & Ouro", "royal", "legendary", true, "free"),
     item("eclipse-sovereign", AvatarDecoration, "Coroa do Soberano", "conquistas", "founder", true, "badge:sovereign"),
 ];
 
@@ -67,6 +71,10 @@ const V5_PROFILE_FRAMES: &[CosmeticItem] = &[
     item("arcane-grimoire", ProfileFrame, "Grimório Arcano", "arcane", "legendary", true, "free"),
     item("liquid", ProfileFrame, "Santuário Abissal", "abyssal", "epic", true, "free"),
     item("seraphim-arch", ProfileFrame, "Arco de Serafim", "seraphim", "legendary", true, "free"),
+    item("dream-sanctuary", ProfileFrame, "Bosque Onírico", "dream", "legendary", true, "free"),
+    item("neon-pulse", ProfileFrame, "Templo do Trovão", "synth", "legendary", true, "free"),
+    item("eclipse-crown", ProfileFrame, "Gabinete Arcade", "retro", "epic", true, "free"),
+    item("core-pulse", ProfileFrame, "Lagoa de Jade", "royal", "legendary", true, "free"),
     item("sovereign-crest", ProfileFrame, "Trono Soberano", "conquistas", "founder", true, "badge:sovereign"),
     item("early-user", ProfileFrame, "Pioneira Astral", "conquistas", "founder", false, "badge:early_user"),
     item("founder", ProfileFrame, "Fundação Imperial", "conquistas", "founder", true, "badge:founder"),
@@ -83,6 +91,10 @@ const V5_PROFILE_EFFECTS: &[CosmeticItem] = &[
     item("arcane-sigil", ProfileEffect, "Selo do Eclipse", "arcane", "legendary", true, "free"),
     item("abyssal-tide", ProfileEffect, "Maré Bioluminescente", "abyssal", "epic", true, "free"),
     item("seraphim-fall", ProfileEffect, "Chuva de Plumas", "seraphim", "legendary", true, "free"),
+    item("dream-butterflies", ProfileEffect, "Revoada Onírica", "dream", "legendary", true, "free"),
+    item("synth-overdrive", ProfileEffect, "Fúria de Raijin", "synth", "legendary", true, "free"),
+    item("eclipse-flare", ProfileEffect, "Overdrive Arcade", "retro", "epic", true, "free"),
+    item("core-signal", ProfileEffect, "Dança dos Koi", "royal", "legendary", true, "free"),
 ];
 
 const V5_NAMEPLATES: &[CosmeticItem] = &[
@@ -94,6 +106,9 @@ const V5_NAMEPLATES: &[CosmeticItem] = &[
     item("arcane-velvet", Nameplate, "Veludo Arcano", "arcane", "epic", true, "free"),
     item("tide-glass", Nameplate, "Vidro de Maré", "abyssal", "epic", true, "free"),
     item("eclipse-gold", Nameplate, "Ouro de Serafim", "seraphim", "legendary", true, "free"),
+    item("dream-mist", Nameplate, "Bruma Onírica", "dream", "epic", true, "free"),
+    item("circuit-weave", Nameplate, "Corrente de Raijin", "synth", "epic", false, "free"),
+    item("gold-leaf", Nameplate, "Lótus de Jade & Ouro", "royal", "legendary", false, "free"),
 ];
 
 const V4_NAME_STYLES: &[CosmeticItem] = &[
@@ -128,8 +143,7 @@ const V4_NAME_STYLES: &[CosmeticItem] = &[
 /// IDs legados gratuitos retirados da vitrine V5, mas ainda aceitos no backend para
 /// compatibilidade transparente com contas e presets antigos (o cliente renderiza o sucessor V5).
 const LEGACY_FREE_IDS: &[(Kind, &str)] = &[
-    (AvatarDecoration, "core-orbit"), (AvatarDecoration, "electric-pulse"),
-    (AvatarDecoration, "cyber-ring"), (AvatarDecoration, "lunar"), (AvatarDecoration, "static-royal-crown"),
+    (AvatarDecoration, "static-royal-crown"),
     (AvatarDecoration, "static-emerald"), (AvatarDecoration, "static-cyber-hud"), (AvatarDecoration, "static-diamond"),
     (AvatarDecoration, "flame-violet"), (AvatarDecoration, "devil-horns"), (AvatarDecoration, "cyber-cyan"),
     (AvatarDecoration, "golden-halo"), (AvatarDecoration, "crimson-vortex"), (AvatarDecoration, "rainbow-prism"),
@@ -138,20 +152,16 @@ const LEGACY_FREE_IDS: &[(Kind, &str)] = &[
     (AvatarDecoration, "snowfall"), (AvatarDecoration, "digital-rain"), (AvatarDecoration, "retro-pixels"),
     (AvatarDecoration, "static-gold"), (AvatarDecoration, "static-crimson"), (AvatarDecoration, "static-blurple"),
     (AvatarDecoration, "static-angel"),
-    (ProfileFrame, "core-pulse"), (ProfileFrame, "neon-pulse"), (ProfileFrame, "eclipse-crown"),
-    (ProfileFrame, "dream-sanctuary"), (ProfileFrame, "reactive-aura"),
+    (ProfileFrame, "reactive-aura"),
     (ProfileFrame, "voice-pulse"), (ProfileFrame, "royal"), (ProfileFrame, "cyber-corners"), (ProfileFrame, "minimal"),
     (ProfileFrame, "carbon"), (ProfileFrame, "sakura-corners"), (ProfileFrame, "retro-pixel"),
     (ProfileFrame, "cosmic"), (ProfileFrame, "inferno"), (ProfileFrame, "frost"),
     (ProfileFrame, "prism-flow"), (ProfileFrame, "electric"), (ProfileFrame, "digital-glitch"),
-    (ProfileEffect, "core-signal"), (ProfileEffect, "eclipse-flare"),
-    (ProfileEffect, "synth-overdrive"), (ProfileEffect, "dream-butterflies"),
     (ProfileEffect, "sparkles"), (ProfileEffect, "sakura"), (ProfileEffect, "matrix"),
     (ProfileEffect, "lightning"), (ProfileEffect, "snow"), (ProfileEffect, "confetti"),
     (ProfileEffect, "cyber"), (ProfileEffect, "hellfire"), (ProfileEffect, "galaxy"),
     (ProfileEffect, "glitch"), (ProfileEffect, "aurora"), (ProfileEffect, "pixel-assembly"),
     (ProfileEffect, "gravity-well"),
-    (Nameplate, "dream-mist"), (Nameplate, "circuit-weave"), (Nameplate, "gold-leaf"),
     (Nameplate, "crimson"), (Nameplate, "nebula"), (Nameplate, "aurora"), (Nameplate, "sakura"),
     (Nameplate, "gold"), (Nameplate, "cyber"), (Nameplate, "hellfire"), (Nameplate, "frost"),
     (Nameplate, "void"), (Nameplate, "toxic"), (Nameplate, "synthwave"), (Nameplate, "retro-horizon"),

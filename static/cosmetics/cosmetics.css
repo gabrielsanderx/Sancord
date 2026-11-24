@@ -683,6 +683,10 @@
 .profile-card .profile-nameplate-wrap > .np-art-layer {
   display: none !important;
 }
+.user-profile-bar > .np-art-layer,
+.profile-panel-preview > .np-art-layer {
+  display: none !important;
+}
 body.profile-hide-nameplates .np-art-layer {
   display: none !important;
 }
@@ -996,11 +1000,45 @@ body.profile-hide-nameplates .np-art-layer {
   transform-origin: 50% 34%;
   animation: cosV5CreatureBreathe 5.4s ease-in-out infinite;
 }
-.is-secondary-event .cos-v5-motion-cyber-cat.avatar-art-front > .cos-v5-blink-img {
+/* Qualquer decoração V5 com camada .cos-v5-blink-img dispara piscar/bater de asas/flash real em eventos secundários! */
+.is-secondary-event .cos-v5-deco.avatar-art-front > .cos-v5-blink-img,
+.avatar-status-wrap:hover .cos-v5-deco.avatar-art-front > .cos-v5-blink-img {
   animation: cosV5RealBlink 1.85s ease-in-out 1;
 }
 .avatar-status-wrap:hover .cos-v5-motion-cyber-cat.avatar-art-front > .cos-v5-art-front {
   filter: drop-shadow(0 0 8px rgba(56, 232, 255, 0.55));
+}
+
+/* Guardião das Borboletas (Dream): flutuação feérica + bater de asas */
+.cos-v5-motion-dream.avatar-art-back > .cos-v5-art-back {
+  animation: cosV5SilkBreathe 7.2s ease-in-out infinite;
+}
+.cos-v5-motion-dream.avatar-art-front > .cos-v5-art-front {
+  animation: cosV5SubtleFloat 6.8s ease-in-out infinite;
+}
+
+/* Espírito Raijin (Storm): pulsação elétrica + olhos piscando */
+.cos-v5-motion-storm.avatar-art-back > .cos-v5-art-back {
+  animation: cosV5AstralOrbit 28s linear infinite;
+}
+.cos-v5-motion-storm.avatar-art-front > .cos-v5-art-front {
+  animation: cosV5CreatureBreathe 5.2s ease-in-out infinite;
+}
+
+/* Companheiro Pixel-Bot (Arcade): respiração synthwave + wink CRT */
+.cos-v5-motion-arcade.avatar-art-back > .cos-v5-art-back {
+  animation: cosV5FrostPulse 6.4s ease-in-out infinite;
+}
+.cos-v5-motion-arcade.avatar-art-front > .cos-v5-art-front {
+  animation: cosV5CreatureBreathe 5.6s ease-in-out infinite;
+}
+
+/* Koi de Jade & Ouro (Jade): nado circular contínuo Yin-Yang das carpas! */
+.cos-v5-motion-jade.avatar-art-back > .cos-v5-art-back {
+  animation: cosV5SilkBreathe 8.4s ease-in-out infinite;
+}
+.cos-v5-motion-jade.avatar-art-front > .cos-v5-art-front {
+  animation: cosV5AstralOrbit 24s linear infinite;
 }
 
 /* Chamas de Drakon (Infernal): pulsação ígnea e aura dracônica */
@@ -1221,6 +1259,21 @@ body.profile-hide-nameplates .np-art-layer {
 .cos-v5-frame-motion-sovereign .frame-v5-tl,
 .cos-v5-frame-motion-sovereign .frame-v5-tr {
   animation: cosV5FrameGoldSheen 7.4s ease-in-out infinite;
+}
+.cos-v5-frame-motion-dream .frame-v5-tl,
+.cos-v5-frame-motion-dream .frame-v5-tr {
+  animation: cosV5FrameBranchSway 7.2s ease-in-out infinite;
+}
+.cos-v5-frame-motion-storm .frame-v5-tl,
+.cos-v5-frame-motion-storm .frame-v5-tr {
+  animation: cosV5FrameHoloPulse 5.6s ease-in-out infinite;
+}
+.cos-v5-frame-motion-arcade .frame-v5-tl {
+  animation: cosV5FrameHoloPulse 6.2s ease-in-out infinite;
+}
+.cos-v5-frame-motion-jade .frame-v5-tl,
+.cos-v5-frame-motion-jade .frame-v5-br {
+  animation: cosV5FrameBranchSway 8.0s ease-in-out infinite;
 }
 @keyframes cosV5FrameInfernalGlow {
   0%, 100% { filter: drop-shadow(0 0 3px rgba(234, 88, 12, 0.3)); }

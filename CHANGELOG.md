@@ -1,5 +1,17 @@
 # Histórico de versões
 
+## 0.2.11
+
+### Expansão Flagship V5 (12 Coleções Pintadas) e Avatares Predefinidos
+- **4 novas coleções pintadas Flagship V5 (totalizando 12 coleções completas e 110 assets WebP HiDPI embutidos):**
+  - **Bosque Onírico (`dream`):** decoração *Guardião das Borboletas* (`lunar`) com evento secundário real de bater de asas, moldura *Bosque Onírico* (`dream-sanctuary`), efeito narrativo de 4 atos *Revoada Onírica* (`dream-butterflies`) com animação de bater de asas em 60fps e placa *Bruma Onírica* (`dream-mist`).
+  - **Templo do Trovão (`synth`):** decoração *Espírito Raijin* (`electric-pulse`) com tambores Tomoe em órbita e piscada elétrica, moldura *Templo do Trovão* (`neon-pulse`), efeito *Fúria de Raijin* (`synth-overdrive`) e placa *Corrente de Raijin* (`circuit-weave`).
+  - **Horizonte Arcade (`retro`):** decoração *Companheiro Pixel-Bot* (`cyber-ring`) com piscada CRT `^ ω -`, moldura *Gabinete Arcade* (`eclipse-crown`) e efeito *Overdrive Arcade* (`eclipse-flare`) com robôs CRT e corações 16-bit.
+  - **Lagoa de Jade (`royal`):** decoração *Koi de Jade & Ouro* (`core-orbit`) com duas carpas imperiais nadando em órbita Yin-Yang contínua ao redor do avatar, moldura *Lagoa de Jade* (`core-pulse`), efeito *Dança dos Koi* (`core-signal`) e placa *Lótus de Jade & Ouro* (`gold-leaf`).
+- **Upgrades visuais em coleções existentes:** camadas secundárias pintadas de cintilação para *Dragão Glacial* (`frost-crown`) e *Chamas de Drakon* (`dragon-fire`), além de ornamentos WebP dedicados de 3 cantos para as molduras exclusivas **Fundador** (`founder`) e **Arquitetura Dev** (`developer`).
+- **Seletor de Avatar com 12 Avatares Predefinidos + Envio de Imagem:** clicar em **Avatar** no editor de perfil (ou no avatar do cartão de prévia) agora abre o subeditor **Avatar do perfil**, permitindo escolher entre **12 avatares predefinidos ilustrados do Sanvo**, voltar às iniciais, reposicionar/zoom ou clicar em **Enviar uma imagem** para enviar PNG, JPG, WebP ou GIF personalizado (também disponível no Perfil por Servidor).
+- **Barra inferior de usuário limpa (estilo Discord):** removido o fundo/arte de nameplate da barra inferior esquerda do usuário (`#self-user-profile-bar`), mantendo o painel escuro e limpo como no Discord Desktop enquanto preserva a decoração de avatar e o estilo tipográfico do nome.
+
 ## 0.2.10
 
 ### Sanoted (notas privadas no desktop)

@@ -310,13 +310,13 @@ test('Biblioteca Flagship V5: 4 coleções pintadas WebP multicamada (BACK+FRONT
 
   assert.equal(stats.engineVersion, 5);
   assert.equal(stats.vfxVersion, 5);
-  assert.equal(stats.v5Decos, 9);
-  assert.equal(stats.v5Frames, 13);
-  assert.equal(stats.uiDecos, 9);
-  assert.equal(stats.uiEffects, 8);
+  assert.equal(stats.v5Decos, 13);
+  assert.equal(stats.v5Frames, 17);
+  assert.equal(stats.uiDecos, 13);
+  assert.equal(stats.uiEffects, 12);
   assert.equal(stats.legacyDeco, 'dragon-fire');
   assert.equal(stats.legacyFrame, 'holographic');
-  assert.equal(stats.legacyEffect, 'circuit-boot');
+  assert.equal(stats.legacyEffect, 'synth-overdrive');
   assert.equal(stats.legacyPlate, 'ember-line');
 
   // Combinação completa no Perfil Completo: Kitsune-Neko Cyber (WebP BACK+FRONT+BLINK) + Chassi Synth-Neko (TL+TR+BR) + Inicialização Holográfica
@@ -374,4 +374,23 @@ test('Biblioteca Flagship V5: 4 coleções pintadas WebP multicamada (BACK+FRONT
   assert.ok(card.querySelector('#profile-card-effect-layer .cos-v5-effect'), 'Novo efeito abyssal-tide usa camada V5 sem linhas SVG antigas');
   assert.equal(card.querySelectorAll('#profile-card-effect-layer .effect-plane-back').length, 0);
   assert.equal(card.querySelectorAll('#profile-card-badges .profile-badge.badge-jewel').length, 6, 'Todas as 6 novas insígnias exclusivas renderizam com estilo jewel');
+
+  // Expansão V5 Wave 3: Bosque Onírico (com flutter blink), Templo do Trovão, Horizonte Arcade, Lagoa de Jade + molduras exclusivas Founder/Developer dedicadas
+  h.run(`
+    applyDecoToElement(document.getElementById('profile-card-deco-wrap'), 'lunar');
+    applyProfileFrame(document.getElementById('profile-popover-card'), 'dream-sanctuary');
+    configureProfileEffect(document.getElementById('profile-card-effect-layer'), 'dream-butterflies');
+    playProfileEffect(document.getElementById('profile-card-effect-layer'));
+  `);
+  assert.ok(card.querySelector('.avatar-art-front .cos-v5-art-front')?.getAttribute('src')?.includes('deco_dream_front.webp'));
+  assert.ok(card.querySelector('.avatar-art-front .cos-v5-blink-img')?.getAttribute('src')?.includes('deco_dream_blink.webp'), 'Guardião das Borboletas inclui overlay secundário de bater de asas');
+  assert.ok(card.querySelector('.pf-layer .cos-v5-frame .frame-v5-tl')?.getAttribute('src')?.includes('frame_dream_tl.webp'));
+  assert.ok(card.querySelector('#profile-card-effect-layer .cos-v5-effect'), 'Revoada Onírica monta efeito narrativo V5');
+
+  h.run(`
+    applyDecoToElement(document.getElementById('profile-card-deco-wrap'), 'core-orbit');
+    applyProfileFrame(document.getElementById('profile-popover-card'), 'founder');
+  `);
+  assert.ok(card.querySelector('.avatar-art-front .cos-v5-art-front')?.getAttribute('src')?.includes('deco_jade_front.webp'));
+  assert.ok(card.querySelector('.pf-layer .cos-v5-frame .frame-v5-tl')?.getAttribute('src')?.includes('frame_founder_tl.webp'), 'Moldura Founder usa ornamento dedicado frame_founder_tl.webp');
 });

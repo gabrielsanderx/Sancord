@@ -87,3 +87,43 @@ test('prévia por servidor compara herança e reage a um rascunho sem enviar alt
   assert.equal(h.run('packets.at(-1).type'), 'SetServerProfile');
   assert.equal(h.run('packets.at(-1).payload.bio'), 'Alteração local');
 });
+
+test('clicar em Avatar abre subeditor com 12 avatares predefinidos e mantém opção de enviar imagem', async t => {
+  const h = await openInterface(t), d = h.document;
+  h.run(`state.selfUser = {username:'Swag', display_name:'Swag', avatar_color:'#6366f1', avatar_url:null};
+    openSettingsModal('profile');`);
+
+  let fileInputClicked = 0;
+  d.getElementById('avatar-file-input').addEventListener('click', () => { fileInputClicked++; });
+
+  // 1) Clicar no tile Avatar abre data-pe-view="avatar", NÃO abre o seletor de arquivos diretamente.
+  d.getElementById('settings-change-avatar-btn').click();
+  assert.equal(fileInputClicked, 0, 'Clicar em Avatar não deve abrir input de arquivo diretamente');
+  const avatarView = d.querySelector('[data-pe-view="avatar"]');
+  assert.equal(avatarView.classList.contains('hidden'), false, 'Subeditor de Avatar deve abrir');
+
+  // 2) Renderiza 1 opção "Iniciais" + 12 avatares predefinidos pintados V5.
+  const choices = [...d.querySelectorAll('#pe-preset-avatars-grid .pe-preset-avatar-choice')];
+  assert.equal(choices.length, 13);
+  assert.equal(choices[0].dataset.presetAvatar, 'initials');
+  assert.equal(choices[0].classList.contains('selected'), true);
+
+  // 3) Selecionar um avatar predefinido atualiza a prévia ao vivo imediatamente e marca rascunho sujo.
+  const kitsuneChoice = d.querySelector('#pe-preset-avatars-grid [data-preset-avatar="kitsune"]');
+  assert.ok(kitsuneChoice);
+  kitsuneChoice.click();
+  assert.ok(d.querySelector('#preview-card-avatar img')?.getAttribute('src')?.includes('preset_avatar_kitsune.webp'));
+  assert.ok(d.querySelector('#settings-avatar-preview img')?.getAttribute('src')?.includes('preset_avatar_kitsune.webp'));
+  assert.ok(d.querySelector('#pe-avatar-sub-preview img')?.getAttribute('src')?.includes('preset_avatar_kitsune.webp'));
+  assert.equal(h.run('isProfileDraftDirty()'), true);
+  assert.equal(d.getElementById('unsaved-profile-bar').classList.contains('hidden'), false);
+
+  // 4) Clicar em "Enviar uma imagem" dentro do subeditor aciona o seletor de arquivo (#avatar-file-input).
+  d.getElementById('pe-upload-avatar-btn').click();
+  assert.equal(fileInputClicked, 1, 'Botão Enviar uma imagem deve acionar #avatar-file-input');
+
+  // 5) Clicar em "Usar iniciais" volta para as iniciais da conta.
+  d.getElementById('pe-avatar-remove-btn').click();
+  assert.equal(d.querySelector('#preview-card-avatar img'), null);
+  assert.equal(d.getElementById('preview-card-avatar').textContent.trim(), 'SW');
+});

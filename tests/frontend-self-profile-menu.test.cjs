@@ -399,4 +399,24 @@ test('Cabeçalho do perfil nos 4 contextos: sem tarja atrás do Display Name, hi
   assert.equal(compactBadges.classList.contains('hidden'), true);
   assert.equal(d.getElementById('profile-card-badges').classList.contains('hidden'), true);
   assert.equal(d.querySelector('#self-profile-menu .spm-badges').classList.contains('hidden'), true);
+
+  // Cenário 4: Barra inferior do usuário (#self-user-profile-bar) e prévia "Painel inferior" permanecem limpas
+  // sem fundo/arte de nameplate (estilo Discord), preservando decoração de avatar e estilo do nome.
+  h.run(`
+    state.selfUser.nameplate_style = 'eclipse-gold';
+    state.selfUser.avatar_decoration = 'eclipse-sovereign';
+    state.selfUser.name_style = 'gta';
+    updateSelfProfileUI();
+    profilePreviewContext = 'panel';
+    renderProfileContextPreview();
+  `);
+  const bar = d.getElementById('self-user-profile-bar');
+  assert.equal([...bar.classList].some(c => c.startsWith('nameplate-')), false, 'barra inferior não aplica classe nameplate-*');
+  assert.equal(bar.querySelector('.np-art-layer'), null, 'barra inferior não injeta arte SVG de nameplate');
+  assert.ok(d.getElementById('self-avatar-deco').querySelector('.cos-v5-deco'), 'decoração de avatar continua visível');
+  assert.equal(d.getElementById('self-username').classList.contains('name-style-gta'), true, 'estilo do nome continua visível');
+  const panelPreview = d.querySelector('#profile-context-preview .profile-panel-preview');
+  assert.ok(panelPreview);
+  assert.equal([...panelPreview.classList].some(c => c.startsWith('nameplate-')), false);
+  assert.equal(panelPreview.querySelector('.np-art-layer'), null);
 });

@@ -136,6 +136,7 @@ function renderPeView(name) {
   else if (name === "effect") renderPeList("effect");
   else if (name === "nameplate") renderPeList("nameplate");
   else if (name === "badges") renderPeBadgesEditor();
+  else if (name === "avatar") renderPeAvatarEditor();
   else if (name === "banner") renderPeBannerPreview();
   else if (name === "board") {
     const panel = document.getElementById("board-editor");
@@ -360,6 +361,114 @@ peNameSamples?.addEventListener("pointerover", previewPeNameSample);
 peNameSamples?.addEventListener("focusin", previewPeNameSample);
 peNameSamples?.addEventListener("pointerleave", restorePreviewName);
 peNameSamples?.addEventListener("focusout", restorePreviewName);
+
+// ---------------------------------------------------------------------------
+// Avatar: avatares predefinidos pintados V5 + enviar imagem / GIF + reposicionar
+// ---------------------------------------------------------------------------
+function renderPeAvatarEditor() {
+  if (!state.selfUser) return;
+  const user = draftPreviewUser();
+  const subPreview = document.getElementById("pe-avatar-sub-preview");
+  const subStatus = document.getElementById("pe-avatar-sub-status");
+  const removeBtn = document.getElementById("pe-avatar-remove-btn");
+  const grid = document.getElementById("pe-preset-avatars-grid");
+
+  if (subPreview) {
+    subPreview.innerHTML = renderAvatarInner(user.username || state.selfUser.username, user.avatar_url, user.avatar_animated);
+    subPreview.style.background = user.avatar_color || state.selfUser.avatar_color;
+  }
+  const activePreset = (typeof findPresetAvatar === "function" && findPresetAvatar(profileDraft.media?.avatar?.presetId || user.avatar_url)) || null;
+  if (subStatus) {
+    if (!user.avatar_url) subStatus.textContent = "Iniciais do perfil";
+    else if (activePreset) subStatus.textContent = `Predefinido: ${activePreset.name}`;
+    else subStatus.textContent = user.avatar_animated ? "GIF personalizado" : "Imagem personalizada";
+  }
+  removeBtn?.classList.toggle("hidden", !user.avatar_url);
+
+  if (!grid) return;
+  grid.replaceChildren();
+
+  // 1) Opção de voltar às iniciais do perfil
+  const initialsSelected = !user.avatar_url;
+  const initialsBtn = document.createElement("button");
+  initialsBtn.type = "button";
+  initialsBtn.className = `pe-choice pe-preset-avatar-choice${initialsSelected ? " selected" : ""}`;
+  initialsBtn.dataset.presetAvatar = "initials";
+  initialsBtn.setAttribute("aria-pressed", String(initialsSelected));
+  initialsBtn.title = "Usar as iniciais da conta";
+  const initPrev = document.createElement("span");
+  initPrev.className = "pe-choice-preview";
+  const initAv = document.createElement("span");
+  initAv.className = "avatar";
+  initAv.style.cssText = `width:52px;height:52px;font-size:18px;background:${user.avatar_color || state.selfUser.avatar_color || "#5865f2"}`;
+  initAv.innerHTML = renderAvatarInner(user.username || state.selfUser.username || "?", null);
+  initPrev.append(initAv);
+  const initName = document.createElement("span");
+  initName.className = "pe-choice-name";
+  initName.textContent = "Iniciais";
+  initialsBtn.append(initPrev, initName);
+  initialsBtn.addEventListener("click", () => {
+    setPendingProfileMedia("avatar", "remove");
+  });
+  grid.append(initialsBtn);
+
+  // 2) 12 Avatares predefinidos pintados V5
+  const presets = typeof SANVO_PRESET_AVATARS !== "undefined" ? SANVO_PRESET_AVATARS : [];
+  for (const preset of presets) {
+    const isSel = Boolean(user.avatar_url && activePreset?.id === preset.id);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `pe-choice pe-preset-avatar-choice${isSel ? " selected" : ""}`;
+    btn.dataset.presetAvatar = preset.id;
+    btn.setAttribute("aria-pressed", String(isSel));
+    btn.title = `${preset.name} · ${preset.collection}`;
+
+    const prev = document.createElement("span");
+    prev.className = "pe-choice-preview";
+    const av = document.createElement("span");
+    av.className = "avatar";
+    av.style.cssText = "width:52px;height:52px;";
+    const img = document.createElement("img");
+    img.src = preset.url;
+    img.alt = preset.name;
+    img.decoding = "async";
+    av.append(img);
+    prev.append(av);
+
+    const name = document.createElement("span");
+    name.className = "pe-choice-name";
+    name.textContent = preset.name;
+    btn.append(prev, name);
+
+    btn.addEventListener("click", () => {
+      setPendingProfileMedia("avatar", {
+        presetId: preset.id,
+        presetUrl: preset.url,
+        name: `preset_avatar_${preset.id}.webp`,
+        animated: false,
+      });
+    });
+    grid.append(btn);
+  }
+}
+
+document.getElementById("pe-avatar-reposition")?.addEventListener("click", async () => {
+  const user = draftPreviewUser();
+  if (!user.avatar_url) {
+    document.getElementById("pe-upload-avatar-btn")?.click();
+    return;
+  }
+  if (user.avatar_animated || isAnimatedMediaUrl(user.avatar_url)) {
+    showUiToast("GIFs animados não podem ser recortados. Envie a imagem de novo para trocar.");
+    return;
+  }
+  try {
+    const blob = await (await fetch(cachedMediaUrl(user.avatar_url))).blob();
+    openAvatarCropModal(new File([blob], "avatar.png", { type: blob.type || "image/png" }), "avatar");
+  } catch (_) {
+    showErrorToast("Não foi possível abrir o avatar atual. Envie uma imagem.");
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Faixa: prévia no subeditor e reposicionar/zoom com o editor de recorte
@@ -705,6 +814,7 @@ function peAfterRefresh() {
   renderPeTileThumbnails(user);
   renderPeBadgesHomeSummary();
   renderPeActivity(user);
+  if (peView === "avatar") renderPeAvatarEditor();
   if (peView === "banner") renderPeBannerPreview();
   for (const cap of document.querySelectorAll(".pe-sidebar .pe-tile-caption")) {
     const txt = (cap.textContent || "").trim();

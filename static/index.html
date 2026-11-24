@@ -1121,7 +1121,7 @@
                     <h3 class="pe-section-title">Avatar e decorações</h3>
                     <div class="pe-tiles">
                       <div class="pe-avatar-tile">
-                      <button type="button" id="settings-change-avatar-btn" class="pe-tile" title="Alterar avatar (imagem ou GIF)">
+                      <button type="button" id="settings-change-avatar-btn" class="pe-tile" data-pe-open="avatar" title="Escolher avatar predefinido ou enviar imagem">
                         <span class="pe-tile-visual">
                           <span id="settings-avatar-preview" class="avatar large-avatar editable-avatar">?</span>
                         </span>
@@ -1271,6 +1271,25 @@
                       <input type="color" id="settings-theme-highlight" value="#8f7dff" />
                       <span>Destaque</span>
                     </label>
+                  </div>
+                </div>
+
+                <div class="pe-view hidden" data-pe-view="avatar" data-pe-title="Avatar do perfil">
+                  <div class="pe-avatar-current-row">
+                    <div id="pe-avatar-sub-preview" class="avatar large-avatar">?</div>
+                    <div class="pe-avatar-current-meta">
+                      <strong id="pe-avatar-sub-status">Iniciais do perfil</strong>
+                      <p class="pe-hint">Escolha um avatar predefinido abaixo ou envie uma imagem / GIF personalizado.</p>
+                    </div>
+                  </div>
+                  <div class="pe-actions">
+                    <button type="button" id="pe-upload-avatar-btn" class="btn-primary small-btn">Enviar uma imagem</button>
+                    <button type="button" id="pe-avatar-reposition" class="btn-secondary small-btn">Reposicionar e zoom</button>
+                    <button type="button" id="pe-avatar-remove-btn" class="btn-secondary small-btn hidden" title="Voltar às iniciais">Usar iniciais</button>
+                  </div>
+                  <div class="pe-preset-avatars-wrap">
+                    <h4 class="pe-section-title">Avatares predefinidos</h4>
+                    <div id="pe-preset-avatars-grid" class="pe-grid pe-preset-avatars-grid" role="group" aria-label="Avatares predefinidos"></div>
                   </div>
                 </div>
 

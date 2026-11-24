@@ -4031,6 +4031,10 @@ const AVATAR_DECORATIONS = [
   { id: "blood-moon", name: "Oráculo do Eclipse", kind: "animated" },
   { id: "ocean-bubbles", name: "Coroa das Profundezas", kind: "animated" },
   { id: "angel-wings", name: "Asas de Serafim", kind: "animated" },
+  { id: "lunar", name: "Guardião das Borboletas", kind: "animated" },
+  { id: "electric-pulse", name: "Espírito Raijin", kind: "animated" },
+  { id: "cyber-ring", name: "Companheiro Pixel-Bot", kind: "animated" },
+  { id: "core-orbit", name: "Koi de Jade & Ouro", kind: "animated" },
   { id: "eclipse-sovereign", name: "Coroa do Soberano", kind: "animated" },
 ];
 
@@ -4044,6 +4048,10 @@ const PROFILE_EFFECTS = [
   { id: "arcane-sigil", name: "Selo do Eclipse", desc: "Mandala arcana dourada e runas ametista desabrochando no topo" },
   { id: "abyssal-tide", name: "Maré Bioluminescente", desc: "Águas-vivas translúcidas e bolhas peroladas em correnteza turquesa" },
   { id: "seraphim-fall", name: "Chuva de Plumas", desc: "Feixe solar diagonal com plumas marfim-ouro planando suavemente" },
+  { id: "dream-butterflies", name: "Revoada Onírica", desc: "Borboletas Morpho batendo asas em tempo real em espiral feérica" },
+  { id: "synth-overdrive", name: "Fúria de Raijin", desc: "Raios de plasma celeste e tambores Tomoe giratórios em 4 atos" },
+  { id: "eclipse-flare", name: "Overdrive Arcade", desc: "Pixel-Bot CRT voando com corações 16-bit e horizonte synthwave" },
+  { id: "core-signal", name: "Dança dos Koi", desc: "Carpas Koi imperiais nadando em curva S com flores de lótus e ondas de jade" },
 ];
 
 const NAMEPLATES = [
@@ -4056,6 +4064,9 @@ const NAMEPLATES = [
   { id: "arcane-velvet", name: "Veludo Arcano", desc: "Veludo ametista com selo rúnico em ouro antigo", requiresCatalog: true },
   { id: "tide-glass", name: "Vidro de Maré", desc: "Vidro oceânico bioluminescente com reflexo turquesa", requiresCatalog: true },
   { id: "eclipse-gold", name: "Ouro de Serafim", desc: "Filigrana dourada catedral com luz marfim", requiresCatalog: true },
+  { id: "dream-mist", name: "Bruma Onírica", desc: "Névoa feérica violeta-turquesa com borboletas luminosas", requiresCatalog: true },
+  { id: "circuit-weave", name: "Corrente de Raijin", desc: "Tempestade elétrica azul-noite com filamentos de plasma", requiresCatalog: true },
+  { id: "gold-leaf", name: "Lótus de Jade & Ouro", desc: "Jade imperial lapidado com filigrana dourada", requiresCatalog: true },
 ];
 
 const CLASSIC_NAME_STYLES = ["gta", "neon", "chrome", "gradient", "fire", "ice", "sakura", "retro", "gothic", "toxic", "royal"];
@@ -4431,12 +4442,11 @@ function updateSelfProfileUI() {
 
   const bar = document.getElementById("self-user-profile-bar");
   if (bar) {
-    const npCls = getNameplateClass(state.selfUser.nameplate_style);
+    // O painel inferior do usuário permanece limpo (estilo Discord), sem fundo/arte de nameplate.
     for (const c of Array.from(bar.classList)) {
-      if (c.startsWith("nameplate-") && c !== npCls) bar.classList.remove(c);
+      if (c.startsWith("nameplate-")) bar.classList.remove(c);
     }
-    if (npCls && !bar.classList.contains(npCls)) bar.classList.add(npCls);
-    if (typeof SancordCosmetics !== "undefined") SancordCosmetics.renderNameplateArt(bar, npCls ? state.selfUser.nameplate_style : null);
+    if (typeof SancordCosmetics !== "undefined") SancordCosmetics.renderNameplateArt(bar, null);
   }
 
   const sk = state.selfUser.status_kind || "online";
@@ -4759,8 +4769,15 @@ avatarCropApplyBtn?.addEventListener("click", async () => {
 
 // Clicar no avatar do painel inferior abre o Self Profile Menu (nunca abre seletor de arquivo direto).
 
-settingsChangeAvatarBtn?.addEventListener("click", () => {
+// Clicar no botão Avatar abre o subeditor de Avatar (avatares predefinidos + enviar imagem).
+document.getElementById("pe-upload-avatar-btn")?.addEventListener("click", () => {
   avatarFileInput?.click();
+});
+document.getElementById("pe-avatar-remove-btn")?.addEventListener("click", () => {
+  if (typeof setPendingProfileMedia === "function") setPendingProfileMedia("avatar", "remove");
+});
+document.getElementById("preview-card-avatar")?.addEventListener("click", (e) => {
+  if (typeof openPeView === "function") openPeView("avatar", e.currentTarget);
 });
 
 avatarFileInput?.addEventListener("change", (e) => {
@@ -6531,6 +6548,10 @@ function refreshLiveProfilePreview() {
   if (!state.selfUser) return;
   // Prévia usa a mídia do rascunho (ainda não salva) quando houver.
   const draftUser = draftPreviewUser();
+  if (settingsAvatarPreview) {
+    settingsAvatarPreview.innerHTML = renderAvatarInner(draftUser.username || state.selfUser.username, draftUser.avatar_url, draftUser.avatar_animated);
+    settingsAvatarPreview.style.background = draftUser.avatar_color || state.selfUser.avatar_color;
+  }
   renderDecoratedAvatar(settingsDecoPreviewAvatar, settingsDecoPreviewWrap, draftUser);
   if (settingsDecoLabel) {
     // Nome vem do catálogo do servidor (com o antigo como reserva).

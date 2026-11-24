@@ -43,6 +43,14 @@
     bubble: "/cosmetics/assets/fx_abyssal_bubble.webp",
     feather: "/cosmetics/assets/fx_seraph_feather.webp",
     seraphStar: "/cosmetics/assets/fx_seraph_star.webp",
+    butterflyOpen: "/cosmetics/assets/fx_dream_butterfly.webp",
+    butterflyClosed: "/cosmetics/assets/fx_dream_wing_closed.webp",
+    stormBolt: "/cosmetics/assets/fx_storm_bolt.webp",
+    stormOrb: "/cosmetics/assets/fx_storm_orb.webp",
+    arcadeHeart: "/cosmetics/assets/fx_arcade_heart.webp",
+    arcadeBot: "/cosmetics/assets/fx_arcade_star.webp",
+    jadeKoi: "/cosmetics/assets/fx_jade_koi.webp",
+    jadeLotus: "/cosmetics/assets/fx_jade_lotus.webp",
   });
 
   const PRELOAD_ART_URLS = Object.freeze([
@@ -52,17 +60,30 @@
     "/cosmetics/assets/deco_sakura_front.webp",
     "/cosmetics/assets/deco_frost_back.webp",
     "/cosmetics/assets/deco_frost_front.webp",
+    "/cosmetics/assets/deco_frost_blink.webp",
     "/cosmetics/assets/deco_cyber_back.webp",
     "/cosmetics/assets/deco_cyber_front.webp",
     "/cosmetics/assets/deco_cyber_blink.webp",
     "/cosmetics/assets/deco_infernal_back.webp",
     "/cosmetics/assets/deco_infernal_front.webp",
+    "/cosmetics/assets/deco_infernal_blink.webp",
     "/cosmetics/assets/deco_arcane_back.webp",
     "/cosmetics/assets/deco_arcane_front.webp",
     "/cosmetics/assets/deco_abyssal_back.webp",
     "/cosmetics/assets/deco_abyssal_front.webp",
     "/cosmetics/assets/deco_seraph_back.webp",
     "/cosmetics/assets/deco_seraph_front.webp",
+    "/cosmetics/assets/deco_dream_back.webp",
+    "/cosmetics/assets/deco_dream_front.webp",
+    "/cosmetics/assets/deco_dream_blink.webp",
+    "/cosmetics/assets/deco_storm_back.webp",
+    "/cosmetics/assets/deco_storm_front.webp",
+    "/cosmetics/assets/deco_storm_blink.webp",
+    "/cosmetics/assets/deco_arcade_back.webp",
+    "/cosmetics/assets/deco_arcade_front.webp",
+    "/cosmetics/assets/deco_arcade_blink.webp",
+    "/cosmetics/assets/deco_jade_back.webp",
+    "/cosmetics/assets/deco_jade_front.webp",
     "/cosmetics/assets/deco_sovereign_back.webp",
     "/cosmetics/assets/deco_sovereign_front.webp",
     "/cosmetics/assets/frame_astral_tl.webp",
@@ -89,9 +110,27 @@
     "/cosmetics/assets/frame_seraph_tl.webp",
     "/cosmetics/assets/frame_seraph_tr.webp",
     "/cosmetics/assets/frame_seraph_br.webp",
+    "/cosmetics/assets/frame_dream_tl.webp",
+    "/cosmetics/assets/frame_dream_tr.webp",
+    "/cosmetics/assets/frame_dream_br.webp",
+    "/cosmetics/assets/frame_storm_tl.webp",
+    "/cosmetics/assets/frame_storm_tr.webp",
+    "/cosmetics/assets/frame_storm_br.webp",
+    "/cosmetics/assets/frame_arcade_tl.webp",
+    "/cosmetics/assets/frame_arcade_tr.webp",
+    "/cosmetics/assets/frame_arcade_br.webp",
+    "/cosmetics/assets/frame_jade_tl.webp",
+    "/cosmetics/assets/frame_jade_tr.webp",
+    "/cosmetics/assets/frame_jade_br.webp",
     "/cosmetics/assets/frame_sovereign_tl.webp",
     "/cosmetics/assets/frame_sovereign_tr.webp",
     "/cosmetics/assets/frame_sovereign_br.webp",
+    "/cosmetics/assets/frame_founder_tl.webp",
+    "/cosmetics/assets/frame_founder_tr.webp",
+    "/cosmetics/assets/frame_founder_br.webp",
+    "/cosmetics/assets/frame_dev_tl.webp",
+    "/cosmetics/assets/frame_dev_tr.webp",
+    "/cosmetics/assets/frame_dev_br.webp",
   ]);
 
   const spriteCache = new Map();
@@ -424,6 +463,78 @@
         const tw = 0.5 + 0.5 * Math.sin(t * 3.2 + i * 1.9);
         drawSpark(ctx, x, y, 2.2 + prng(seed, i + 32) * 2.6, i % 2 === 0 ? "#fde047" : "#fb7185", tw * 0.92, t * 0.8);
       }
+      return;
+    }
+
+    if (id === "lunar") {
+      // Borboletas Morpho orbitando o avatar e batendo as asas em tempo real (open <-> closed)!
+      const openImg = getSprite("butterflyOpen");
+      const closedImg = getSprite("butterflyClosed");
+      const count = Math.max(2, Math.round(4 * density));
+      for (let i = 0; i < count; i++) {
+        const ang = t * (0.38 + i * 0.12) + i * 1.65;
+        const z = Math.sin(ang);
+        if ((isFront && z < 0) || (!isFront && z >= 0)) continue;
+        const x = cx + Math.cos(ang) * R * 1.14;
+        const y = cy + Math.sin(ang * 2) * R * 0.52 - R * 0.15;
+        const flap = Math.sin(t * 14 + i * 2.3);
+        const img = flap >= 0 ? openImg : closedImg;
+        if (img) drawSprite(ctx, img, x, y, R * 0.36, Math.cos(ang) * 0.35, 0.92);
+        else drawSpark(ctx, x, y, 2.6, "#c084fc", 0.88);
+      }
+      return;
+    }
+
+    if (id === "electric-pulse") {
+      // Centelhas de plasma e orbe Tomoe orbitando o Espírito Raijin
+      const boltImg = getSprite("stormBolt");
+      const count = Math.max(4, Math.round(7 * density));
+      for (let i = 0; i < count; i++) {
+        if ((i % 2 === 0) !== isFront) continue;
+        const dur = 2.6 + prng(seed, i) * 1.8;
+        const lt = ((t + prng(seed, i + 14) * dur) % dur) / dur;
+        const ang = prng(seed, i + 28) * Math.PI * 2;
+        const x = cx + Math.cos(ang) * R * (1.02 + lt * 0.22);
+        const y = cy + Math.sin(ang) * R * (1.02 + lt * 0.22);
+        const alpha = Math.sin(lt * Math.PI) * 0.92;
+        if (boltImg && i === 0) drawSprite(ctx, boltImg, x, y, R * 0.34, ang, alpha);
+        else drawSpark(ctx, x, y, 2.2 + prng(seed, i + 40) * 2.4, i % 2 === 0 ? "#38bdf8" : "#fde047", alpha, t * 2);
+      }
+      return;
+    }
+
+    if (id === "cyber-ring") {
+      // Corações 16-bit pintados subindo nas laterais do Pixel-Bot
+      const heartImg = getSprite("arcadeHeart");
+      const count = Math.max(3, Math.round(5 * density));
+      for (let i = 0; i < count; i++) {
+        if ((i % 2 === 0) !== isFront) continue;
+        const dur = 4.2 + prng(seed, i) * 2.4;
+        const lt = ((t + prng(seed, i + 10) * dur) % dur) / dur;
+        const side = i % 2 === 0 ? -1 : 1;
+        const x = cx + side * R * (0.85 + prng(seed, i + 20) * 0.32) + Math.sin(lt * 5 + i) * 6;
+        const y = cy + R * 0.85 - lt * R * 1.9;
+        const alpha = smoothstep(0, 0.16, lt) * (1 - smoothstep(0.74, 1, lt)) * 0.92;
+        if (heartImg && i < 3) drawSprite(ctx, heartImg, x, y, R * 0.24, Math.sin(lt * 4) * 0.2, alpha);
+        else drawSpark(ctx, x, y, 2.2, "#38e8ff", alpha);
+      }
+      return;
+    }
+
+    if (id === "core-orbit") {
+      // Pétalas de lótus de jade & gotas douradas ao redor das carpas Koi
+      const lotusImg = getSprite("jadeLotus");
+      const count = Math.max(3, Math.round(6 * density));
+      for (let i = 0; i < count; i++) {
+        const ang = t * (0.28 + prng(seed, i) * 0.16) + i * 1.2;
+        const z = Math.sin(ang);
+        if ((isFront && z < 0) || (!isFront && z >= 0)) continue;
+        const x = cx + Math.cos(ang) * R * 1.12;
+        const y = cy + Math.sin(ang) * R * 1.12;
+        const tw = 0.5 + 0.5 * Math.sin(t * 2.4 + i);
+        if (lotusImg && i === 0) drawSprite(ctx, lotusImg, x, y, R * 0.28, t * 0.5, tw * 0.9);
+        else drawSpark(ctx, x, y, 2.2 + prng(seed, i + 30) * 2.2, i % 2 === 0 ? "#34d399" : "#fde68a", tw * 0.88, t);
+      }
     }
   }
 
@@ -548,6 +659,61 @@
         const y = 16 + lt * (h - 48);
         const alpha = smoothstep(0, 0.14, lt) * (1 - smoothstep(0.8, 1, lt)) * 0.78 * dim;
         if (featherImg) drawSprite(ctx, featherImg, x, y, 18 + prng(seed, i + 30) * 8, Math.sin(lt * 4 + i) * 0.45, alpha);
+      }
+      return;
+    }
+
+    if (id === "dream-sanctuary") {
+      // Borboletas Morpho batendo asas suavemente nas bordas superiores do cartão
+      const openImg = getSprite("butterflyOpen");
+      const closedImg = getSprite("butterflyClosed");
+      const n = Math.max(2, Math.round(3 * density));
+      for (let i = 0; i < n; i++) {
+        const dur = 8.5 + i * 2.2;
+        const lt = ((t + i * 2.7) % dur) / dur;
+        const x = w - 24 - prng(seed, i + 10) * 65 + Math.sin(lt * 6 + i) * 16;
+        const y = 18 + lt * (bannerH + 60);
+        const alpha = Math.sin(lt * Math.PI) * 0.82 * dim;
+        const img = Math.sin(t * 13 + i * 2) >= 0 ? openImg : closedImg;
+        if (img) drawSprite(ctx, img, x, y, 22 + i * 4, Math.sin(lt * 4) * 0.35, alpha);
+      }
+      return;
+    }
+
+    if (id === "neon-pulse") {
+      const n = Math.max(4, Math.round(7 * density));
+      for (let i = 0; i < n; i++) {
+        const x = 16 + prng(seed, i + 5) * (w - 32);
+        const y = 10 + prng(seed, i + 15) * (bannerH * 0.78);
+        const tw = Math.pow(0.5 + 0.5 * Math.sin(t * 3.8 + i * 2.3), 2);
+        drawSpark(ctx, x, y, 2.0 + prng(seed, i + 25) * 2.6, i % 2 === 0 ? "#38bdf8" : "#fde047", tw * 0.85 * dim, t);
+      }
+      return;
+    }
+
+    if (id === "eclipse-crown") {
+      const heartImg = getSprite("arcadeHeart");
+      const n = Math.max(2, Math.round(4 * density));
+      for (let i = 0; i < n; i++) {
+        const dur = 6.0 + prng(seed, i) * 3.0;
+        const lt = ((t + i * 1.9) % dur) / dur;
+        const x = w - 22 - prng(seed, i + 12) * 48;
+        const y = bannerH + 30 - lt * (bannerH + 15);
+        const alpha = Math.sin(lt * Math.PI) * 0.78 * dim;
+        if (heartImg) drawSprite(ctx, heartImg, x, y, 14 + (i % 2) * 4, 0, alpha);
+      }
+      return;
+    }
+
+    if (id === "core-pulse") {
+      const lotusImg = getSprite("jadeLotus");
+      const n = Math.max(3, Math.round(6 * density));
+      for (let i = 0; i < n; i++) {
+        const x = 18 + prng(seed, i + 4) * (w - 36);
+        const y = 12 + prng(seed, i + 16) * (bannerH * 0.82);
+        const tw = 0.4 + 0.6 * Math.sin(t * 2.2 + i * 1.7);
+        if (lotusImg && i === 0) drawSprite(ctx, lotusImg, w - 34, 32, 22, t * 0.3, 0.75 * dim);
+        else drawSpark(ctx, x, y, 2.0 + prng(seed, i + 28) * 2.4, i % 2 === 0 ? "#34d399" : "#fde68a", tw * 0.8 * dim, t * 0.5);
       }
     }
   }
@@ -899,6 +1065,158 @@
           const sx = w * (0.18 + i * 0.17);
           const sy = h * (0.12 + prng(seed, i + 80) * 0.34);
           drawSprite(ctx, starImg, sx, sy, 34 + prng(seed, i + 90) * 24, st * 0.8, Math.sin(st * Math.PI) * 0.85);
+        }
+      }
+      return;
+    }
+
+    if (id === "dream-butterflies") {
+      // REVOADA ONÍRICA (4 atos com bater de asas real open <-> closed!):
+      const openImg = getSprite("butterflyOpen");
+      const closedImg = getSprite("butterflyClosed");
+      const wash = ctx.createRadialGradient(w * 0.5, h * 0.25, 10, w * 0.5, h * 0.25, w * 0.85);
+      wash.addColorStop(0, `rgba(192, 132, 252, ${(0.26 * climax * env).toFixed(3)})`);
+      wash.addColorStop(0.55, `rgba(56, 189, 248, ${(0.14 * env).toFixed(3)})`);
+      wash.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = wash;
+      ctx.fillRect(0, 0, w, h);
+
+      for (let i = 0; i < 14; i++) {
+        const start = prng(seed, i) * 0.34;
+        const lt = clamp01((p - start) / 0.62);
+        if (lt <= 0 || lt >= 1) continue;
+        const ease = easeOutCubic(lt);
+        const fromLeft = i % 2 === 0;
+        const x = (fromLeft ? -30 : w + 30) + (fromLeft ? 1 : -1) * ease * (w + 60) * (0.7 + prng(seed, i + 20) * 0.35);
+        const y = h * (0.72 - ease * 0.62) + Math.sin(lt * 8 + i) * 26;
+        const a = smoothstep(0, 0.14, lt) * (1 - smoothstep(0.76, 1, lt)) * (i < 6 ? 0.68 : 0.96);
+        const sz = (i < 6 ? 28 : 48) + prng(seed, i + 40) * 20;
+        const flap = Math.sin(p * 48 + i * 2.1);
+        const img = flap >= 0 ? openImg : closedImg;
+        if (img) drawSprite(ctx, img, x, y, sz, (fromLeft ? 0.35 : -0.35) + Math.cos(lt * 6) * 0.25, a);
+        else drawSpark(ctx, x, y, 4, "#c084fc", a);
+      }
+      for (let i = 0; i < 18; i++) {
+        const sx = prng(seed, i + 80) * w;
+        const sy = prng(seed, i + 100) * h * 0.75;
+        drawSpark(ctx, sx, sy, 2.0 + prng(seed, i + 120) * 2.8, i % 2 === 0 ? "#e879f9" : "#38bdf8", env * Math.sin(p * Math.PI), p * 3);
+      }
+      return;
+    }
+
+    if (id === "synth-overdrive") {
+      // FÚRIA DE RAIJIN (4 atos com raios de plasma + tambores Tomoe giratórios!):
+      const boltImg = getSprite("stormBolt");
+      const orbImg = getSprite("stormOrb");
+      const flash = Math.sin(smoothstep(0.18, 0.55, p) * Math.PI);
+      const wash = ctx.createLinearGradient(0, 0, 0, h * 0.75);
+      wash.addColorStop(0, `rgba(56, 189, 248, ${(0.32 * flash * env).toFixed(3)})`);
+      wash.addColorStop(0.5, `rgba(99, 102, 241, ${(0.16 * env).toFixed(3)})`);
+      wash.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = wash;
+      ctx.fillRect(0, 0, w, h);
+
+      if (orbImg) {
+        for (let i = 0; i < 3; i++) {
+          const lt = clamp01((p - i * 0.08) / 0.74);
+          if (lt <= 0 || lt >= 1) continue;
+          const x = w * (0.22 + i * 0.28);
+          const y = h * 0.18 + Math.sin(lt * Math.PI) * 18;
+          const a = smoothstep(0, 0.16, lt) * (1 - smoothstep(0.75, 1, lt)) * 0.88;
+          drawSprite(ctx, orbImg, x, y, i === 1 ? 74 : 54, lt * 3.2 * (i % 2 === 0 ? 1 : -1), a);
+        }
+      }
+      if (boltImg) {
+        for (let i = 0; i < 7; i++) {
+          const start = 0.06 + i * 0.08;
+          const lt = clamp01((p - start) / 0.34);
+          if (lt <= 0 || lt >= 1) continue;
+          const x = w * (0.12 + prng(seed, i + 10) * 0.76);
+          const y = h * (0.18 + prng(seed, i + 30) * 0.38);
+          const a = Math.sin(lt * Math.PI) * 0.96;
+          drawSprite(ctx, boltImg, x, y, 76 + prng(seed, i + 50) * 48, (prng(seed, i + 70) - 0.5) * 0.6, a);
+        }
+      }
+      return;
+    }
+
+    if (id === "eclipse-flare") {
+      // OVERDRIVE ARCADE (4 atos com Pixel-Bot + corações 16-bit + grid laser synthwave!):
+      const heartImg = getSprite("arcadeHeart");
+      const botImg = getSprite("arcadeBot");
+      const wash = ctx.createLinearGradient(0, 0, w, h * 0.7);
+      wash.addColorStop(0, `rgba(244, 63, 158, ${(0.25 * climax * env).toFixed(3)})`);
+      wash.addColorStop(0.5, `rgba(56, 232, 255, ${(0.18 * env).toFixed(3)})`);
+      wash.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = wash;
+      ctx.fillRect(0, 0, w, h);
+
+      if (botImg) {
+        const bp = smoothstep(0.08, 0.86, p);
+        if (bp > 0 && bp < 1) {
+          const ease = easeOutCubic(bp);
+          const bx = -40 + ease * (w + 80);
+          const by = h * 0.22 - Math.sin(bp * Math.PI * 3) * 24;
+          const a = smoothstep(0, 0.14, bp) * (1 - smoothstep(0.78, 1, bp)) * 0.95;
+          drawSprite(ctx, botImg, bx, by, 72, Math.sin(bp * 10) * 0.18, a);
+        }
+      }
+      for (let i = 0; i < 14; i++) {
+        const start = prng(seed, i) * 0.36;
+        const lt = clamp01((p - start) / 0.56);
+        if (lt <= 0 || lt >= 1) continue;
+        const x = w * (0.08 + prng(seed, i + 20) * 0.84);
+        const y = h * (0.68 - easeOutCubic(lt) * 0.58);
+        const a = smoothstep(0, 0.14, lt) * (1 - smoothstep(0.74, 1, lt)) * 0.92;
+        if (heartImg) drawSprite(ctx, heartImg, x, y, 22 + prng(seed, i + 40) * 18, Math.sin(lt * 6 + i) * 0.2, a);
+      }
+      return;
+    }
+
+    if (id === "core-signal") {
+      // DANÇA DOS KOI (4 atos com carpas Koi imperiais nadando em curva S + flores de lótus + ondas de jade!):
+      const koiImg = getSprite("jadeKoi");
+      const lotusImg = getSprite("jadeLotus");
+      const wash = ctx.createRadialGradient(w * 0.5, h * 0.3, 12, w * 0.5, h * 0.3, w * 0.85);
+      wash.addColorStop(0, `rgba(16, 185, 129, ${(0.26 * climax * env).toFixed(3)})`);
+      wash.addColorStop(0.55, `rgba(245, 158, 11, ${(0.14 * env).toFixed(3)})`);
+      wash.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = wash;
+      ctx.fillRect(0, 0, w, h);
+
+      // Ondas concêntricas douradas de água
+      for (let r = 0; r < 3; r++) {
+        const rp = clamp01((p - r * 0.14) / 0.65);
+        if (rp <= 0 || rp >= 1) continue;
+        ctx.save();
+        ctx.strokeStyle = `rgba(110, 231, 183, ${((1 - rp) * 0.42 * env).toFixed(3)})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(w * (0.3 + r * 0.2), h * 0.26, 12 + rp * 95, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      if (koiImg) {
+        for (let i = 0; i < 2; i++) {
+          const kp = smoothstep(0.05 + i * 0.12, 0.88 + i * 0.08, p);
+          if (kp <= 0 || kp >= 1) continue;
+          const dir = i === 0 ? 1 : -1;
+          const kx = (i === 0 ? -50 : w + 50) + dir * kp * (w + 100);
+          const ky = h * (0.22 + i * 0.14) + Math.sin(kp * Math.PI * 2.5 + i) * 32;
+          const a = smoothstep(0, 0.15, kp) * (1 - smoothstep(0.78, 1, kp)) * 0.94;
+          const tailSwim = 1 + Math.sin(kp * 18 + i) * 0.08;
+          drawSprite(ctx, koiImg, kx, ky, 92, (i === 0 ? 1.35 : -1.75) + Math.cos(kp * 7) * 0.22, a, tailSwim, 1);
+        }
+      }
+      if (lotusImg) {
+        for (let i = 0; i < 6; i++) {
+          const lp = clamp01((p - prng(seed, i) * 0.3) / 0.64);
+          if (lp <= 0 || lp >= 1) continue;
+          const lx = w * (0.12 + i * 0.15) + Math.sin(lp * 4 + i) * 14;
+          const ly = h * (0.12 + (i % 2) * 0.22) + lp * 24;
+          const a = smoothstep(0, 0.16, lp) * (1 - smoothstep(0.76, 1, lp)) * 0.9;
+          drawSprite(ctx, lotusImg, lx, ly, 32 + (i % 2) * 12, lp * 1.4 + i, a);
         }
       }
     }

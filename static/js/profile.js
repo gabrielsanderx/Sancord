@@ -378,8 +378,34 @@ function updateBioCounter() {
 }
 
 // ---------------------------------------------------------------------------
-// Mídia do perfil (avatar/banner)
+// Mídia do perfil (avatar/banner) + Avatares Predefinidos Pintados V5
 // ---------------------------------------------------------------------------
+const SANVO_PRESET_AVATARS = [
+  { id: "kitsune",  name: "Kitsune Cyber",       collection: "Holográfico & Cyber", url: "/cosmetics/assets/preset_avatar_kitsune.webp" },
+  { id: "astral",   name: "Guardião Astral",     collection: "Astral & Cósmico",    url: "/cosmetics/assets/preset_avatar_astral.webp" },
+  { id: "sakura",   name: "Espírito Hanami",     collection: "Sakura & Floral",     url: "/cosmetics/assets/preset_avatar_sakura.webp" },
+  { id: "frost",    name: "Drakon Glacial",      collection: "Gelo & Cristal",      url: "/cosmetics/assets/preset_avatar_frost.webp" },
+  { id: "infernal", name: "Fênix Dracônica",     collection: "Forja Dracônica",     url: "/cosmetics/assets/preset_avatar_infernal.webp" },
+  { id: "arcane",   name: "Oráculo do Eclipse",  collection: "Magia & Arcano",      url: "/cosmetics/assets/preset_avatar_arcane.webp" },
+  { id: "abyssal",  name: "Guardião Abissal",    collection: "Abissal & Oceânico",  url: "/cosmetics/assets/preset_avatar_abyssal.webp" },
+  { id: "seraph",   name: "Valquíria Celestial", collection: "Celestial & Serafim", url: "/cosmetics/assets/preset_avatar_seraph.webp" },
+  { id: "dream",    name: "Borboleta Onírica",   collection: "Bosque Onírico",      url: "/cosmetics/assets/preset_avatar_dream.webp" },
+  { id: "storm",    name: "Lobo Raijin",         collection: "Templo do Trovão",    url: "/cosmetics/assets/preset_avatar_storm.webp" },
+  { id: "arcade",   name: "Pixel-Bot 16-Bit",    collection: "Horizonte Arcade",    url: "/cosmetics/assets/preset_avatar_arcade.webp" },
+  { id: "jade",     name: "Lótus de Jade",       collection: "Lagoa de Jade",       url: "/cosmetics/assets/preset_avatar_jade.webp" },
+];
+
+function findPresetAvatar(idOrUrl) {
+  if (!idOrUrl) return null;
+  const str = String(idOrUrl);
+  return SANVO_PRESET_AVATARS.find((p) => p.id === str || p.url === str || str.includes(`preset_avatar_${p.id}.webp`)) || null;
+}
+
+async function fetchPresetAvatarBlob(preset) {
+  const res = await fetch(preset.url);
+  if (!res.ok) throw new Error(`Não foi possível carregar o avatar predefinido (${res.status}).`);
+  return res.blob();
+}
 async function uploadProfileImage(blob, filename) {
   const res = await SancordNet.fetch(`/api/attachments?filename=${encodeURIComponent(filename)}`, {
     method: "POST",
@@ -541,6 +567,10 @@ async function openServerProfileDialog(serverId) {
           mediaPreviews.set(kind, { file, url: URL.createObjectURL(file), animated: file.type === "image/gif" });
         }
         if (form[kind] === "keep") overrides[kind] = local?.[kind];
+        else if (form[kind] === "preset" && kind === "avatar") {
+          const p = findPresetAvatar(form.avatar_preset) || SANVO_PRESET_AVATARS[0];
+          overrides.avatar = { url: p.url, animated: false };
+        }
         else if (form[kind] === "upload") overrides[kind] = mediaPreviews.get(kind);
       }
       const profile = mergeServerProfile(state.selfUser, overrides);
@@ -553,9 +583,18 @@ async function openServerProfileDialog(serverId) {
       ...media.flatMap(({ kind, label, maxMB }) => [
         { name: kind, label, type: "select", value: "keep", options: [
           { value: "keep", label: local?.[kind] ? "Manter imagem deste servidor" : "Usar imagem do perfil global" },
+          ...(kind === "avatar" ? [{ value: "preset", label: "Escolher um avatar predefinido" }] : []),
           { value: "upload", label: "Enviar uma imagem para este servidor" },
           ...(local?.[kind] ? [{ value: "inherit", label: "Voltar a usar imagem do perfil global" }] : []),
         ] },
+        ...(kind === "avatar" ? [{
+          name: "avatar_preset",
+          label: "Avatar predefinido",
+          type: "select",
+          value: SANVO_PRESET_AVATARS[0].id,
+          options: SANVO_PRESET_AVATARS.map((p) => ({ value: p.id, label: `${p.name} (${p.collection})` })),
+          visibleWhen: (v) => v.avatar === "preset",
+        }] : []),
         { name: `${kind}_file`, label: `Arquivo de ${label.toLowerCase()}`, type: "file", required: true,
           accept: "image/png,image/jpeg,image/webp,image/gif", hint: `PNG, JPG, WebP ou GIF. Até ${maxMB} MB.`,
           visibleWhen: (v) => v[kind] === "upload" },
@@ -609,7 +648,12 @@ async function openServerProfileDialog(serverId) {
   }
   try {
     const uploads = media.filter(({ kind }) => values[kind] === "upload");
-    if (uploads.length) showUiToast("Enviando imagens do perfil…");
+    if (uploads.length || values.avatar === "preset") showUiToast("Enviando imagens do perfil…");
+    if (values.avatar === "preset") {
+      const p = findPresetAvatar(values.avatar_preset) || SANVO_PRESET_AVATARS[0];
+      const blob = await fetchPresetAvatarBlob(p);
+      changes.avatar_attachment_id = await uploadProfileImage(blob, `preset_avatar_${p.id}.webp`);
+    }
     for (const { kind } of uploads) {
       const file = values[`${kind}_file`];
       changes[`${kind}_attachment_id`] = await uploadProfileImage(file, file.name);
@@ -686,7 +730,7 @@ function renderProfileContextPreview() {
     }
     renderCompactProfile(host.firstElementChild, u, name, u.username || "voce", true);
   } else if (profilePreviewContext === "panel") {
-    host.innerHTML = `<div class="ctx-dm-row profile-panel-preview ${plate}">${avatar(34)}<div>${nameSpan}
+    host.innerHTML = `<div class="ctx-dm-row profile-panel-preview">${avatar(34)}<div>${nameSpan}
       <div class="ctx-sub">${escapeHtml(customStatusText(u) || STATUS_LABELS[u.status_kind] || "Online")}</div></div>
       <span aria-hidden="true" class="profile-panel-preview-gear">⚙</span></div>`;
   } else if (profilePreviewContext === "chat") {
@@ -704,7 +748,7 @@ function renderProfileContextPreview() {
   }
   const nameEl = host.querySelector(".ctx-name");
   if (nameEl && typeof applyNameStyleToEl === "function") applyNameStyleToEl(nameEl, u, "#ffffff");
-  const plateRow = host.querySelector(".ctx-dm-row");
+  const plateRow = host.querySelector(".ctx-dm-row:not(.profile-panel-preview)");
   if (plateRow && typeof SancordCosmetics !== "undefined" && typeof SancordCosmetics.renderNameplateArt === "function") {
     SancordCosmetics.renderNameplateArt(plateRow, plate ? u.nameplate_style : null);
   }
@@ -743,7 +787,7 @@ function discardPendingProfileMedia() {
   profileDraft.media = {};
 }
 
-/** `value`: { blob, name, animated } para trocar ou "remove" para voltar ao padrão. */
+/** `value`: { blob, name, animated } ou { presetId, presetUrl, name } para trocar, ou "remove" para voltar ao padrão. */
 function setPendingProfileMedia(kind, value) {
   if (typeof profileDraft === "undefined") return;
   const prev = profileDraft.media?.[kind];
@@ -753,6 +797,15 @@ function setPendingProfileMedia(kind, value) {
     const saved = kind === "avatar" ? state.selfUser?.avatar_url : state.selfUser?.banner_url;
     if (saved) profileDraft.media[kind] = "remove";
     else delete profileDraft.media[kind];
+  } else if (value && value.presetUrl) {
+    profileDraft.media[kind] = {
+      presetId: value.presetId,
+      presetUrl: value.presetUrl,
+      name: value.name || `preset_avatar_${value.presetId || "default"}.webp`,
+      animated: false,
+      url: value.presetUrl,
+      blob: value.blob || null,
+    };
   } else {
     profileDraft.media[kind] = { blob: value.blob, name: value.name, animated: Boolean(value.animated), url: URL.createObjectURL(value.blob) };
   }
@@ -766,8 +819,17 @@ async function flushPendingProfileMedia() {
     const v = pending[kind];
     if (!v) continue;
     try {
-      if (v === "remove") await applyProfileMedia(kind, null);
-      else await applyProfileMedia(kind, v.blob, v.name);
+      if (v === "remove") {
+        await applyProfileMedia(kind, null);
+      } else {
+        let blob = v.blob;
+        if (!blob && v.presetUrl) {
+          const res = await fetch(v.presetUrl);
+          if (!res.ok) throw new Error(`Não foi possível carregar o avatar predefinido (${res.status}).`);
+          blob = await res.blob();
+        }
+        await applyProfileMedia(kind, blob, v.name);
+      }
       if (v.url?.startsWith?.("blob:")) URL.revokeObjectURL(v.url);
       delete profileDraft.media[kind];
     } catch (err) {

@@ -2036,3 +2036,55 @@ Implementação local sobre as fontes da v0.2.3. O cliente Windows continua carr
 - Imagens por colagem, arraste ou seletor e arquivos PDF ou texto passam pelo mesmo diretório de uploads existente. O backend valida formato, dimensões e tamanho e usa um identificador interno aleatório no disco. A leitura exige a conta autorizada e só é atendida pela rota privada. Imagens podem ser ampliadas, redimensionadas e legendadas, com carregamento sob demanda. Os limites são 500 notas, 100 pastas, 128 KiB por documento, 10 MiB por arquivo, 24 anexos armazenados por nota e 250 MiB por conta. Anexos removidos do documento permanecem associados à nota até a exclusão permanente, para preservar a resolução de conflitos.
 - QA de API em `src/sanoted_tests.rs`. QA de ponta a ponta em `scripts/sanoted-qa.mjs` com processos Windows, backend e perfis WebView2 descartáveis. O teste derruba o backend de QA, recupera uma edição e uma imagem após encerrar o cliente e confere a sincronização em outro perfil. A colagem e o arraste são exercitados com eventos de entrada do WebView2. O atalho físico Win+Shift+S e a sincronização entre dois computadores físicos ficam para homologação.
 - Entrega local, com atualização conjunta de cliente e backend necessária para disponibilizar a área em produção.
+
+## 23/11/2026 · v0.2.10 publicada e produção atualizada (autorizada pelo usuário)
+
+- **Commit:** `2e49d405a1ddc74aa1d86175916a95845590ca7c` na `main` de `gabrielsanderx/Sanvo` (pai `dcbda7c3`, sem force), via GitHub API com 35 arquivos alterados/novos conferidos por SHA-1 e `0` segredos/arquivos proibidos.
+  - `sancord-release validate v0.2.10` OK; suítes locais aprovadas (**284** frontend + **224** Rust + QA E2E `sanoted-qa.mjs` e `profile-motion-qa.mjs --idle`).
+- **Tag** `v0.2.10`:
+  - `Stable Windows release` (run `45283847492`): `tests`, `package`, `sign`, `verify-package` e `publish` concluídos com sucesso.
+  - `Windows CI` na `main` (run `45283845869`): sucesso.
+  - `sancord-release verify` local sobre os ativos publicados: assinatura Ed25519 e integridade válidas.
+  - `SanvoServer.exe` / `SancordServer.exe`: `16.742.912` bytes, SHA-256 `1b80a194d16298bd1698dd2bdfd93faa9350eb5ee925e939e5193e9448dbf73e`.
+  - `Sanvo.exe` / `Sancord.exe`: `13.825.024` bytes, SHA-256 `d062eb0a5ef807eaf5ce02ea46c7ed64e11067a5cb3db1f1e4de9efd3bed6604`.
+- **Produção atualizada:**
+  1. Parado apenas o `SanvoServer.exe` anterior (PID `16328`); o túnel `cloudflared.exe` (PID `19012`) permaneceu intacto e único.
+  2. Backup completo criado em `data-backup-pre-0.2.10-20261123-2018/` (`data/` + `SanvoServer-0.2.9.exe` + `Sanvo-0.2.9.exe`).
+  3. `SanvoServer.exe`, `SancordServer.exe`, `Sanvo.exe` e `Sancord.exe` substituídos pelos binários oficiais assinados `v0.2.10` e servidor religado via `scripts/start-host.ps1` (PID `25288`).
+- **Conferido:**
+  - `/api/health` responde `0.2.10`, `ok: true`, protocolo `2`;
+  - log confirma `SMTP configurado (smtp.gmail.com:587, starttls)` e URL pública assinada anunciada;
+  - banco migrado de **v22 → v23** com `integrity_check = ok`, 7 contas e 23 mensagens preservadas, tabelas `sanoted_notes`, `sanoted_folders` e `sanoted_assets` criadas.
+- **Rollback:** parar `SanvoServer.exe`, restaurar `data/` e `SanvoServer-0.2.9.exe` / `Sanvo-0.2.9.exe` de `data-backup-pre-0.2.10-20261123-2018/`.
+
+## 23/11/2026 · Barra inferior limpa (estilo Discord) + Expansão Flagship V5 Wave 3 (12 Coleções Pintadas)
+
+- **Barra inferior de usuário (`#self-user-profile-bar` e `.profile-panel-preview`):**
+  - Removido o fundo/gradiente e a arte SVG de nameplate da barra inferior esquerda do usuário para espelhar o dock escuro e limpo do Discord Desktop (`static/app.js`, `static/js/profile.js`, `static/ui.css`, `static/cosmetics/cosmetics.css`), mantendo na barra apenas a decoração de avatar e a tipografia/cor do nome (`name_style`), enquanto as nameplates continuam ativas na lista de membros, lista de DMs e editor.
+- **Expansão Flagship V5 Wave 3 (`scripts/generate-v5-wave3.mjs`, 37 novos assets WebP HiDPI RGBA, totalizando 98 assets embutidos em `src/bin/desktop_assets.rs`):**
+  1. **Bosque Onírico (`dream`):**
+     - Avatar Decoration `lunar` (*Guardião das Borboletas*): `deco_dream_back.webp` + `deco_dream_front.webp` + `deco_dream_blink.webp` (evento secundário real de bater de asas);
+     - Profile Frame `dream-sanctuary` (*Bosque Onírico*): `frame_dream_{tl,tr,br}.webp`;
+     - Profile Effect `dream-butterflies` (*Revoada Onírica*): narrativa de 4 atos com animação 60fps real de bater de asas alternando `fx_dream_butterfly.webp` e `fx_dream_wing_closed.webp`;
+     - Nameplate `dream-mist` (*Bruma Onírica*).
+  2. **Templo do Trovão (`synth` / Raijin):**
+     - Avatar Decoration `electric-pulse` (*Espírito Raijin*): `deco_storm_back.webp` (tamborins Tomoe em órbita) + `deco_storm_front.webp` (mascotes Raiju) + `deco_storm_blink.webp` (piscar elétrico);
+     - Profile Frame `neon-pulse` (*Templo do Trovão*): `frame_storm_{tl,tr,br}.webp`;
+     - Profile Effect `synth-overdrive` (*Fúria de Raijin*): narrativa de 4 atos com relâmpagos `fx_storm_bolt.webp` e orbes `fx_storm_orb.webp`;
+     - Nameplate `circuit-weave` (*Corrente de Raijin*).
+  3. **Horizonte Arcade (`retro` / 16-Bit Pixel-Bot):**
+     - Avatar Decoration `cyber-ring` (*Companheiro Pixel-Bot*): `deco_arcade_back.webp` + `deco_arcade_front.webp` + `deco_arcade_blink.webp` (piscada CRT `^ ω -`);
+     - Profile Frame `eclipse-crown` (*Gabinete Arcade*): `frame_arcade_{tl,tr,br}.webp`;
+     - Profile Effect `eclipse-flare` (*Overdrive Arcade*): narrativa de 4 atos com `fx_arcade_star.webp` e corações 16-bit `fx_arcade_heart.webp`.
+  4. **Lagoa de Jade (`royal` / Imperial Koi & Lotus):**
+     - Avatar Decoration `core-orbit` (*Koi de Jade & Ouro*): `deco_jade_back.webp` + `deco_jade_front.webp` (duas carpas imperiais nadando em órbita Yin-Yang contínua ao redor do avatar);
+     - Profile Frame `core-pulse` (*Lagoa de Jade*): `frame_jade_{tl,tr,br}.webp`;
+     - Profile Effect `core-signal` (*Dança dos Koi*): narrativa de 4 atos com carpas `fx_jade_koi.webp`, flores de lótus `fx_jade_lotus.webp` e ondas na água;
+     - Nameplate `gold-leaf` (*Lótus de Jade & Ouro*).
+  5. **Upgrades visuais em coleções existentes:**
+     - Adicionados overlays secundários `deco_frost_blink.webp` (`frost-crown`) e `deco_infernal_blink.webp` (`dragon-fire`), além de regra CSS universal `.cos-v5-blink-img` para todas as decorações V5 com camada de evento secundário;
+     - Molduras exclusivas `founder` (`frame_founder_{tl,tr,br}.webp`) e `developer` (`frame_dev_{tl,tr,br}.webp`) agora possuem ornamentos WebP dedicados de 3 cantos.
+- **Subeditor de Avatar com Avatares Predefinidos + Envio de Imagem (`data-pe-view="avatar"`):**
+  - Ao clicar no card **Avatar** (`#settings-change-avatar-btn`) ou no avatar do cartão de prévia ao vivo (`#preview-card-avatar`), o editor abre o subeditor lateral **Avatar do perfil** (`data-pe-view="avatar"`) em vez de acionar o seletor de arquivos diretamente.
+  - O subeditor oferece **12 avatares predefinidos ilustrados do Sanvo** (`SANVO_PRESET_AVATARS`, gerados via `scripts/generate-preset-avatars.mjs` em `static/cosmetics/assets/preset_avatar_*.webp` e embutidos em `src/bin/desktop_assets.rs`, totalizando 110 assets WebP embutidos), além da opção **Iniciais**, do botão **Enviar uma imagem** (`#pe-upload-avatar-btn` para PNG, JPG, WebP ou GIF com editor de recorte/zoom) e de **Reposicionar e zoom** (`#pe-avatar-reposition`). Também disponível no diálogo de Perfil por Servidor (`openServerProfileDialog`).
+- **Validação e Deploy Local:** `285/285` testes de frontend (`npm.cmd test`), `224/224` testes em Rust (`cargo test --locked --all-targets`), verificação visual HiDPI 150% em Chromium e atualização local de `Sanvo.exe` / `SanvoServer.exe` mantendo `cloudflared.exe` ativo.
