@@ -339,13 +339,21 @@ impl ServerState {
                 self.hydrate_chat_message(message);
             }
             MessagesPage { channel_id, messages, .. }
-            | PinnedMessages { channel_id, messages }
-            | MessageContext { channel_id, messages, .. } => {
+            | PinnedMessages { channel_id, messages } => {
                 if !self.can_read_text_channel(recipient, channel_id) {
                     return false;
                 }
                 for m in messages {
                     self.hydrate_chat_message(m);
+                }
+            }
+            MessageContext { channel_id, messages, .. } => {
+                if !self.can_read_text_channel(recipient, channel_id) {
+                    messages.clear();
+                } else {
+                    for m in messages {
+                        self.hydrate_chat_message(m);
+                    }
                 }
             }
             MessageDeleted { channel_id, .. }
