@@ -218,6 +218,24 @@ document.addEventListener("mousedown", e => {
   if (!voiceSignalBox?.contains(e.target) && !voiceDetails.contains(e.target)) closeVoiceDetails();
 });
 
+function watchUserScreenShare(uid) {
+  const user = state.users.get(uid);
+  if (!user || !user.voice_channel_id) return;
+  const openStage = () => {
+    if (typeof voiceStage !== "undefined" && voiceStage) {
+      voiceStage.classList.remove("hidden");
+    }
+    state.spotlightCardId = `screen-${uid}`;
+    if (typeof syncVoiceStageContext === "function") syncVoiceStageContext();
+    if (typeof renderVoiceStage === "function") renderVoiceStage();
+  };
+  if (state.currentVoiceChannel === user.voice_channel_id) {
+    openStage();
+  } else if (typeof joinVoiceChannel === "function") {
+    Promise.resolve(joinVoiceChannel(user.voice_channel_id)).then(openStage).catch(() => {});
+  }
+}
+
 function voiceUserIndicators(user) {
   return [
     ["noise", "Falando", "voice-speaking-glyph"],
@@ -229,12 +247,21 @@ function voiceUserIndicators(user) {
   ].filter(Boolean).map(([icon, label, cls]) => {
     const el = document.createElement("span");
     el.className = cls || "voice-user-state";
-    el.title = label;
+    el.title = cls === "voice-live-label" ? "Assistir transmissão" : label;
     if (icon) {
       el.setAttribute("role", "img");
       el.setAttribute("aria-label", label);
       el.append(SancordIcons.node(icon));
-    } else el.textContent = label;
+    } else {
+      el.textContent = label;
+      if (cls === "voice-live-label" && user?.id) {
+        el.style.cursor = "pointer";
+        el.addEventListener("click", (e) => {
+          e.stopPropagation();
+          watchUserScreenShare(user.id);
+        });
+      }
+    }
     return el;
   });
 }
@@ -289,6 +316,13 @@ function openVoiceUserMenu(e, uid) {
   const isSelf = uid === state.selfUser?.id;
   const name = user.display_name || user.username;
   const items = [{ header: name }];
+  if (user.screen_sharing) {
+    items.push({
+      label: "Assistir transmissão",
+      icon: "screen",
+      onSelect: () => watchUserScreenShare(uid),
+    });
+  }
   items.push({
     label: "Ver perfil",
     icon: "user",

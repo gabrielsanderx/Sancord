@@ -2264,16 +2264,27 @@ function renderDspDiagnostics(diag) {
 function applyDspParametersRealtime() {
   updateNoiseSuppressionUi();
   if (!state.dsp) return;
-  const { ctx, highpassNode, micGainNode, compressorNode, loopGainNode, nsNode } = state.dsp;
+  const { ctx, rawStream, highpassNode, presenceNode, micGainNode, compressorNode, loopGainNode, nsNode } = state.dsp;
   const now = ctx.currentTime;
   const mode = currentNoiseSuppressionMode();
   const abRaw = Boolean(state.micTestActive && state.micTestAbRaw);
-  // 70 Hz preserva graves naturais da voz masculina enquanto remove batidas/hum.
-  highpassNode.frequency.setTargetAtTime(state.audioSettings.highpass && !abRaw ? 70 : 10, now, 0.02);
+  // 85 Hz remove rumble de mesa, ar-condicionado e hum 60 Hz preservando a voz natural.
+  highpassNode.frequency.setTargetAtTime(state.audioSettings.highpass && !abRaw ? 85 : 10, now, 0.02);
+  if (presenceNode?.gain?.setTargetAtTime) {
+    const clarityDb = state.audioSettings.highpass && !abRaw && mode !== "off" ? 1.6 : 0;
+    presenceNode.gain.setTargetAtTime(clarityDb, now, 0.03);
+  }
   micGainNode.gain.setTargetAtTime((state.audioSettings.micGain || 100) / 100, now, 0.02);
-  compressorNode.threshold.setTargetAtTime(state.audioSettings.compressor && !abRaw ? -18 : 0, now, 0.02);
-  compressorNode.ratio.setTargetAtTime(state.audioSettings.compressor && !abRaw ? 3.5 : 1, now, 0.02);
+  // Compressor suave para evitar clipping sem amplificar ruído de fundo no silêncio.
+  compressorNode.threshold.setTargetAtTime(state.audioSettings.compressor && !abRaw ? -14 : 0, now, 0.02);
+  compressorNode.ratio.setTargetAtTime(state.audioSettings.compressor && !abRaw ? 2.5 : 1, now, 0.02);
   loopGainNode.gain.setTargetAtTime(state.micTestActive ? 1.0 : 0.0, now, 0.02);
+  const wantNativeNs = Boolean(!abRaw && mode !== "off" && mode !== "light");
+  const rawTrack = rawStream?.getAudioTracks?.()[0];
+  if (rawTrack?.applyConstraints && state.dsp.lastNativeNs !== wantNativeNs) {
+    state.dsp.lastNativeNs = wantNativeNs;
+    rawTrack.applyConstraints({ noiseSuppression: wantNativeNs }).catch(() => {});
+  }
   if (nsNode?.port) {
     try {
       nsNode.port.postMessage({ type: "setMode", mode });
@@ -2335,13 +2346,16 @@ async function createLocalAudioStream(forceRebuild = false) {
     typeof AudioCtxCtor === "function" &&
     Boolean(AudioCtxCtor.prototype && "audioWorklet" in AudioCtxCtor.prototype);
 
-  // Evita supressão dupla: quando o AudioWorklet do Sancord está ativo, desliga o NS do browser
-  // e mantém AEC e AGC independentes conforme configuração do usuário.
+  // Cascata estilo Discord: usa o supressor nativo C++ do WebRTC/Chromium em modos
+  // auto/standard/strong para ruídos complexos de ambiente + AudioWorklet do Sanvo
+  // para silêncio limpo e supressão de transientes. Em off/light mantém captura pura.
+  const wantNativeNs = Boolean(!(state.micTestActive && state.micTestAbRaw) && nsMode !== "off" && nsMode !== "light");
   const baseConstraints = {
     echoCancellation: Boolean(state.audioSettings.aec),
-    noiseSuppression: !supportsWorklet && nsMode !== "off",
+    noiseSuppression: wantNativeNs || (!supportsWorklet && nsMode !== "off"),
     autoGainControl: Boolean(state.audioSettings.agc),
     channelCount: 1,
+    sampleRate: { ideal: 48000 },
   };
   if (state.audioSettings.micDeviceId) {
     baseConstraints.deviceId = { exact: state.audioSettings.micDeviceId };
@@ -2357,7 +2371,7 @@ async function createLocalAudioStream(forceRebuild = false) {
       rawStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: Boolean(state.audioSettings.aec),
-          noiseSuppression: !supportsWorklet && nsMode !== "off",
+          noiseSuppression: wantNativeNs || (!supportsWorklet && nsMode !== "off"),
           autoGainControl: Boolean(state.audioSettings.agc),
         },
         video: false,
@@ -2392,8 +2406,17 @@ async function createLocalAudioStream(forceRebuild = false) {
   const sourceNode = ctx.createMediaStreamSource(rawStream);
   const highpassNode = ctx.createBiquadFilter();
   highpassNode.type = "highpass";
-  highpassNode.frequency.value = state.audioSettings.highpass ? 70 : 10;
+  highpassNode.frequency.value = state.audioSettings.highpass ? 85 : 10;
   highpassNode.Q.value = 0.707;
+
+  // Clareza vocal sutil em 3 kHz (estilo Discord) — preservando bypass em modo off.
+  const presenceNode = ctx.createBiquadFilter();
+  presenceNode.type = "peaking";
+  presenceNode.frequency.value = 3000;
+  presenceNode.Q.value = 1.0;
+  if (presenceNode.gain) {
+    presenceNode.gain.value = state.audioSettings.highpass && nsMode !== "off" ? 1.6 : 0;
+  }
 
   // Supressor adaptativo de ruído em thread de áudio dedicada (AudioWorklet),
   // com fallback seguro para passthrough se o Worklet falhar ou não existir.
@@ -2428,13 +2451,13 @@ async function createLocalAudioStream(forceRebuild = false) {
   analyserNode.fftSize = 512;
   analyserNode.smoothingTimeConstant = 0.3;
 
-  // Compressor suave pós-supressão (não amplifica ruído nem bombeia).
+  // Compressor suave pós-supressão (controla picos sem amplificar ruído no silêncio).
   const compressorNode = ctx.createDynamicsCompressor();
-  compressorNode.threshold.value = state.audioSettings.compressor ? -18 : 0;
-  compressorNode.knee.value = 16;
-  compressorNode.ratio.value = state.audioSettings.compressor ? 3.5 : 1;
-  compressorNode.attack.value = 0.005;
-  compressorNode.release.value = 0.14;
+  compressorNode.threshold.value = state.audioSettings.compressor ? -14 : 0;
+  compressorNode.knee.value = 20;
+  compressorNode.ratio.value = state.audioSettings.compressor ? 2.5 : 1;
+  compressorNode.attack.value = 0.004;
+  compressorNode.release.value = 0.16;
 
   const gateGainNode = ctx.createGain();
   gateGainNode.gain.value = 1.0;
@@ -2443,10 +2466,11 @@ async function createLocalAudioStream(forceRebuild = false) {
   const loopGainNode = ctx.createGain();
   loopGainNode.gain.value = state.micTestActive ? 1.0 : 0.0;
 
-  // Ordem do pipeline: Captura (AEC/AGC) -> Passa-alta 70Hz -> Supressor Adaptativo -> Ganho -> Medidor -> Compressor -> Gate auxiliar -> Opus
+  // Ordem do pipeline: Captura (AEC/AGC/NS C++) -> Passa-alta 85Hz -> Supressor Adaptativo -> Clareza Vocal -> Ganho -> Medidor -> Compressor -> Gate auxiliar -> Opus
   sourceNode.connect(highpassNode);
   highpassNode.connect(nsNode);
-  nsNode.connect(micGainNode);
+  nsNode.connect(presenceNode);
+  presenceNode.connect(micGainNode);
   micGainNode.connect(analyserNode);
   analyserNode.connect(compressorNode);
   compressorNode.connect(gateGainNode);
@@ -2458,8 +2482,10 @@ async function createLocalAudioStream(forceRebuild = false) {
   const dspObj = {
     ctx,
     rawStream,
+    lastNativeNs: wantNativeNs,
     sourceNode,
     highpassNode,
+    presenceNode,
     nsNode,
     nsWorkletActive,
     nsFallback: !nsWorkletActive,
@@ -2922,7 +2948,8 @@ function boostSdpVideoBitrate(sdpStr, maxBitrateBps) {
   const minKbps = Math.min(maxKbps, 2500);
   const opusHd = Boolean(state.audioSettings?.opusHd);
   const channelAudioKbps = activeVoiceBitrateKbps();
-  const targetAudioBps = channelAudioKbps > 0 ? channelAudioKbps * 1000 : opusHd ? 128000 : 0;
+  const targetAudioBps = channelAudioKbps > 0 ? channelAudioKbps * 1000 : opusHd ? 96000 : 64000;
+  const wantStudioStereo = state.audioSettings?.voiceProfile === "studio" && channelAudioKbps >= 128;
   const lines = sdpStr.split("\r\n");
   const out = [];
   let section = "";
@@ -2953,10 +2980,15 @@ function boostSdpVideoBitrate(sdpStr, maxBitrateBps) {
       } else {
         upgraded += `;maxaveragebitrate=${targetAudioBps}`;
       }
-      if ((opusHd || channelAudioKbps >= 128) && !upgraded.includes("stereo=")) {
-        upgraded += ";stereo=1;sprop-stereo=1";
+      if (wantStudioStereo) {
+        if (!upgraded.includes("stereo=")) upgraded += ";stereo=1;sprop-stereo=1";
+      } else if (!upgraded.includes("stereo=")) {
+        upgraded += ";stereo=0;sprop-stereo=0";
       }
+      if (!upgraded.includes("maxplaybackrate=")) upgraded += ";maxplaybackrate=48000";
+      if (!upgraded.includes("sprop-maxcapturerate=")) upgraded += ";sprop-maxcapturerate=48000";
       if (!upgraded.includes("useinbandfec=")) upgraded += ";useinbandfec=1";
+      if (!upgraded.includes("usedtx=")) upgraded += ";usedtx=1";
       out.push(upgraded);
       continue;
     }
@@ -4827,11 +4859,12 @@ function resolveRemotePeerStreams(user, peerEntry) {
   for (const [sid, stream] of map.entries()) {
     const hasLiveTrack = stream.getVideoTracks().some((t) => t.readyState === "live");
     if (!hasLiveTrack) continue;
+    if (stream === cameraStream || stream === screenStream) continue;
     if (sid === user.camera_stream_id || sid === user.screen_stream_id) continue;
 
-    if (user.camera_on && !user.camera_stream_id && !cameraStream) {
+    if (user.camera_on && !cameraStream && (!user.camera_stream_id || !map.has(user.camera_stream_id))) {
       cameraStream = stream;
-    } else if (user.screen_sharing && !user.screen_stream_id && !screenStream) {
+    } else if (user.screen_sharing && !screenStream && (!user.screen_stream_id || !map.has(user.screen_stream_id))) {
       screenStream = stream;
     }
   }
@@ -4946,12 +4979,13 @@ function renderVoiceStage() {
         videoEl.playsInline = true;
         videoEl.muted = true;
         videoEl.srcObject = screenStream;
-        videoEl.play().catch(() => {});
+        videoEl.play?.()?.catch?.(() => {});
 
         const controlsOverlay = document.createElement("div");
         controlsOverlay.className = "screen-controls-overlay";
 
         if (!isSelf) {
+          const volPct = getPeerVolume(uid);
           const volWrap = document.createElement("div");
           volWrap.className = "volume-control-wrap";
           volWrap.title = "Volume da transmissão / participante (0% a 200%)";
@@ -5005,6 +5039,7 @@ function renderVoiceStage() {
           if (badgeEl) {
             badgeEl.textContent = classifyVideoResolution(videoEl, chosenLabel);
           }
+          videoEl.play?.()?.catch?.(() => {});
         };
 
         videoEl.addEventListener("loadedmetadata", syncBadge);
@@ -5033,7 +5068,7 @@ function renderVoiceStage() {
       const videoEl = screenCard.querySelector("video");
       if (videoEl && videoEl.srcObject !== screenStream) {
         videoEl.srcObject = screenStream;
-        videoEl.play().catch(() => {});
+        videoEl.play?.()?.catch?.(() => {});
       }
 
       const spotlightBtn = screenCard.querySelector(".spotlight-toggle-btn");

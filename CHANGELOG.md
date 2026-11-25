@@ -1,5 +1,17 @@
 # Histórico de versões
 
+## 0.2.14
+
+### Transmissão de tela em chamadas privadas e servidores
+- Corrigido o erro `ReferenceError: volPct is not defined` em `renderVoiceStage()` que impedia o card de vídeo da transmissão de tela de aparecer para os demais participantes da chamada (tanto em chamadas privadas quanto em canais de voz de servidores).
+- Melhorada a resolução de streams remotos quando o `stream.id` recebido no `ontrack` diverge do ID anunciado, com reprodução automática resiliente no WebView2.
+- Selo **AO VIVO** na lista de participantes agora é clicável (além da opção **Assistir transmissão** no menu de contexto) para abrir o palco e focar direto na tela compartilhada.
+
+### Qualidade da voz e supressão de ruído (estilo Discord)
+- Ativada a cascata híbrida de supressão de ruído: supressor nativo C++ do WebRTC/Chromium (`noiseSuppression`) em modos `auto`, `standard` e `strong`, combinado ao motor DSP adaptativo `SancordNoiseSuppressorCore` em AudioWorklet (com alternância em tempo real e bypass verdadeiro em `off`).
+- Upgrade do motor DSP (`voice-dsp-core.js`): passa-alta de 85 Hz, hangover de 260 ms, envelope suave de silêncio (`-35` a `-48 dB` nos intervalos sem fala sem cortar inícios ou finais de palavras) e supressão reforçada de cliques de teclado/mouse.
+- Pipeline Web Audio e Opus calibrados para voz limpa: filtro de clareza vocal sutil em 3 kHz, compressor mais transparente (sem amplificar ruído de fundo no silêncio) e Opus mono 48 kHz com `useinbandfec=1` e `usedtx=1`.
+
 ## 0.2.13
 
 ### Correções no cliente desktop (Windows / WebView2)

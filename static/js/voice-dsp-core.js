@@ -20,10 +20,10 @@
   const VALID_MODES = Object.freeze(["auto", "light", "standard", "strong", "off"]);
 
   const MODE_PRESETS = Object.freeze({
-    off:      { overSub: 0.0,  minGainSilence: 1.0,   minGainSpeech: 1.0,  transientAtten: 0.0,  speechBoost: 0.0 },
-    light:    { overSub: 1.45, minGainSilence: 0.26,  minGainSpeech: 0.80, transientAtten: 0.48, speechBoost: 0.25 },
-    standard: { overSub: 2.15, minGainSilence: 0.14,  minGainSpeech: 0.70, transientAtten: 0.72, speechBoost: 0.20 },
-    strong:   { overSub: 2.95, minGainSilence: 0.085, minGainSpeech: 0.58, transientAtten: 0.85, speechBoost: 0.15 },
+    off:      { overSub: 0.0,  minGainSilence: 1.0,   minGainSpeech: 1.0,  transientAtten: 0.0,  speechBoost: 0.0,  silenceGateFloor: 1.0   },
+    light:    { overSub: 1.65, minGainSilence: 0.14,  minGainSpeech: 0.84, transientAtten: 0.55, speechBoost: 0.25, silenceGateFloor: 0.18  },
+    standard: { overSub: 2.55, minGainSilence: 0.045, minGainSpeech: 0.76, transientAtten: 0.82, speechBoost: 0.20, silenceGateFloor: 0.045 },
+    strong:   { overSub: 3.45, minGainSilence: 0.018, minGainSpeech: 0.66, transientAtten: 0.92, speechBoost: 0.15, silenceGateFloor: 0.015 },
   });
 
   function sanitizeMode(raw, fallback = "auto") {
@@ -106,18 +106,18 @@
       this.sampleRate = safeSr;
       const binHz = safeSr / this.fftSize;
       const clampBin = (hz) => Math.max(1, Math.min(this.bins - 1, Math.round(hz / binHz)));
-      this._rumbleMaxBin = clampBin(75);
+      this._rumbleMaxBin = clampBin(90);
       this._voiceMinBin = clampBin(110);
-      this._voiceMaxBin = clampBin(3400);
+      this._voiceMaxBin = clampBin(3600);
       this._fricMinBin = clampBin(3400);
-      this._fricMaxBin = clampBin(7600);
+      this._fricMaxBin = clampBin(7800);
       this._clickMinBin = clampBin(1400);
       this._clickMaxBin = clampBin(7800);
 
-      // Hangover de ~220 ms convertido em hops de 128 amostras
-      this._hangoverHops = Math.max(8, Math.round((0.22 * safeSr) / this.hopSize));
-      // DC blocker + passa-alta suave (~68 Hz) por amostra
-      const rc = 1 / (2 * Math.PI * 68);
+      // Hangover de ~260 ms convertido em hops de 128 amostras (preserva finais de palavras)
+      this._hangoverHops = Math.max(10, Math.round((0.26 * safeSr) / this.hopSize));
+      // DC blocker + passa-alta suave (~85 Hz) por amostra
+      const rc = 1 / (2 * Math.PI * 85);
       const dt = 1 / safeSr;
       this._dcAlpha = rc / (rc + dt);
     }
@@ -147,10 +147,12 @@
       this._speechRmsDb = -70;
       this._autoIntensity = 0.5; // 0 = light, 0.5 = standard, 1 = strong
       this._wetMix = this.mode === "off" ? 0 : 1;
-      this._effOverSub = 1.25;
-      this._effMinSilence = 0.18;
-      this._effMinSpeech = 0.68;
-      this._effTransient = 0.65;
+      this._effOverSub = 2.15;
+      this._effMinSilence = 0.06;
+      this._effMinSpeech = 0.76;
+      this._effTransient = 0.78;
+      this._effSilenceGateFloor = 0.06;
+      this._silenceEnv = 1.0;
       this._prevHighEnergy = 1e-7;
       this._transientHold = 0;
       this._limiterGain = 1.0;
@@ -226,11 +228,10 @@
         return MODE_PRESETS[this.mode] || MODE_PRESETS.standard;
       }
       // Modo Automático: adapta suavemente ao piso de ruído estimado.
-      // Microfone limpo (<-58 dB) -> Leve (não degrada headsets bons).
-      // Ambiente médio (-58..-42 dB) -> Padrão.
-      // Ventilador / ruído forte (>-42 dB) -> Forte (dentro dos limites seguros).
-      const targetIntensity = Math.max(0, Math.min(1, (this._noiseFloorDb + 58) / 18));
-      this._autoIntensity += (targetIntensity - this._autoIntensity) * 0.015;
+      // Começa já com boa limpeza mesmo em ambientes médios (-64..-44 dB) e
+      // escala até o modo Forte em ambientes com ventilador / AC / ruído alto.
+      const targetIntensity = Math.max(0.25, Math.min(1, (this._noiseFloorDb + 64) / 18));
+      this._autoIntensity += (targetIntensity - this._autoIntensity) * 0.025;
       const t = this._autoIntensity;
       if (t <= 0.5) {
         const u = t * 2;
@@ -241,6 +242,7 @@
           minGainSilence: a.minGainSilence + (b.minGainSilence - a.minGainSilence) * u,
           minGainSpeech: a.minGainSpeech + (b.minGainSpeech - a.minGainSpeech) * u,
           transientAtten: a.transientAtten + (b.transientAtten - a.transientAtten) * u,
+          silenceGateFloor: a.silenceGateFloor + (b.silenceGateFloor - a.silenceGateFloor) * u,
         };
       }
       const u = (t - 0.5) * 2;
@@ -251,6 +253,7 @@
         minGainSilence: a.minGainSilence + (b.minGainSilence - a.minGainSilence) * u,
         minGainSpeech: a.minGainSpeech + (b.minGainSpeech - a.minGainSpeech) * u,
         transientAtten: a.transientAtten + (b.transientAtten - a.transientAtten) * u,
+        silenceGateFloor: a.silenceGateFloor + (b.silenceGateFloor - a.silenceGateFloor) * u,
       };
     }
 
@@ -423,6 +426,15 @@
       this._effMinSilence += (target.minGainSilence - this._effMinSilence) * 0.12;
       this._effMinSpeech += (target.minGainSpeech - this._effMinSpeech) * 0.12;
       this._effTransient += (target.transientAtten - this._effTransient) * 0.12;
+      const targetGateFloor = typeof target.silenceGateFloor === "number" ? target.silenceGateFloor : 1.0;
+      this._effSilenceGateFloor += (targetGateFloor - this._effSilenceGateFloor) * 0.12;
+
+      // Envelope suave de silêncio (estilo Discord/Krisp): abre em <4 ms ao detectar voz
+      // e atenua suavemente o ruído residual nos intervalos sem fala (sem corte seco).
+      const envTarget = this._vadProb >= 0.25 ? 1.0 : this._effSilenceGateFloor;
+      const envCoef = envTarget > this._silenceEnv ? 0.68 : 0.09;
+      this._silenceEnv += (envTarget - this._silenceEnv) * envCoef;
+      const wetSilenceEnv = 1 + (this._silenceEnv - 1) * this._wetMix;
 
       // 5. Ganho Decision-Directed Wiener (anti-underwater!) + preservação de voz + transientes
       const gain = this._gain;
@@ -451,14 +463,14 @@
           g = Math.pow(g, p);
         }
 
-        // Atenuação extra suave abaixo de 75 Hz (rumble de mesa / hum de 60 Hz)
+        // Atenuação extra abaixo de 90 Hz (rumble de mesa / hum de 60 Hz / ventilador)
         if (k <= this._rumbleMaxBin) {
-          g *= 0.45;
+          g *= 0.32;
         }
         // Proteção extra para fricativas/consoantes durante fala ou hangover ("s", "f", "ch")
         let binFloor = minFloorBase;
         if (this._vadProb > 0.25 && k >= this._fricMinBin && k <= this._fricMaxBin) {
-          binFloor = Math.max(binFloor, 0.42 * this._vadProb + this._effMinSilence);
+          binFloor = Math.max(binFloor, 0.46 * this._vadProb + this._effMinSilence);
         }
 
         // Supressão impulsiva de teclado/mouse:
@@ -467,7 +479,7 @@
         if (this._transientHold > 0 && k >= this._clickMinBin) {
           const speechBackoff = 1 - 0.72 * this._vadProb;
           const tAtten = 1 - this._effTransient * speechBackoff;
-          g *= Math.max(0.18, tAtten);
+          g *= Math.max(0.10, tAtten);
         }
 
         if (g < binFloor) g = binFloor;
@@ -485,7 +497,7 @@
         const timeCoef = freqSmoothed > smoothGain[k] ? 0.55 : 0.22;
         smoothGain[k] += (freqSmoothed - smoothGain[k]) * timeCoef;
 
-        const applied = 1 + (smoothGain[k] - 1) * this._wetMix;
+        const applied = (1 + (smoothGain[k] - 1) * this._wetMix) * wetSilenceEnv;
         re[k] *= applied;
         im[k] *= applied;
         if (k > 0 && k < bins - 1) {

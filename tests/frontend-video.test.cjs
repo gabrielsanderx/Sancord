@@ -171,3 +171,32 @@ test('falha ao publicar tela libera a captura obtida pelo seletor do sistema',as
   await h.c.startBrowserDisplayMediaFallback({fps:30,width:1280,height:720},false);
   assert.equal(h.state.screenSharing,false);assert.equal(h.state.localScreenStream,null);assert.equal(stream.track.stops,1);assert.equal(h.errors.length,1);
 });
+
+test('resolveRemotePeerStreams recupera transmissão de tela quando o stream.id do ontrack diverge do anunciado',()=>{
+  const screen=media();
+  const peer={incomingVideoStreams:new Map([['local-fallback-id',screen]])};
+  const c=load(['resolveRemotePeerStreams'],{});
+  const result=c.resolveRemotePeerStreams({camera_on:false,screen_sharing:true,screen_stream_id:'remote-sender-id'},peer);
+  assert.equal(result.screenStream,screen);
+});
+
+test('renderVoiceStage renderiza card de transmissão remota sem ReferenceError de volPct',async(t)=>{
+  const { openInterface } = require('./helpers/dom.cjs');
+  const h = await openInterface(t);
+  const ok = h.run(`(() => {
+    window.HTMLMediaElement.prototype.play = () => Promise.resolve();
+    const fakeTrack = { kind: 'video', readyState: 'live' };
+    const fakeStream = { id: 'scr-1', getTracks: () => [fakeTrack], getVideoTracks: () => [fakeTrack] };
+    state.selfUser = { id: 'u1', username: 'Swag', display_name: 'Swag', avatar_color: '#5865f2', voice_channel_id: 'dmvoice:clara__swag' };
+    const peerUser = { id: 'u2', username: 'clara', display_name: 'clara', avatar_color: '#5865f2', voice_channel_id: 'dmvoice:clara__swag', screen_sharing: true, screen_stream_id: 'scr-1', stream_quality: '1080p • 30FPS' };
+    state.users.set('u1', state.selfUser);
+    state.users.set('u2', peerUser);
+    state.currentVoiceChannel = 'dmvoice:clara__swag';
+    state.voiceMembers['dmvoice:clara__swag'] = ['u1', 'u2'];
+    state.peers.set('u2', { incomingVideoStreams: new Map([['scr-1', fakeStream]]) });
+    renderVoiceStage();
+    const card = document.getElementById('stage-screen-u2');
+    return Boolean(card && card.querySelector('video') && card.querySelector('[data-vol-slider="u2"]'));
+  })()`);
+  assert.equal(ok, true, 'card de transmissão remota deve aparecer com vídeo e controle de volume');
+});
