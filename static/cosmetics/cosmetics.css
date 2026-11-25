@@ -918,7 +918,6 @@ body.profile-hide-nameplates .np-art-layer {
   overflow: visible !important;
 }
 .avatar-status-wrap:has(> .cos-v5-deco) {
-  position: relative;
   isolation: isolate;
   overflow: visible !important;
 }

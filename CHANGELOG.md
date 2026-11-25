@@ -1,5 +1,10 @@
 # Histórico de versões
 
+## 0.2.16
+
+### Correção de alinhamento do avatar decorado no chat
+- Preservado o posicionamento absoluto (`.message-item > .avatar-status-wrap`) das mensagens do chat ao usar decorações de avatar V5, mantendo o avatar alinhado à esquerda sem sobrepor o nome ou o texto da mensagem.
+
 ## 0.2.15
 
 ### Transmissão de tela em chamadas privadas e servidores
