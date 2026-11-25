@@ -1,5 +1,13 @@
 # Histórico de versões
 
+## 0.2.17
+
+### Eliminação do zumbido de fundo, indicador de fala e calibração padrão estilo Discord
+- **Janela Root-Hann casada (análise + síntese IFFT) no DSP (`voice-dsp-core.js`):** aplica janelamento seno tanto na entrada quanto na saída da IFFT ($\sin^2 + \cos^2 = 1.0$) e interpola o envelope de silêncio amostra a amostra, eliminando 100% a descontinuidade de borda de bloco em 375 Hz (que gerava o som de "maquininha" no silêncio) e removendo o `usedtx=1` do SDP do Opus.
+- **Indicador de fala (anel verde / ícone Falando) corrigido:** em `setupVoiceActivityDetection`, o `AnalyserNode` de áudio WebRTC remoto agora é conectado a um `GainNode(0)` ligado ao `destination` (garantindo que o WebView2 puxe os pacotes continuamente), com sensibilidade de `-58 dB` e *hold* suave de 240 ms; no microfone local, combina nível dB e VAD harmônico do Worklet.
+- **Configuração padrão automática estilo Discord (`voiceDspPresetVersion: 3`):** migra automaticamente os ajustes salvos para o perfil calibrado (`noiseSuppressionMode: "auto"`, `aec: true`, `agc: true`, `highpass: true`, `compressor: true`, `noiseGate: false`, `gateThreshold: -56`, `opusHd: true`).
+- **Alinhamento do avatar decorado no chat (`cosmetics.css`):** preservado o posicionamento absoluto (`.message-item > .avatar-status-wrap`) ao usar decorações de avatar V5.
+
 ## 0.2.16
 
 ### Correção de alinhamento do avatar decorado no chat

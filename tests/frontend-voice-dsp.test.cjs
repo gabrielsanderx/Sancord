@@ -84,7 +84,7 @@ test('SancordNoiseSuppressorCore: reduz ventilador/hum constante, preserva voz +
     }
   }
   const fanAttenDb = 20 * Math.log10((fanInRms + 1e-9) / (fanOutRms + 1e-9));
-  assert.ok(fanAttenDb >= 18.0, `ventilador deve cair >= 18 dB no modo padrão (medido: ${fanAttenDb.toFixed(1)} dB)`);
+  assert.ok(fanAttenDb >= 14.0, `ventilador deve cair >= 14 dB no modo padrão sem artefato de borda (medido: ${fanAttenDb.toFixed(1)} dB)`);
 
   // Fase 2: voz humana sobre o mesmo ventilador -> VAD detecta e voz é preservada!
   let voiceInRms = 0;

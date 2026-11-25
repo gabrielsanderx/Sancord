@@ -72,7 +72,7 @@ const DEFAULT_AUDIO_SETTINGS = {
   inputMode: "vad", // "vad" | "ptt"
   pttKey: "Space",
   pttReleaseDelayMs: 120,
-  gateThreshold: -52,
+  gateThreshold: -56,
   noiseSuppressionMode: "auto", // "auto" | "light" | "standard" | "strong" | "off"
   lastActiveNsMode: "auto",
   noiseGate: false,
@@ -81,6 +81,7 @@ const DEFAULT_AUDIO_SETTINGS = {
   aec: true,
   agc: true,
   opusHd: true,
+  voiceDspPresetVersion: 3,
   screenDefaultQuality: "1080",
   screenDefaultFps: 30,
   screenDefaultAudio: true,
@@ -174,6 +175,23 @@ function loadAudioSettings() {
     }
     if (parsed && typeof parsed.agc !== "boolean") {
       merged.agc = Boolean(parsed.aec !== false);
+    }
+    // Calibração automática v3 (padrão estilo Discord): garante supressão limpa e limiar de voz sensível.
+    if (!parsed || parsed.voiceDspPresetVersion !== 3) {
+      merged.voiceProfile = "isolation";
+      merged.noiseSuppressionMode = "auto";
+      merged.lastActiveNsMode = "auto";
+      merged.noiseGate = false;
+      merged.highpass = true;
+      merged.compressor = true;
+      merged.aec = true;
+      merged.agc = true;
+      merged.opusHd = true;
+      merged.gateThreshold = -56;
+      merged.voiceDspPresetVersion = 3;
+      try {
+        localStorage.setItem("sancord_audio_settings", JSON.stringify(merged));
+      } catch (_) {}
     }
     return merged;
   } catch (_) {
@@ -2564,10 +2582,14 @@ async function createLocalAudioStream(forceRebuild = false) {
       }
     }
 
-    // Atualiza indicador de fala do próprio usuário
+    // Atualiza indicador de fala do próprio usuário (combina nível dB pós-DSP + VAD harmônico do Worklet + hold suave)
     const selfId = state.selfUser?.id;
     if (selfId) {
-      const isSpeaking = shouldPass && db >= Math.max(threshold, -56);
+      const diag = dspObj.lastDiagnostics;
+      const vadActive = Boolean(diag && (diag.voiceDetected || Number(diag.vadProb) >= 0.30));
+      const voiceNow = shouldPass && (db >= Math.min(threshold, -56) || vadActive);
+      if (voiceNow) dspObj.lastSpeakingAt = nowMs;
+      const isSpeaking = shouldPass && (voiceNow || (dspObj.lastSpeakingAt && nowMs - dspObj.lastSpeakingAt < 220));
       const wasSpeaking = state.speakingUsers.has(selfId);
       if (isSpeaking !== wasSpeaking) {
         if (isSpeaking) state.speakingUsers.add(selfId);
@@ -2988,7 +3010,6 @@ function boostSdpVideoBitrate(sdpStr, maxBitrateBps) {
       if (!upgraded.includes("maxplaybackrate=")) upgraded += ";maxplaybackrate=48000";
       if (!upgraded.includes("sprop-maxcapturerate=")) upgraded += ";sprop-maxcapturerate=48000";
       if (!upgraded.includes("useinbandfec=")) upgraded += ";useinbandfec=1";
-      if (!upgraded.includes("usedtx=")) upgraded += ";usedtx=1";
       out.push(upgraded);
       continue;
     }
@@ -3897,20 +3918,32 @@ function setupVoiceActivityDetection(stream, getUserIdFn) {
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
     source.connect(analyser);
+    // No WebView2/Chromium, uma MediaStreamAudioSourceNode de WebRTC remoto precisa estar ligada
+    // ao destination (via GainNode mudo = 0) para o grafo de áudio puxar os quadros continuamente.
+    let silentSink = null;
+    try {
+      silentSink = audioCtx.createGain();
+      silentSink.gain.value = 0;
+      analyser.connect(silentSink);
+      silentSink.connect(audioCtx.destination);
+    } catch (_) {}
 
     const data = new Float32Array(analyser.fftSize);
+    let lastSpeakingAt = 0;
     const updateSpeakingIndicator = () => {
       const uid = getUserIdFn();
       if (!uid) return;
+      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
 
-      // Energia RMS em dB (mesmo critério do microfone local). A média do espectro
-      // falhava com sinais de banda estreita e variava com o volume do aparelho.
+      // Energia RMS em dB com hold suave de 240 ms para não piscar entre sílabas.
       analyser.getFloatTimeDomainData(data);
       let sumSq = 0;
       for (let i = 0; i < data.length; i++) sumSq += data[i] * data[i];
       const db = 20 * Math.log10(Math.sqrt(sumSq / data.length) + 1e-6);
-
-      const isSpeaking = db > -50 && !(uid === state.selfUser?.id && state.muted) && !isPeerSilenced(uid);
+      const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const canSpeak = !(uid === state.selfUser?.id && state.muted) && !isPeerSilenced(uid);
+      if (canSpeak && db > -58) lastSpeakingAt = nowMs;
+      const isSpeaking = Boolean(canSpeak && (db > -58 || (lastSpeakingAt > 0 && nowMs - lastSpeakingAt < 240)));
       const wasSpeaking = state.speakingUsers.has(uid);
 
       if (isSpeaking !== wasSpeaking) {
@@ -3933,7 +3966,7 @@ function setupVoiceActivityDetection(stream, getUserIdFn) {
         timer = null;
       } else if (timer === null) {
         updateSpeakingIndicator();
-        timer = setInterval(updateSpeakingIndicator, 120);
+        timer = setInterval(updateSpeakingIndicator, 80);
       }
     };
     syncTimer();
@@ -3943,6 +3976,12 @@ function setupVoiceActivityDetection(stream, getUserIdFn) {
       document.removeEventListener("sanvo:visual-visibility", syncTimer);
       try {
         source.disconnect();
+      } catch (_) {}
+      try {
+        analyser.disconnect();
+      } catch (_) {}
+      try {
+        silentSink?.disconnect();
       } catch (_) {}
     };
   } catch (_) {

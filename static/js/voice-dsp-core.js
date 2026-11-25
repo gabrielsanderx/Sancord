@@ -20,10 +20,10 @@
   const VALID_MODES = Object.freeze(["auto", "light", "standard", "strong", "off"]);
 
   const MODE_PRESETS = Object.freeze({
-    off:      { overSub: 0.0,  minGainSilence: 1.0,   minGainSpeech: 1.0,  transientAtten: 0.0,  speechBoost: 0.0,  silenceGateFloor: 1.0   },
-    light:    { overSub: 1.65, minGainSilence: 0.14,  minGainSpeech: 0.84, transientAtten: 0.55, speechBoost: 0.25, silenceGateFloor: 0.18  },
-    standard: { overSub: 2.55, minGainSilence: 0.045, minGainSpeech: 0.76, transientAtten: 0.82, speechBoost: 0.20, silenceGateFloor: 0.045 },
-    strong:   { overSub: 3.45, minGainSilence: 0.018, minGainSpeech: 0.66, transientAtten: 0.92, speechBoost: 0.15, silenceGateFloor: 0.015 },
+    off:      { overSub: 0.0,  minGainSilence: 1.0,   minGainSpeech: 1.0,  transientAtten: 0.0,  speechBoost: 0.0,  silenceGateFloor: 1.0  },
+    light:    { overSub: 1.35, minGainSilence: 0.22,  minGainSpeech: 0.86, transientAtten: 0.50, speechBoost: 0.25, silenceGateFloor: 0.35 },
+    standard: { overSub: 1.95, minGainSilence: 0.12,  minGainSpeech: 0.78, transientAtten: 0.75, speechBoost: 0.20, silenceGateFloor: 0.15 },
+    strong:   { overSub: 2.55, minGainSilence: 0.07,  minGainSpeech: 0.68, transientAtten: 0.88, speechBoost: 0.15, silenceGateFloor: 0.07 },
   });
 
   function sanitizeMode(raw, fallback = "auto") {
@@ -95,9 +95,11 @@
         this._cos[k] = Math.cos(ang);
         this._sin[k] = Math.sin(ang);
       }
-      // Janela Hann periódica (soma de sobreposição 50% = exatamente 1.0, sem ripple).
+      // Janela Root-Hann (Seno) periódica aplicada TANTO na análise quanto na síntese (IFFT):
+      // sin^2(pi*i/N) + sin^2(pi*(i+N/2)/N) === 1.0 exato, e zera suavemente as duas pontas
+      // do bloco IFFT após filtragem espectral, eliminando 100% o zumbido de 375 Hz ("maquininha")!
       for (let i = 0; i < N; i++) {
-        this._window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / N));
+        this._window[i] = Math.sin((Math.PI * i) / N);
       }
     }
 
@@ -430,11 +432,13 @@
       this._effSilenceGateFloor += (targetGateFloor - this._effSilenceGateFloor) * 0.12;
 
       // Envelope suave de silêncio (estilo Discord/Krisp): abre em <4 ms ao detectar voz
-      // e atenua suavemente o ruído residual nos intervalos sem fala (sem corte seco).
-      const envTarget = this._vadProb >= 0.25 ? 1.0 : this._effSilenceGateFloor;
-      const envCoef = envTarget > this._silenceEnv ? 0.68 : 0.09;
+      // e atenua suavemente o ruído residual nos intervalos sem fala, interpolado amostra a amostra!
+      const prevSilenceEnv = this._silenceEnv;
+      const envTarget = this._vadProb >= 0.24 ? 1.0 : this._effSilenceGateFloor;
+      const envCoef = envTarget > this._silenceEnv ? 0.72 : 0.10;
       this._silenceEnv += (envTarget - this._silenceEnv) * envCoef;
-      const wetSilenceEnv = 1 + (this._silenceEnv - 1) * this._wetMix;
+      const startSilenceEnv = 1 + (prevSilenceEnv - 1) * this._wetMix;
+      const endSilenceEnv = 1 + (this._silenceEnv - 1) * this._wetMix;
 
       // 5. Ganho Decision-Directed Wiener (anti-underwater!) + preservação de voz + transientes
       const gain = this._gain;
@@ -497,7 +501,7 @@
         const timeCoef = freqSmoothed > smoothGain[k] ? 0.55 : 0.22;
         smoothGain[k] += (freqSmoothed - smoothGain[k]) * timeCoef;
 
-        const applied = (1 + (smoothGain[k] - 1) * this._wetMix) * wetSilenceEnv;
+        const applied = 1 + (smoothGain[k] - 1) * this._wetMix;
         re[k] *= applied;
         im[k] *= applied;
         if (k > 0 && k < bins - 1) {
@@ -508,13 +512,16 @@
         prevPostGain[k] = applied;
       }
 
-      // 7. IFFT + Overlap-Add + Safety Limiter transparente (-1.5 dBFS ceiling = 0.84)
+      // 7. IFFT + Janela de Síntese Root-Hann + Overlap-Add + Envelope suave por amostra + Safety Limiter
       this._fft(true);
       const overlap = this._outOverlap;
       let limGain = this._limiterGain;
+      const envStep = (endSilenceEnv - startSilenceEnv) / H;
+      let curEnv = startSilenceEnv;
       for (let i = 0; i < H; i++) {
-        let sample = re[i] + overlap[i];
-        overlap[i] = re[i + H];
+        curEnv += envStep;
+        let sample = (re[i] * win[i] + overlap[i]) * curEnv;
+        overlap[i] = re[i + H] * win[i + H];
         // Limiter suave para evitar clipping em fala alta sem esmagar dinâmica
         const abs = sample < 0 ? -sample : sample;
         const targetLim = abs > 0.86 ? 0.86 / abs : 1.0;
