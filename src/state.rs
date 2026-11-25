@@ -375,6 +375,7 @@ impl ServerState {
         }
         st.persisted_friends = content_hash(&st.friends_store).0;
         st.rebuild_account_index();
+        st.hydrate_all_cached_messages();
         crate::profile_board::restore_first_creation(&mut st);
         if !legacy_hub {
             st.purge_legacy_hub();
@@ -665,6 +666,41 @@ impl ServerState {
     /// Persiste uma mensagem alterada (edição, reação, fixação).
     pub fn persist_message(&self, msg: &ChatMessage) {
         self.db.write(WriteOp::UpsertMessage(Box::new(msg.clone())));
+    }
+
+    /// Sincroniza avatar e cor atuais das contas nas mensagens em memória.
+    pub fn hydrate_all_cached_messages(&mut self) {
+        for list in self.chat_history.values_mut() {
+            for m in list {
+                if m.author_kind() != crate::models::AuthorKind::User {
+                    continue;
+                }
+                let lower = m.author_name.to_lowercase();
+                if let Some(acc) = self.accounts.get(&lower) {
+                    m.author_avatar = acc.avatar_url.clone();
+                    m.author_color = acc.avatar_color.clone();
+                }
+            }
+        }
+    }
+
+    /// Atualiza avatar e cor das mensagens em memória de um autor específico.
+    pub fn sync_author_messages(&mut self, username_lower: &str) {
+        let Some(acc) = self.accounts.get(username_lower) else {
+            return;
+        };
+        let avatar = acc.avatar_url.clone();
+        let color = acc.avatar_color.clone();
+        for list in self.chat_history.values_mut() {
+            for m in list {
+                if m.author_kind() == crate::models::AuthorKind::User
+                    && m.author_name.eq_ignore_ascii_case(username_lower)
+                {
+                    m.author_avatar = avatar.clone();
+                    m.author_color = color.clone();
+                }
+            }
+        }
     }
 
     pub fn remove_message(&mut self, channel_id: &str, message_id: &str) {

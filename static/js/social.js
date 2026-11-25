@@ -643,6 +643,8 @@ function formatProfileDate(ms) {
 function onUserProfile(p) {
   const u = p.user;
   if (!u) return;
+  if (typeof cacheMemberRosterUser === "function") cacheMemberRosterUser(u);
+  if (typeof syncCachedMessagesForUser === "function") syncCachedMessagesForUser(u);
   renderCompactProfileReply(p);
   // Respostas atrasadas de outro perfil ou contexto ficam fora do cartão atual.
   if (currentPopoverUsername?.toLowerCase() !== u.username.toLowerCase() ||

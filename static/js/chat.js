@@ -164,10 +164,11 @@ function memberNickname(srv, username) {
   return srv?.member_nicks && Object.hasOwn(srv.member_nicks, lower) ? srv.member_nicks[lower] : null;
 }
 
-/** Nome mostrado num canal: apelido do servidor do canal, senão o nome de usuário. */
+/** Nome mostrado num canal: apelido do servidor do canal, senão o nome exibido ou de usuário. */
 function displayNameIn(channelId, username) {
   const srv = serverForChannel(channelId);
-  return memberNickname(srv, username) || (srv && findLiveUserByName(username?.toLowerCase())?.display_name) || username || "";
+  const known = findKnownUserByName(username?.toLowerCase(), srv);
+  return memberNickname(srv, username) || known?.display_name || username || "";
 }
 
 // ---------------------------------------------------------------------------
@@ -241,8 +242,35 @@ function messageMentionsMe(msg) {
 }
 
 function findLiveUserByName(lower) {
+  if (!lower || !state.users) return null;
   for (const u of state.users.values()) {
-    if (u.username.toLowerCase() === lower) return u;
+    if (u?.username?.toLowerCase() === lower) return u;
+  }
+  return null;
+}
+
+function findKnownUserByName(lower, srv = null) {
+  if (!lower) return null;
+  const live = findLiveUserByName(lower);
+  if (live) return live;
+  if (state.selfUser?.username?.toLowerCase() === lower) return state.selfUser;
+  const fromRoster = srv?.member_roster && Object.hasOwn(srv.member_roster, lower) ? srv.member_roster[lower] : null;
+  const fromCache = state.memberRosterCache?.get?.(lower) || null;
+  if (fromRoster && fromCache) return { ...fromRoster, ...fromCache };
+  if (fromCache) return fromCache;
+  if (fromRoster) return fromRoster;
+  for (const s of state.servers || []) {
+    if (s?.member_roster && Object.hasOwn(s.member_roster, lower)) return s.member_roster[lower];
+  }
+  const fromFriend = (state.friends || []).find((f) => f?.username?.toLowerCase() === lower);
+  if (fromFriend) return fromFriend;
+  const fromDm = (state.dmConversations || []).map((c) => c?.peer).find((p) => p?.username?.toLowerCase() === lower);
+  if (fromDm) return fromDm;
+  const fromReq = (state.messageRequests || []).map((c) => c?.peer).find((p) => p?.username?.toLowerCase() === lower);
+  if (fromReq) return fromReq;
+  for (const g of state.groupDms || []) {
+    const member = (g?.members || []).find((m) => m?.username?.toLowerCase() === lower);
+    if (member) return member;
   }
   return null;
 }
@@ -725,7 +753,9 @@ function updateChatMessageUI(msg) {
   const el = chatMessagesEl?.querySelector(`[data-msg-id="${CSS.escape(msg.id)}"]`);
   if (!el) return;
   const draft = captureMessageEdit();
-  el.replaceWith(buildMessageElementV2(msg, { grouped: el.classList.contains("grouped") }));
+  const nextEl = buildMessageElementV2(msg, { grouped: el.classList.contains("grouped") });
+  el.replaceWith(nextEl);
+  if (typeof refreshAnimatedMedia === "function") refreshAnimatedMedia(nextEl);
   restoreMessageEdit(draft);
 }
 
@@ -794,15 +824,19 @@ function buildMessageElementV2(msg, { grouped = false } = {}) {
   ].filter(Boolean).join(" ");
   div.dataset.msgId = msg.id;
   div.dataset.author = authorLower;
-  const liveUser = findLiveUserByName(authorLower) || state.users.get(msg.author_id);
+  const isUserAuthor = authorKindOf(msg) === "user";
+  const liveUser = findLiveUserByName(authorLower) || (isUserAuthor ? state.users.get(msg.author_id) : null);
   // Mensagens de sistema e integração mantêm a identidade gravada.
-  const srv = authorKindOf(msg) === "user" ? serverForChannel(msg.channel_id) : null;
-  const author = resolveServerProfile(srv, msg.author_name, liveUser);
-  const shownName = memberNickname(srv, msg.author_name) || (srv && liveUser?.display_name) || msg.author_name;
+  const srv = isUserAuthor ? serverForChannel(msg.channel_id) : null;
+  const knownUser = isUserAuthor ? (liveUser || findKnownUserByName(authorLower, srv)) : null;
+  const author = isUserAuthor ? resolveServerProfile(srv, msg.author_name, knownUser) : null;
+  const shownName = memberNickname(srv, msg.author_name) || author?.display_name || knownUser?.display_name || msg.author_name;
   div.setAttribute("role", "article");
   div.setAttribute("aria-label", `${shownName}, ${formatMessageTime(msg)}`);
-  const avatarUrl = author?.avatar_url || msg.author_avatar;
-  const avatarColor = /^#[0-9a-f]{3,8}$/i.test(msg.author_color || "") ? msg.author_color : "#5865f2";
+  const hasAuthorAvatar = Boolean(author && Object.hasOwn(author, "avatar_url") && author.avatar_url !== undefined);
+  const avatarUrl = hasAuthorAvatar ? author.avatar_url : (author?.avatar_url || msg.author_avatar);
+  const rawAvatarColor = author?.avatar_color || msg.author_color || "";
+  const avatarColor = /^#[0-9a-f]{3,8}$/i.test(rawAvatarColor) ? rawAvatarColor : "#5865f2";
   const decoCls = getDecoClass(author?.avatar_decoration);
   const isEditing = state.editingMsgId === msg.id;
   const nickTitle = shownName !== msg.author_name ? ` title="@${escapeHtml(msg.author_name)}"` : "";
@@ -1071,6 +1105,7 @@ function renderChatMessagesV2({ preserveScroll = false } = {}) {
   }
   chatMessagesEl.innerHTML = "";
   chatMessagesEl.appendChild(frag);
+  if (typeof refreshAnimatedMedia === "function") refreshAnimatedMedia(chatMessagesEl);
   restoreMessageEdit(draft);
   updatePinnedBadge();
   updateJumpPresentBar();
@@ -1105,6 +1140,7 @@ function appendChatMessageUIV2(msg) {
   const el = buildMessageElementV2(msg, { grouped: shouldGroup(prev, msg) });
   el.classList.add("message-enter");
   chatMessagesEl.appendChild(el);
+  if (typeof refreshAnimatedMedia === "function") refreshAnimatedMedia(el);
   if (wasNearBottom || isOwnMessage(msg)) {
     chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
   } else {

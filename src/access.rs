@@ -183,6 +183,17 @@ impl ServerState {
         }
     }
 
+    pub(crate) fn hydrate_chat_message(&self, msg: &mut crate::models::ChatMessage) {
+        if msg.author_kind() != crate::models::AuthorKind::User {
+            return;
+        }
+        let lower = msg.author_name.to_lowercase();
+        if let Some(acc) = self.accounts.get(&lower) {
+            msg.author_avatar = acc.avatar_url.clone();
+            msg.author_color = acc.avatar_color.clone();
+        }
+    }
+
     fn project_server_profile(&self, recipient: &str, server: &mut GuildServer) {
         *server = server.visible_to(recipient);
         for (owner, profile) in &mut server.member_profiles {
@@ -240,6 +251,11 @@ impl ServerState {
                     }
                 }
                 chat_history.retain(|ch, _| self.can_read_text_channel(recipient, ch));
+                for list in chat_history.values_mut() {
+                    for m in list {
+                        self.hydrate_chat_message(m);
+                    }
+                }
                 read_states.retain(|r| self.can_view_channel(recipient, &r.channel_id));
                 voice_members.retain(|ch, _| self.can_view_channel(recipient, ch));
                 for u in users {
@@ -261,6 +277,11 @@ impl ServerState {
                 }
                 self.project_server_profile(recipient, server);
                 history.retain(|ch, _| self.can_read_text_channel(recipient, ch));
+                for list in history.values_mut() {
+                    for m in list {
+                        self.hydrate_chat_message(m);
+                    }
+                }
                 if let ServerAccessUpdated { read_states, .. } = msg {
                     read_states.retain(|r| self.can_view_channel(recipient, &r.channel_id));
                 }
@@ -309,15 +330,25 @@ impl ServerState {
                 if !self.can_read_text_channel(recipient, &message.channel_id) {
                     message.reply_to = None;
                 }
+                self.hydrate_chat_message(message);
             }
             MessageUpdated { message } => {
                 if !self.can_read_text_channel(recipient, &message.channel_id) {
                     return false;
                 }
+                self.hydrate_chat_message(message);
             }
-            MessagesPage { channel_id, .. }
-            | PinnedMessages { channel_id, .. }
-            | MessageDeleted { channel_id, .. }
+            MessagesPage { channel_id, messages, .. }
+            | PinnedMessages { channel_id, messages }
+            | MessageContext { channel_id, messages, .. } => {
+                if !self.can_read_text_channel(recipient, channel_id) {
+                    return false;
+                }
+                for m in messages {
+                    self.hydrate_chat_message(m);
+                }
+            }
+            MessageDeleted { channel_id, .. }
             | MessagesBulkDeleted { channel_id, .. } => {
                 if !self.can_read_text_channel(recipient, channel_id) {
                     return false;
@@ -370,10 +401,10 @@ impl ServerState {
                 incoming_requests,
                 outgoing_requests,
                 dm_conversations,
+                dm_history,
                 message_requests,
                 blocked,
                 groups,
-                ..
             } => {
                 for friend in friends
                     .iter_mut()
@@ -386,8 +417,23 @@ impl ServerState {
                 {
                     crate::profile_sharing::project_friend(self, recipient, friend);
                 }
+                for list in dm_history.values_mut() {
+                    for m in list {
+                        self.hydrate_chat_message(m);
+                    }
+                }
             }
-            DmOpened { peer, .. } => crate::profile_sharing::project_friend(self, recipient, peer),
+            DmOpened { peer, messages, .. } => {
+                crate::profile_sharing::project_friend(self, recipient, peer);
+                for m in messages {
+                    self.hydrate_chat_message(m);
+                }
+            }
+            SearchResults { hits, .. } => {
+                for hit in hits {
+                    self.hydrate_chat_message(&mut hit.message);
+                }
+            }
             UserProfile { user, mutual_friends, .. } => {
                 crate::profile_sharing::project_friend(self, recipient, user);
                 for friend in mutual_friends { crate::profile_sharing::project_friend(self, recipient, friend); }

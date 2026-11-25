@@ -246,9 +246,12 @@ function onProfileLookApplied(appearance) {
   if (!state.selfUser || !appearance) return;
   const equipped = profileAppearanceForWire(appearance);
   Object.assign(state.selfUser, equipped);
+  if (typeof cacheMemberRosterUser === "function") cacheMemberRosterUser(state.selfUser);
   loadAppearanceDraft(state.selfUser);
   updateSelfProfileUI();
   refreshLiveProfilePreview();
+  if (typeof renderChatMessages === "function") renderChatMessages({ preserveScroll: true });
+  if (typeof renderMembersSidebar === "function") renderMembersSidebar();
   closeCollectionPreview();
   renderCollectionInventory();
   collectionStatus.textContent = "Visual aplicado.";

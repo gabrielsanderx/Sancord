@@ -1290,7 +1290,14 @@ async function handleServerMessage(msg) {
       state.users.clear();
       for (const u of payload.users) {
         state.users.set(u.id, u);
+        cacheMemberRosterUser(u);
+        syncCachedMessagesForUser(u);
       }
+      if (state.selfUser) {
+        cacheMemberRosterUser(state.selfUser);
+        syncCachedMessagesForUser(state.selfUser);
+      }
+      seedRosterCacheFromServers(state.servers);
 
       updateSelfProfileUI();
       renderGuildRail();
@@ -1342,8 +1349,11 @@ async function handleServerMessage(msg) {
       if (payload.user) {
         if (state.currentVoiceChannel && !payload.user.voice_channel_id) leaveVoiceChannel();
         state.selfUser = payload.user;
+        cacheMemberRosterUser(payload.user);
+        syncCachedMessagesForUser(payload.user);
         updateSelfProfileUI();
         renderMembersSidebar();
+        renderChatMessages({ preserveScroll: true });
         syncSettingsModalFields();
         if (typeof SancordActivity !== "undefined") SancordActivity.onSelfStatusChanged();
       }
@@ -1353,6 +1363,7 @@ async function handleServerMessage(msg) {
     case "ServersSync": {
       for (const server of payload.servers || []) reconcileServerAccess(state.servers.find(s => s.id === server.id), server);
       state.servers = payload.servers || [];
+      const rosterMutated = seedRosterCacheFromServers(state.servers);
       const srv = getActiveServer();
       if (srv) {
         state.activeServerId = srv.id;
@@ -1365,6 +1376,7 @@ async function handleServerMessage(msg) {
       renderTextChannels();
       renderVoiceChannels();
       renderMembersSidebar();
+      if (rosterMutated && state.activeView === "server") renderChatMessages({ preserveScroll: true });
       refreshServerSettingsModalIfOpen();
       break;
     }
@@ -1380,6 +1392,7 @@ async function handleServerMessage(msg) {
         state.chatHistory = { ...state.chatHistory, ...history };
       }
       if (server) {
+        seedRosterCacheFromServers([server]);
         switchToServerId(server.id, default_channel_id || server.text_channels?.[0]?.id || null);
         showUiToast(`Entrou em ${server.name}!`);
       }
@@ -1406,12 +1419,14 @@ async function handleServerMessage(msg) {
       const idx = state.servers.findIndex((s) => s.id === server.id);
       const previous = state.servers[idx];
       reconcileServerAccess(previous || null, server);
-      const profilesChanged = previous && (
+      const profilesChanged = Boolean(previous && (
         JSON.stringify(previous.member_nicks) !== JSON.stringify(server.member_nicks) ||
-        JSON.stringify(previous.member_profiles) !== JSON.stringify(server.member_profiles)
-      );
+        JSON.stringify(previous.member_profiles) !== JSON.stringify(server.member_profiles) ||
+        JSON.stringify(previous.member_roster) !== JSON.stringify(server.member_roster)
+      ));
       if (idx >= 0) state.servers[idx] = server;
       else state.servers.push(server);
+      const rosterMutated = seedRosterCacheFromServers([server]);
 
       if (state.activeServerId === server.id) {
         state.textChannels = server.text_channels || [];
@@ -1435,7 +1450,7 @@ async function handleServerMessage(msg) {
               state.voiceChannels.find((c) => c.id === state.currentTextChannel);
             if (ch) currentTextChannelTitle.textContent = ch.name;
             applyChannelHeader(server, ch);
-            if (profilesChanged) renderChatMessages({ preserveScroll: true });
+            if (profilesChanged || rosterMutated) renderChatMessages({ preserveScroll: true });
           }
         }
         // Fórum aberto: tags (filtro e etiquetas) podem ter mudado.
@@ -1585,11 +1600,19 @@ async function handleServerMessage(msg) {
     }
 
     case "UserJoined": {
-      state.users.set(payload.user.id, payload.user);
-      cacheMemberRosterUser(payload.user);
-      if (state.selfUser && payload.user.id === state.selfUser.id) {
-        state.selfUser = payload.user;
+      const u = payload.user;
+      const lower = u?.username?.toLowerCase();
+      state.users.set(u.id, u);
+      cacheMemberRosterUser(u);
+      const msgMutated = syncCachedMessagesForUser(u);
+      if (state.selfUser && u.id === state.selfUser.id) {
+        state.selfUser = u;
         updateSelfProfileUI();
+      }
+      const activeCh = getActiveTextChannelId();
+      const activeMsgs = (activeCh && state.chatHistory?.[activeCh]) || [];
+      if (msgMutated || (lower && activeMsgs.some((m) => (m.author_name || "").toLowerCase() === lower))) {
+        renderChatMessages({ preserveScroll: true });
       }
       renderVoiceChannels();
       renderMembersSidebar();
@@ -1841,6 +1864,22 @@ async function handleServerMessage(msg) {
         }
       }
 
+      let socialMutated = false;
+      const socialProfiles = [
+        ...(state.friends || []),
+        ...(state.incomingRequests || []),
+        ...(state.outgoingRequests || []),
+        ...(state.dmConversations || []).map((c) => c?.peer),
+        ...(state.messageRequests || []).map((c) => c?.peer),
+        ...(state.groupDms || []).flatMap((g) => g?.members || []),
+      ];
+      for (const p of socialProfiles) {
+        if (!p?.username) continue;
+        const lookChanged = cacheMemberRosterUser(p);
+        const msgChanged = syncCachedMessagesForUser(p);
+        if (lookChanged || msgChanged) socialMutated = true;
+      }
+
       updateHomeNotificationBadges();
       renderDmList();
       if (state.activeView === "home") {
@@ -1852,7 +1891,7 @@ async function handleServerMessage(msg) {
             break;
           }
           updateActiveDmHeaderAndSidebar();
-          if (resync && payload.dm_history && !state.pendingHistoryRestore && !getHistoryState(dmId).hasNewer) {
+          if ((resync || socialMutated) && !state.pendingHistoryRestore && !getHistoryState(dmId).hasNewer) {
             renderChatMessages({ preserveScroll: true });
           }
         } else if (state.homeSection === "starred") {
@@ -1860,6 +1899,8 @@ async function handleServerMessage(msg) {
         } else {
           renderFriendsView();
         }
+      } else if (socialMutated && state.activeView === "server") {
+        renderChatMessages({ preserveScroll: true });
       }
       if (friendsTabIsAdd()) {
         renderQuickAddMembers();
@@ -1881,7 +1922,9 @@ async function handleServerMessage(msg) {
 
     case "DmOpened": {
       const { dm_id, peer, messages } = payload;
+      if (peer?.username) cacheMemberRosterUser(peer);
       state.chatHistory[dm_id] = messages || [];
+      if (peer?.username) syncCachedMessagesForUser(peer);
       openDmConversation(dm_id, peer);
       // "Ligar" do menu do membro: abre a conversa e entra na chamada dela.
       if (state.pendingCallPeer && state.pendingCallPeer === String(peer?.username || "").toLowerCase()) {
@@ -1955,28 +1998,44 @@ async function handleServerMessage(msg) {
     case "VoiceStateSync": {
       state.voiceMembers = payload.voice_members;
       // Perfil P1 (tempo real): mudou a aparência de alguém? Redesenha o chat aberto.
-      const looks = (u) => JSON.stringify([u.avatar_url, u.avatar_decoration, u.name_style, u.name_color,
+      const looks = (u) => u ? JSON.stringify([u.avatar_url, u.avatar_animated, u.avatar_color, u.avatar_decoration, u.name_style, u.name_color,
         u.name_color_secondary, u.name_gradient_direction, u.nameplate_style, u.display_name, u.bio, u.banner_url,
         u.profile_frame, u.profile_effect, u.theme_primary, u.theme_accent, u.theme_highlight, u.theme_mode, u.theme_direction,
-        u.badges]);
-      const before = new Map([...state.users.values()].map((u) => [u.id, looks(u)]));
+        u.badges]) : "";
+      const beforeByLower = new Map();
+      for (const [k, cachedU] of state.memberRosterCache?.entries?.() || []) {
+        beforeByLower.set(k, looks(cachedU));
+      }
+      for (const u of state.users.values()) {
+        if (u?.username) beforeByLower.set(u.username.toLowerCase(), looks(u));
+      }
+      const activeCh = getActiveTextChannelId();
+      const activeAuthors = new Set(
+        ((activeCh && state.chatHistory?.[activeCh]) || [])
+          .map((m) => (m?.author_name || "").toLowerCase())
+          .filter(Boolean)
+      );
       state.users.clear();
       let looksChanged = false;
       let selfLookChanged = false;
       for (const u of payload.users) {
         state.users.set(u.id, u);
+        const lower = u.username.toLowerCase();
+        const prevLook = beforeByLower.get(lower);
+        const nextLook = looks(u);
         cacheMemberRosterUser(u);
-        const changed = before.has(u.id) && before.get(u.id) !== looks(u);
+        const msgMutated = syncCachedMessagesForUser(u);
+        const changed = (prevLook !== undefined ? prevLook !== nextLook : activeAuthors.has(lower)) || msgMutated;
         if (changed) {
           looksChanged = true;
           if (profilePopoverModal && !profilePopoverModal.classList.contains("hidden") &&
-            currentPopoverUsername?.toLowerCase() === u.username.toLowerCase()) {
+            currentPopoverUsername?.toLowerCase() === lower) {
             renderVisitedProfile({ ...visitedProfileBase, ...u, ...profileAppearanceForWire(u) }, u.username, currentPopoverUserId);
           }
         }
-        if (state.selfUser && u.id === state.selfUser.id) {
-          state.selfUser = u;
-          selfLookChanged = changed;
+        if (state.selfUser && (u.id === state.selfUser.id || u.username.toLowerCase() === state.selfUser.username?.toLowerCase())) {
+          if (u.id === state.selfUser.id) state.selfUser = u;
+          selfLookChanged = selfLookChanged || changed;
         }
       }
       if (looksChanged) renderChatMessages({ preserveScroll: true });
@@ -5283,20 +5342,93 @@ imageLightboxModal?.addEventListener("click", (e) => {
   }
 });
 
+function profileLookSignature(u) {
+  if (!u) return "";
+  return JSON.stringify([
+    u.avatar_url || null,
+    Boolean(u.avatar_animated),
+    u.avatar_color || "",
+    u.avatar_decoration || null,
+    u.name_style || null,
+    u.name_color || null,
+    u.name_color_secondary || null,
+    u.name_gradient_direction || null,
+    u.nameplate_style || null,
+    u.display_name || null,
+    u.bio || null,
+    u.banner_url || null,
+    u.profile_frame || null,
+    u.profile_effect || null,
+    u.theme_primary || null,
+    u.theme_accent || null,
+    u.theme_highlight || null,
+    u.theme_mode || null,
+    u.theme_direction || null,
+    u.badges || [],
+  ]);
+}
+
 function cacheMemberRosterUser(user) {
-  if (!user || !user.username || typeof state === "undefined") return;
+  if (!user || !user.username || typeof state === "undefined") return false;
   if (!state.memberRosterCache) state.memberRosterCache = new Map();
   const key = user.username.toLowerCase();
-  const prev = state.memberRosterCache.get(key) || {};
-  state.memberRosterCache.set(key, {
-    ...prev,
+  const prev = state.memberRosterCache.get(key);
+  const prevSig = prev ? profileLookSignature(prev) : null;
+  const merged = {
+    ...(prev || {}),
     ...user,
     id: null,
     online: false,
     status_kind: "offline",
     voice_channel_id: null,
     activity: null,
-  });
+  };
+  const nextSig = profileLookSignature(merged);
+  state.memberRosterCache.set(key, merged);
+  for (const srv of state.servers || []) {
+    if (srv?.member_roster && Object.hasOwn(srv.member_roster, key)) {
+      srv.member_roster[key] = { ...srv.member_roster[key], ...merged };
+    }
+  }
+  return prevSig !== nextSig;
+}
+
+function syncCachedMessagesForUser(user) {
+  if (!user || !user.username || typeof state === "undefined" || !state.chatHistory) return false;
+  const lower = user.username.toLowerCase();
+  const hasAvatar = Object.hasOwn(user, "avatar_url") && user.avatar_url !== undefined;
+  const nextAvatar = hasAvatar ? (user.avatar_url || null) : undefined;
+  const nextColor = user.avatar_color || undefined;
+  let mutated = false;
+  for (const msgs of Object.values(state.chatHistory)) {
+    if (!Array.isArray(msgs)) continue;
+    for (const m of msgs) {
+      if (!m || (m.author_kind && m.author_kind !== "user") || m.author_id === "system") continue;
+      if ((m.author_name || "").toLowerCase() !== lower) continue;
+      if (nextAvatar !== undefined && m.author_avatar !== nextAvatar) {
+        m.author_avatar = nextAvatar;
+        mutated = true;
+      }
+      if (nextColor && m.author_color !== nextColor) {
+        m.author_color = nextColor;
+        mutated = true;
+      }
+    }
+  }
+  return mutated;
+}
+
+function seedRosterCacheFromServers(servers) {
+  let mutated = false;
+  for (const srv of servers || []) {
+    for (const info of Object.values(srv?.member_roster || {})) {
+      if (!info?.username) continue;
+      const lookChanged = cacheMemberRosterUser(info);
+      const msgChanged = syncCachedMessagesForUser(info);
+      if (lookChanged || msgChanged) mutated = true;
+    }
+  }
+  return mutated;
 }
 
 // Usa somente o cadastro de membros e o roster filtrado por privacidade recebidos do servidor.
@@ -5317,7 +5449,7 @@ function sidebarMemberRows(server, users) {
       const fromRoster = roster && roster[name];
       const fromCache = cache && cache.get(name);
       const fromFriend = friends && friends.find(f => f && f.username && f.username.toLowerCase() === name);
-      const base = fromRoster || fromCache || fromFriend;
+      const base = (fromRoster && fromCache) ? { ...fromRoster, ...fromCache } : (fromCache || fromRoster || fromFriend);
       if (base) {
         rows.set(name, {
           ...base,
@@ -7350,8 +7482,10 @@ saveProfileBtn?.addEventListener("click", async () => {
       );
     }
     fillSocialProfileFields(state.selfUser);
+    cacheMemberRosterUser(state.selfUser);
+    syncCachedMessagesForUser(state.selfUser);
     updateSelfProfileUI();
-    renderChatMessages();
+    renderChatMessages({ preserveScroll: true });
     renderMembersSidebar();
   }
 

@@ -379,7 +379,11 @@ function positionCompactProfile() {
 }
 
 function openCompactProfile(userId, fallback, anchor = document.activeElement) {
-  const cached = state.users.get(userId) || findLiveUserByName(fallback?.author_name?.toLowerCase());
+  const srvId = compactServerId(fallback);
+  const srv = srvId ? (state.servers || []).find((s) => s.id === srvId) : null;
+  const lower = fallback?.author_name?.toLowerCase();
+  const cached = state.users.get(userId) ||
+    (typeof findKnownUserByName === "function" ? findKnownUserByName(lower, srv) : findLiveUserByName(lower));
   const username = cached?.username || fallback?.author_name;
   if (!username || username === "Sanvo Bot" || username === "Sancord Bot") return;
   currentCompactProfile = { userId, username, fallback, serverId: compactServerId(fallback), trigger: document.activeElement, anchor, effectPlayed: false };

@@ -1391,6 +1391,7 @@ async fn process_client_message(user_id: &str, msg: ClientMessage, state: &Share
                 if let Some(acc) = st.accounts.get_mut(&key) {
                     acc.avatar_url = Some(avatar_url);
                 }
+                st.sync_author_messages(&key);
                 st.save_accounts();
             }
 

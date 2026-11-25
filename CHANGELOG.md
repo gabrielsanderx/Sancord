@@ -1,5 +1,12 @@
 # Histórico de versões
 
+## 0.2.18
+
+### Atualização do perfil em mensagens antigas (servidores e DMs)
+- **Hidratação do autor no servidor (`access.rs`, `state.rs`, `profile.rs`, `ws.rs`):** mensagens de usuários em `Welcome`, `FriendsSync`, `DmOpened`, `MessagesPage`, `PinnedMessages`, `MessageContext`, `SearchResults`, `NewChatMessage` e `MessageUpdated` agora recebem automaticamente o avatar e a cor atuais da conta do autor, inclusive ao carregar páginas antigas do histórico ou após reiniciar o servidor.
+- **Resolução completa de perfil para autores offline e reconectados (`chat.js`, `app.js`, `profile-sharing.js`, `social.js`, `profile-collection.js`):** mensagens antigas agora resolvem foto de perfil, decoração de avatar, estilo/cor do nome e nome de exibição usando o roster do servidor, cache local, lista de amigos, DMs e grupos (mesmo quando o autor está offline ou invisível), e redesenham o chat em tempo real ao receber atualizações de perfil, reconexões com novo ID de sessão ou `FriendsSync`.
+- **Avatares animados no chat (`chat.js`):** chamada de `refreshAnimatedMedia` ao renderizar, anexar e atualizar mensagens para garantir exibição correta de avatares GIF nas conversas.
+
 ## 0.2.17
 
 ### Eliminação do zumbido de fundo, indicador de fala e calibração padrão estilo Discord

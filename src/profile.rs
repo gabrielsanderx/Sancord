@@ -51,6 +51,9 @@ pub fn set_media(st: &mut ServerState, uid: &str, kind: &str, attachment_id: Opt
     if let Some(acc) = st.accounts.get_mut(&lower) {
         apply(&mut acc.avatar_url, &mut acc.banner_url, &mut acc.profile);
     }
+    if avatar {
+        st.sync_author_messages(&lower);
+    }
     st.save_accounts();
     broadcast_profile(st);
     Ok(match (avatar, url.is_some()) {
