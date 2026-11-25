@@ -19,6 +19,21 @@ pub fn is_app_page(url: &str) -> bool {
     .any(|base| url.starts_with(base))
 }
 
+/// Converte URLs dos protocolos internos (`sancord://localhost/...` ou `sanvo://localhost/...`)
+/// para a forma HTTP virtual usada pelo WebView2 no Windows (`http://sancord.localhost/...`).
+/// O `wry` 0.47 só faz essa tradução no `WebViewBuilder::with_url`; chamadas posteriores a
+/// `webview.load_url` passariam o esquema cru ao WebView2, disparando o prompt de aplicativo
+/// externo do Windows.
+pub fn webview_url(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("sancord://") {
+        format!("http://sancord.{rest}")
+    } else if let Some(rest) = url.strip_prefix("sanvo://") {
+        format!("http://sanvo.{rest}")
+    } else {
+        url.to_string()
+    }
+}
+
 pub fn response(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let (bytes, mime): (&'static [u8], &str) = match request.uri().path() {
         "/" | "/index.html" => (include_bytes!("../../static/index.html"), "text/html; charset=utf-8"),
@@ -256,5 +271,22 @@ mod tests {
         assert!(is_app_page("http://sancord.localhost/index.html?endpoint=http%3A%2F%2Flocalhost%3A3000"));
         assert!(!is_app_page("https://remote.trycloudflare.com/"));
         assert!(!is_app_page("http://sancord.localhost.evil/index.html"));
+    }
+    #[test]
+    fn webview_url_maps_custom_protocols_for_webview2_load_url() {
+        assert_eq!(
+            webview_url("sancord://localhost/index.html?endpoint=https%3A%2F%2Fdemo.trycloudflare.com"),
+            "http://sancord.localhost/index.html?endpoint=https%3A%2F%2Fdemo.trycloudflare.com"
+        );
+        assert_eq!(
+            webview_url("sanvo://localhost/connect.html"),
+            "http://sanvo.localhost/connect.html"
+        );
+        assert_eq!(
+            webview_url("http://sancord.localhost/index.html"),
+            "http://sancord.localhost/index.html"
+        );
+        assert!(is_app_page(&webview_url(APP_URL)));
+        assert!(is_app_page(&webview_url(CONNECT_URL)));
     }
 }

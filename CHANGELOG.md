@@ -1,5 +1,10 @@
 # Histórico de versões
 
+## 0.2.13
+
+### Correções no cliente desktop (Windows / WebView2)
+- Corrigida a navegação após descoberta automática do servidor remoto, conexão manual e abertura de links `sanvo://` / `sancord://`: o cliente agora converte `sancord://localhost/...` para `http://sancord.localhost/...` antes de chamar `webview.load_url`, eliminando o aviso *"Este site está tentando abrir o Sanvo Desktop"* e a abertura de janela preta duplicada no PC dos convidados.
+
 ## 0.2.12
 
 ### Conectividade e descoberta automática

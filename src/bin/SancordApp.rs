@@ -1005,13 +1005,13 @@ fn main() {
                 // Endereço digitado pelo próprio usuário na tela de conexão.
                 discovery_cancelled.store(true, Ordering::Relaxed);
                 known.trust(&url);
-                if let Some(page) = desktop_url(&url) { let _ = webview.load_url(&page); }
+                if let Some(page) = desktop_url(&url) { let _ = webview.load_url(&desktop_assets::webview_url(&page)); }
             }
             Event::UserEvent(UserEvent::Discovered(url)) => {
                 // Local ou anúncio com assinatura válida do anfitrião.
                 if !discovery_cancelled.swap(true, Ordering::Relaxed) {
                     known.trust(&url);
-                    if let Some(page) = desktop_url(&url) { let _ = webview.load_url(&page); }
+                    if let Some(page) = desktop_url(&url) { let _ = webview.load_url(&desktop_assets::webview_url(&page)); }
                 }
             }
             Event::UserEvent(UserEvent::OpenLink(link)) => {
@@ -1022,7 +1022,7 @@ fn main() {
                 } else {
                     Some(confirm_page(&link, &origin))
                 };
-                if let Some(page) = page { let _ = webview.load_url(&page); }
+                if let Some(page) = page { let _ = webview.load_url(&desktop_assets::webview_url(&page)); }
             }
             Event::UserEvent(UserEvent::CancelLink) => {
                 let page = if is_local_server_running() {
@@ -1030,12 +1030,12 @@ fn main() {
                 } else {
                     desktop_assets::CONNECT_URL.into()
                 };
-                let _ = webview.load_url(&page);
+                let _ = webview.load_url(&desktop_assets::webview_url(&page));
             }
             Event::UserEvent(UserEvent::TrustLink(link)) => {
                 if let Some(origin) = link_endpoint(&link) {
                     known.trust(&origin);
-                    if let Some(page) = open_link_page(&link) { let _ = webview.load_url(&page); }
+                    if let Some(page) = open_link_page(&link) { let _ = webview.load_url(&desktop_assets::webview_url(&page)); }
                 }
             }
             Event::UserEvent(UserEvent::PageLoaded(url)) => {
