@@ -1679,7 +1679,7 @@ body .profile-info-block label, .profile-card-section label { color: var(--text-
   height: calc(100% + var(--avatar-art-bleed, 18%));
 }
 .avatar-art-back { z-index: 0; }
-:is(.profile-card-avatar-wrap,.avatar-deco-wrap,.user-avatar-wrap):has(> .avatar-art-back) > .avatar { position: relative; z-index: 1; }
+:is(.profile-card-avatar-wrap,.avatar-deco-wrap,.user-avatar-wrap,.avatar-status-wrap):has(> .avatar-art-back) > .avatar { position: relative; z-index: 1; }
 .avatar-art-front { z-index: 2; }
 .avatar-art-front svg, .avatar-art-back svg { overflow: hidden; }
 .avatar-art-shadow { fill: none; stroke: var(--art-ink); stroke-width: 5.5; opacity: .36; stroke-linecap: round; }
@@ -1699,7 +1699,7 @@ body .profile-info-block label, .profile-card-section label { color: var(--text-
 }
 .member-item .avatar-art-motes, .dm-item .avatar-art-motes { opacity: .74; }
 .avatar-art-spark { fill: var(--art-lit); animation: profileArtPulse 3.8s ease-in-out infinite; }
-:is(.profile-card-avatar-wrap, .user-avatar-wrap):has(.avatar-art-front) > .status-badge { z-index: 4; }
+:is(.profile-card-avatar-wrap, .user-avatar-wrap, .avatar-status-wrap):has(.avatar-art-front) > .status-badge { z-index: 4; }
 
 .profile-card { --frame-art-size: 24px; }
 .profile-card:is([data-profile-render-context="full"],[data-profile-render-context="editor-full"]) { --frame-art-size: clamp(34px, 3.4vw, 55px); }
